@@ -1,0 +1,5 @@
+[
+	{"name": "balta", "host": "10.147.17.5", "port": 7788, "self": true},
+	{"name": "chubik", "host": "10.147.17.9", "port": 7788},
+	{"name": "tomi", "host": "10.147.17.12", "port": 7788}
+]

@@ -1,0 +1,49 @@
+// Preload: exposes the desktop transport bridge to the renderer.
+const {contextBridge, ipcRenderer, webUtils} = require('electron');
+
+contextBridge.exposeInMainWorld('pelacordTransport', {
+	isDesktop: true,
+	hello: (identity) => ipcRenderer.send('pelacord:hello', identity),
+	publishPresence: (payload) => ipcRenderer.send('pelacord:presence', payload),
+	sendSignal: (to, payload) => ipcRenderer.send('pelacord:signal', {to, payload}),
+	onPresence: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:presence', handler);
+		return () => ipcRenderer.removeListener('pelacord:presence', handler);
+	},
+	onSignal: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:signal', handler);
+		return () => ipcRenderer.removeListener('pelacord:signal', handler);
+	},
+	onPeerLeft: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:peer-left', handler);
+		return () => ipcRenderer.removeListener('pelacord:peer-left', handler);
+	},
+	getRoster: () => ipcRenderer.invoke('pelacord:roster'),
+	getRosterPath: () => ipcRenderer.invoke('pelacord:rosterPath'),
+	getPeers: () => ipcRenderer.invoke('pelacord:peers'),
+	getDesktopSources: () => ipcRenderer.invoke('pelacord:desktop-sources'),
+	selectSource: (id) => ipcRenderer.send('pelacord:select-source', id),
+	getFileEndpoint: () => ipcRenderer.invoke('pelacord:file-endpoint'),
+	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
+	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),
+	cacheMedia: (payload) => ipcRenderer.invoke('pelacord:cache-media', payload),
+	openPath: (target) => ipcRenderer.invoke('pelacord:open-path', target),
+	downloadFile: (payload) => ipcRenderer.invoke('pelacord:download-file', payload),
+	cancelDownload: (id) => ipcRenderer.invoke('pelacord:cancel-download', id),
+	onDownloadProgress: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:download-progress', handler);
+		return () => ipcRenderer.removeListener('pelacord:download-progress', handler);
+	},
+	getPathForFile: (file) => webUtils.getPathForFile(file),
+	checkUpdate: () => ipcRenderer.invoke('pelacord:check-update'),
+	installUpdate: () => ipcRenderer.invoke('pelacord:install-update'),
+	onUpdateStatus: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:update-status', handler);
+		return () => ipcRenderer.removeListener('pelacord:update-status', handler);
+	},
+});

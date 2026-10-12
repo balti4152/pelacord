@@ -1,0 +1,19 @@
+rules_version = '2';
+
+// Pelacord prototype rules.
+//
+// There is no auth yet, so these allow anonymous access to the app's collections only.
+// TODO: add Firebase Auth and scope reads/writes to authenticated members before going public.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /messages/{channelId}/items/{messageId} {
+      allow read, write: if true;
+    }
+    match /voice/{channelId}/members/{clientId} {
+      allow read, write: if true;
+    }
+    match /presence/{clientId} {
+      allow read, write: if true;
+    }
+  }
+}
