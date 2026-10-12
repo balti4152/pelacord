@@ -109,6 +109,13 @@ export function Composer(): JSX.Element {
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [showEmoji, setShowEmoji] = useState(false);
 	const [showGifs, setShowGifs] = useState(false);
+	const [mention, setMention] = useState<{query: string; index: number} | null>(null);
+	// Miembros que coinciden con lo que va escribiendo después del @.
+	const mentionList = mention
+		? state.members
+				.filter((member) => member.name.toLowerCase().startsWith(mention.query.toLowerCase()))
+				.slice(0, 8)
+		: [];
 	const fileInput = useRef<HTMLInputElement>(null);
 	const textarea = useRef<HTMLTextAreaElement>(null);
 
@@ -143,6 +150,28 @@ export function Composer(): JSX.Element {
 	}
 
 	function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+		// Con la lista de menciones abierta: Tab/Enter completan, flechas mueven, Esc cierra.
+		if (mention && mentionList.length > 0) {
+			if (event.key === 'Tab' || event.key === 'Enter') {
+				event.preventDefault();
+				insertMention(mentionList[Math.min(mention.index, mentionList.length - 1)].name);
+				return;
+			}
+			if (event.key === 'ArrowDown') {
+				event.preventDefault();
+				setMention({...mention, index: (mention.index + 1) % mentionList.length});
+				return;
+			}
+			if (event.key === 'ArrowUp') {
+				event.preventDefault();
+				setMention({...mention, index: (mention.index - 1 + mentionList.length) % mentionList.length});
+				return;
+			}
+			if (event.key === 'Escape') {
+				setMention(null);
+				return;
+			}
+		}
 		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
 			submit();
@@ -150,10 +179,28 @@ export function Composer(): JSX.Element {
 	}
 
 	function handleInput(event: ChangeEvent<HTMLTextAreaElement>): void {
-		setText(event.target.value);
+		const value = event.target.value;
+		setText(value);
 		const el = event.target;
 		el.style.height = 'auto';
 		el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+		// ¿Está escribiendo una mención? (@ seguido de letras, pegado al cursor)
+		const caret = el.selectionStart ?? value.length;
+		const match = /@([\w-]*)$/.exec(value.slice(0, caret));
+		setMention(match ? {query: match[1], index: 0} : null);
+	}
+
+	/** Reemplaza lo que escribió por @nombre y deja el cursor después. */
+	function insertMention(name: string): void {
+		const el = textarea.current;
+		const caret = el?.selectionStart ?? text.length;
+		const before = text.slice(0, caret).replace(/@[\w-]*$/, `@${name} `);
+		setText(before + text.slice(caret));
+		setMention(null);
+		requestAnimationFrame(() => {
+			el?.focus();
+			el?.setSelectionRange(before.length, before.length);
+		});
 	}
 
 	/** Pegar imágenes (Ctrl+V) las adjunta directamente. */
@@ -193,6 +240,23 @@ export function Composer(): JSX.Element {
 						textarea.current?.focus();
 					}}
 				/>
+			) : null}
+			{mention && mentionList.length > 0 ? (
+				<div className="mention-picker">
+					{mentionList.map((member, index) => (
+						<button
+							type="button"
+							key={member.id}
+							className={`mention-picker-item${index === Math.min(mention.index, mentionList.length - 1) ? ' is-active' : ''}`}
+							onMouseDown={(event) => {
+								event.preventDefault();
+								insertMention(member.name);
+							}}>
+							<span>@{member.name}</span>
+						</button>
+					))}
+					<span className="mention-picker-hint">Tab o Enter para completar</span>
+				</div>
 			) : null}
 			{attachments.length > 0 ? (
 				<div className="composer-attachments">

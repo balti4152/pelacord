@@ -42,6 +42,9 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	},
 	getPathForFile: (file) => webUtils.getPathForFile(file),
 	notify: (payload) => ipcRenderer.send('pelacord:notify', payload),
+	cacheAvatar: (payload) => ipcRenderer.invoke('pelacord:cache-avatar', payload),
+	getLoginItem: () => ipcRenderer.invoke('pelacord:get-login-item'),
+	setLoginItem: (enabled) => ipcRenderer.invoke('pelacord:set-login-item', enabled),
 	setBadge: (payload) => ipcRenderer.send('pelacord:badge', payload),
 	onNotificationClick: (callback) => {
 		const handler = (_event, message) => callback(message);

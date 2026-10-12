@@ -502,9 +502,41 @@ function AppearanceTab(props: {
 	onVolume: (v: number) => void;
 	onTestSound: () => void;
 }): JSX.Element {
+	const [autoStart, setAutoStart] = useState(false);
+	useEffect(() => {
+		let active = true;
+		void getDesktopTransport()
+			?.getLoginItem()
+			.then((value) => {
+				if (active) setAutoStart(Boolean(value));
+			})
+			.catch(() => {});
+		return () => {
+			active = false;
+		};
+	}, []);
+
 	return (
 		<>
 			<h2 className="modal-title">Apariencia</h2>
+			<div className="settings-section">
+				<span className="settings-label">Inicio</span>
+				<label className="settings-toggle">
+					<input
+						type="checkbox"
+						checked={autoStart}
+						onChange={(event) => {
+							setAutoStart(event.target.checked);
+							void getDesktopTransport()?.setLoginItem(event.target.checked);
+						}}
+					/>
+					<span>Abrir al prender la PC</span>
+				</label>
+				<p className="settings-hint">
+					Arranca en la bandeja (sin molestar). Cerrar la ventana no cierra la app: queda en el ícono al lado del reloj;
+					para salir de verdad, usá "Salir" ahí.
+				</p>
+			</div>
 			<div className="settings-section">
 				<span className="settings-label">Notificaciones</span>
 				<label className="settings-toggle">

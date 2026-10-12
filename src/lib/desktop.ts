@@ -70,6 +70,11 @@ interface DesktopTransport {
 	getPathForFile(file: File): string;
 	/** Notificación nativa de Windows (toast). */
 	notify(payload: {title: string; body: string; channelId?: string; silent?: boolean}): void;
+	/** Guarda la foto de un peer en disco y devuelve la URL local (para verla offline). */
+	cacheAvatar(payload: {peerId: string; url: string}): Promise<string | null>;
+	/** Arranque automático con Windows (abierto en la bandeja). */
+	getLoginItem(): Promise<boolean>;
+	setLoginItem(enabled: boolean): Promise<boolean>;
 	/** Globito sobre el ícono de la barra de tareas (dataUrl vacío = sacarlo). */
 	setBadge(payload: {dataUrl?: string; description?: string}): void;
 	onNotificationClick(callback: (message: {channelId?: string}) => void): () => void;

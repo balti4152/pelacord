@@ -24,6 +24,32 @@ export function uid(): string {
 	return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** ¿El texto menciona a ese nombre? (@nombre) */
+export function mentionsName(content: string, name: string): boolean {
+	if (!content || !name) return false;
+	return new RegExp(`@${escapeRegExp(name)}(?![\\w-])`, 'i').test(content);
+}
+
+/** Partes del texto separando las menciones, para poder resaltarlas. */
+export function splitMentions(content: string, names: string[]): Array<{text: string; mention: boolean}> {
+	if (!content || names.length === 0) return [{text: content, mention: false}];
+	const pattern = new RegExp(`@(?:${names.map(escapeRegExp).join('|')})(?![\\w-])`, 'gi');
+	const parts: Array<{text: string; mention: boolean}> = [];
+	let index = 0;
+	for (const match of content.matchAll(pattern)) {
+		const at = match.index ?? 0;
+		if (at > index) parts.push({text: content.slice(index, at), mention: false});
+		parts.push({text: match[0], mention: true});
+		index = at + match[0].length;
+	}
+	if (index < content.length) parts.push({text: content.slice(index), mention: false});
+	return parts;
+}
+
 function makeAvatarColor(seed: string): string {
 	let hash = 0;
 	for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -118,6 +144,8 @@ function seedState(): AppState {
 		voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
 		voiceMembers: remote ? {} : demoVoiceMembers,
 		unread: {},
+		mutedChannels: [],
+		knownMembers: {},
 	};
 }
 
@@ -127,6 +155,8 @@ type Action =
 	| {type: 'setChannelMessages'; channelId: string; messages: Message[]}
 	| {type: 'markRead'; channelId: string}
 	| {type: 'bumpUnread'; channelId: string}
+	| {type: 'toggleChannelMute'; channelId: string}
+	| {type: 'setKnownMembers'; knownMembers: Record<string, Member>}
 	| {type: 'editMessage'; channelId: string; messageId: string; content: string}
 	| {type: 'deleteMessage'; channelId: string; messageId: string}
 	| {type: 'setRemoteMembers'; members: Member[]}
@@ -158,6 +188,15 @@ function reducer(state: AppState, action: Action): AppState {
 				...state,
 				unread: {...state.unread, [action.channelId]: (state.unread[action.channelId] ?? 0) + 1},
 			};
+		case 'toggleChannelMute':
+			return {
+				...state,
+				mutedChannels: state.mutedChannels.includes(action.channelId)
+					? state.mutedChannels.filter((id) => id !== action.channelId)
+					: [...state.mutedChannels, action.channelId],
+			};
+		case 'setKnownMembers':
+			return {...state, knownMembers: action.knownMembers};
 		case 'sendMessage': {
 			const message: Message = {
 				id: uid(),
@@ -257,6 +296,8 @@ function loadState(): AppState {
 		if (typeof parsed.settings.cosmeticAnimations !== 'boolean') parsed.settings.cosmeticAnimations = true;
 		if (typeof parsed.settings.notifications !== 'boolean') parsed.settings.notifications = true;
 		if (!parsed.unread || typeof parsed.unread !== 'object') parsed.unread = {};
+		if (!Array.isArray(parsed.mutedChannels)) parsed.mutedChannels = [];
+		if (!parsed.knownMembers || typeof parsed.knownMembers !== 'object') parsed.knownMembers = {};
 		return parsed;
 	} catch {
 		return seedState();
@@ -334,6 +375,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	activeChannelRef.current = state.activeChannelId;
 	const notificationsRef = useRef(state.settings.notifications);
 	notificationsRef.current = state.settings.notifications;
+	const knownMembersRef = useRef<Record<string, Member>>(state.knownMembers);
+	knownMembersRef.current = state.knownMembers;
+	const mutedChannelsRef = useRef<string[]>(state.mutedChannels);
+	mutedChannelsRef.current = state.mutedChannels;
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
 
 	useEffect(() => {
@@ -424,17 +469,27 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		const me = meRef.current;
 		const voice = voiceRef.current;
 		const voiceMembers: Record<string, VoiceParticipant[]> = {};
-		const members: Member[] = [me];
+		const online: Member[] = [];
+		const onlineIds = new Set<string>();
+		const known = {...knownMembersRef.current};
+		const transport = getDesktopTransport();
+
 		for (const peer of Object.values(peersRef.current)) {
 			if (peer.id === me.id) continue;
-			members.push({
+			onlineIds.add(peer.id);
+			const previous = known[peer.id];
+			// La foto guardada en disco se usa como respaldo (y para los tamaños chicos).
+			const member: Member = {
 				id: peer.id,
 				name: peer.name,
-				tag: '0000',
+				tag: previous?.tag ?? '0000',
 				presence: 'online',
 				avatarColor: peer.color,
 				avatarUrl: peer.avatarUrl,
 				avatarCrop: peer.avatarCrop,
+				avatarPoster: previous?.cachedAvatar,
+				cachedAvatar: previous?.cachedAvatar,
+				lastAvatarUrl: previous?.lastAvatarUrl,
 				bannerUrl: peer.bannerUrl,
 				bannerColor: peer.bannerColor,
 				effect: peer.effect as Member['effect'],
@@ -456,7 +511,28 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				accentColor: 'hsl(242, 70%, 55%)',
 				bio: peer.bio,
 				status: peer.status,
-			});
+			};
+			known[peer.id] = member;
+			online.push(member);
+
+			// Se guarda la foto en disco para poder seguir viéndola cuando se desconecte.
+			if (transport && peer.avatarUrl && /^https?:/i.test(peer.avatarUrl) && peer.avatarUrl !== previous?.lastAvatarUrl) {
+				void transport
+					.cacheAvatar({peerId: peer.id, url: peer.avatarUrl})
+					.then((local) => {
+						if (!local) return;
+						const current = knownMembersRef.current[peer.id];
+						if (!current) return;
+						const next = {
+							...knownMembersRef.current,
+							[peer.id]: {...current, cachedAvatar: local, lastAvatarUrl: peer.avatarUrl},
+						};
+						knownMembersRef.current = next;
+						dispatch({type: 'setKnownMembers', knownMembers: next});
+					})
+					.catch(() => {});
+			}
+
 			if (peer.channelId) {
 				voiceMembers[peer.channelId] = [...(voiceMembers[peer.channelId] ?? []), peerToParticipant(peer)];
 				// Sonido cuando alguien empieza o deja de compartir pantalla.
@@ -473,9 +549,24 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				toParticipant(me, {muted: voice.muted, deafened: voice.deafened, sharing: voice.sharing}),
 			];
 		}
+		// Los que ya no están online siguen apareciendo, pero en gris y con su foto guardada.
+		const offline = Object.values(known)
+			.filter((member) => member.id !== me.id && !onlineIds.has(member.id))
+			.map((member) => ({
+				...member,
+				presence: 'offline' as const,
+				avatarUrl: member.cachedAvatar ?? member.avatarUrl,
+				avatarPoster: member.cachedAvatar,
+			}));
+		dispatch({type: 'setKnownMembers', knownMembers: known});
 		dispatch({type: 'setVoiceMembers', voiceMembers});
-		dispatch({type: 'setRemoteMembers', members});
+		dispatch({type: 'setRemoteMembers', members: [me, ...online, ...offline]});
 	}, []);
+
+	// Al abrir la app ya se muestran los perfiles guardados (aunque estén desconectados).
+	useEffect(() => {
+		applyPresence();
+	}, [applyPresence]);
 
 	useEffect(() => {
 		const transport = getDesktopTransport();
@@ -571,15 +662,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				const isNew =
 					previous !== undefined && messages.length > previous && Boolean(last) && last.authorId !== meRef.current.id;
 				if (isNew && last) {
-					playSound('message');
 					const watching = channel.id === activeChannelRef.current && document.hasFocus();
+					const muted = mutedChannelsRef.current.includes(channel.id);
+					const mentioned = mentionsName(last.content ?? '', meRef.current.name);
+					// Silenciado: ni suena ni avisa, SALVO que te mencionen.
+					const audible = !muted || mentioned;
+					if (audible) playSound('message');
 					if (!watching) {
 						dispatch({type: 'bumpUnread', channelId: channel.id});
-						if (notificationsRef.current) {
+						if (notificationsRef.current && audible) {
 							const attachment = last.attachments?.[0];
 							const body = last.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
 							showNotification({
-								title: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
+								title: mentioned
+									? `Te mencionaron en #${channel.name}`
+									: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
 								body: body.slice(0, 180),
 								channelId: channel.id,
 							});

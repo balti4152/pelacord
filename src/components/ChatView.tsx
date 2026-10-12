@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
-import {resolveMember, useStore} from '@/state/store';
+import {resolveMember, splitMentions, useStore} from '@/state/store';
 import type {AppState, Attachment, Message} from '@/types';
 
 const FALLBACK_COLOR = 'hsl(0, 0%, 40%)';
@@ -239,9 +239,11 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 }
 
 export function ChatView(): JSX.Element {
-	const {state, updateSettings, editMessage, removeMessage} = useStore();
+	const {state, dispatch, updateSettings, editMessage, removeMessage} = useStore();
 	const channel = state.channels.find((c) => c.id === state.activeChannelId);
 	const messages = state.messages[state.activeChannelId] ?? [];
+	const mentionNames = state.members.map((member) => member.name);
+	const muted = state.mutedChannels.includes(state.activeChannelId);
 	const [menu, setMenu] = useState<{message: Message; isMe: boolean; x: number; y: number} | null>(null);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
@@ -289,6 +291,7 @@ export function ChatView(): JSX.Element {
 				grouped={grouped && !compact}
 				compact={compact}
 				editing={editingId === message.id}
+				mentionNames={mentionNames}
 				onMenu={(x, y) => setMenu({message, isMe, x, y})}
 				onSaveEdit={(content) => {
 					if (content.trim() && content !== message.content) editMessage(message.id, content);
@@ -308,7 +311,12 @@ export function ChatView(): JSX.Element {
 					{channel.topic ? <span className="chat-header-topic">{channel.topic}</span> : null}
 				</div>
 				<div className="chat-header-tools">
-					<IconButton icon="bell" label="Notificaciones" />
+					<IconButton
+						icon={muted ? 'bellOff' : 'bell'}
+						label={muted ? 'Activar las notificaciones del canal' : 'Silenciar el canal'}
+						active={muted}
+						onClick={() => dispatch({type: 'toggleChannelMute', channelId: state.activeChannelId})}
+					/>
 					<IconButton
 						icon="members"
 						label="Mostrar lista de miembros"
@@ -438,6 +446,7 @@ function MessageRow({
 	grouped,
 	compact,
 	editing,
+	mentionNames,
 	onMenu,
 	onSaveEdit,
 	onCancelEdit,
@@ -448,6 +457,7 @@ function MessageRow({
 	grouped: boolean;
 	compact: boolean;
 	editing: boolean;
+	mentionNames: string[];
 	onMenu: (x: number, y: number) => void;
 	onSaveEdit: (content: string) => void;
 	onCancelEdit: () => void;
@@ -526,7 +536,17 @@ function MessageRow({
 						</div>
 					</div>
 				) : message.content ? (
-					<div className="message-content">{message.content}</div>
+					<div className="message-content">
+						{splitMentions(message.content, mentionNames).map((part, index) =>
+							part.mention ? (
+								<span className="mention" key={index}>
+									{part.text}
+								</span>
+							) : (
+								<span key={index}>{part.text}</span>
+							),
+						)}
+					</div>
 				) : null}
 				{message.attachments.length > 0 ? (
 					<div className="attachments">

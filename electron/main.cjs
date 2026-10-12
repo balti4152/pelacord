@@ -7,7 +7,7 @@
 //
 // Nadie edita nada: cada uno abre la app, pone su nombre y ya se ve con los demás.
 
-const {app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, session, shell, Notification, nativeImage} = require('electron');
+const {app, BrowserWindow, desktopCapturer, ipcMain, Menu, net, protocol, session, shell, Notification, nativeImage, Tray} = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const dgram = require('node:dgram');
@@ -46,6 +46,9 @@ app.commandLine.appendSwitch('enable-accelerated-video-encode');
 app.commandLine.appendSwitch('enable-features', 'AcceleratedVideoEncoder,AcceleratedVideoDecodeLinuxGL');
 
 let mainWindow = null;
+let tray = null;
+/** Cerrar la ventana la esconde (como Discord); sólo se sale de verdad desde la bandeja. */
+let isQuitting = false;
 let myPeerId = null;
 let myName = '';
 let listenPort = PORT;
@@ -276,10 +279,13 @@ function connectPeer(peerId, host, port) {
 function createWindow() {
 	// En la app instalada el ícono sale del .exe; en desarrollo se usa el generado.
 	const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
+	// Si arrancó con la PC (--hidden), se abre directo en la bandeja sin molestar.
+	const startHidden = process.argv.includes('--hidden');
 	mainWindow = new BrowserWindow({
 		width: 1280,
 		height: 800,
 		minWidth: 940,
+		show: !startHidden,
 		backgroundColor: '#0b0912',
 		autoHideMenuBar: true,
 		icon: fs.existsSync(iconPath) ? iconPath : undefined,
@@ -294,10 +300,83 @@ function createWindow() {
 		void shell.openExternal(url);
 		return {action: 'deny'};
 	});
+	// Cerrar (la X) esconde la ventana: la app sigue viva en la bandeja.
+	mainWindow.on('close', (event) => {
+		if (isQuitting) return;
+		event.preventDefault();
+		mainWindow.hide();
+	});
 	if (process.env.PELACORD_DEV_URL || !app.isPackaged) {
 		void mainWindow.loadURL(DEV_URL);
 	} else {
 		void mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+	}
+}
+
+function showWindow() {
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	if (mainWindow.isMinimized()) mainWindow.restore();
+	mainWindow.show();
+	mainWindow.focus();
+}
+
+/** Registra (o saca) el arranque automático con Windows, abierto en la bandeja. */
+function setLoginItem(enabled) {
+	if (!app.isPackaged) return;
+	try {
+		app.setLoginItemSettings({openAtLogin: Boolean(enabled), args: ['--hidden']});
+	} catch (error) {
+		console.error('[pelacord] login item error', String(error));
+	}
+}
+
+function loginItemEnabled() {
+	if (!app.isPackaged) return false;
+	try {
+		return app.getLoginItemSettings().openAtLogin;
+	} catch {
+		return false;
+	}
+}
+
+function createTray() {
+	const ico = path.join(__dirname, '..', 'build', 'icon.ico');
+	const png = path.join(__dirname, '..', 'build', 'icons', '32x32.png');
+	const iconPath = fs.existsSync(ico) ? ico : fs.existsSync(png) ? png : null;
+	if (!iconPath) return;
+	try {
+		tray = new Tray(iconPath);
+		tray.setToolTip('Pelacord');
+		const refresh = () => {
+			tray.setContextMenu(
+				Menu.buildFromTemplate([
+					{label: 'Abrir Pelacord', click: () => showWindow()},
+					{type: 'separator'},
+					{
+						label: 'Abrir al prender la PC',
+						type: 'checkbox',
+						checked: loginItemEnabled(),
+						click: (item) => {
+							setLoginItem(item.checked);
+							refresh();
+						},
+					},
+					{type: 'separator'},
+					{
+						label: 'Salir',
+						click: () => {
+							isQuitting = true;
+							app.quit();
+						},
+					},
+				]),
+			);
+		};
+		refresh();
+		// Click en el ícono (o doble click) trae la ventana al frente.
+		tray.on('click', () => showWindow());
+	} catch (error) {
+		console.error('[pelacord] tray error', String(error));
 	}
 }
 
@@ -530,16 +609,58 @@ function cleanupMediaCache() {
 
 function registerMediaProtocol() {
 	const dir = mediaDirectory();
+	const peersDir = peerAvatarDirectory();
 	fs.mkdirSync(dir, {recursive: true});
+	fs.mkdirSync(peersDir, {recursive: true});
 	cleanupMediaCache();
 	protocol.handle('pelacord-media', (request) => {
 		const url = new URL(request.url);
 		const name = path.basename(decodeURIComponent(url.pathname));
-		const filePath = path.join(dir, name);
+		// pelacord-media://peer/<archivo> sirve las fotos de perfil guardadas de los demás.
+		const base = url.hostname === 'peer' ? peersDir : dir;
+		const filePath = path.join(base, name);
 		if (!name || !fs.existsSync(filePath)) return new Response('No encontrado', {status: 404});
 		return net.fetch(pathToFileURL(filePath).toString());
 	});
 }
+
+/** Fotos de perfil de los demás, guardadas en disco para que sigan viéndose offline. */
+function peerAvatarDirectory() {
+	return path.join(app.getPath('userData'), 'peer-avatars');
+}
+
+ipcMain.handle('pelacord:cache-avatar', async (_event, payload) => {
+	const {peerId, url} = payload ?? {};
+	if (!peerId || typeof url !== 'string' || !/^https?:/i.test(url)) return null;
+	try {
+		const dir = peerAvatarDirectory();
+		fs.mkdirSync(dir, {recursive: true});
+		const client = url.startsWith('https') ? https : http;
+		const safeId = String(peerId).replace(/[^a-zA-Z0-9_-]/g, '_');
+		const result = await new Promise((resolve, reject) => {
+			client
+				.get(url, (response) => {
+					if (response.statusCode !== 200) {
+						reject(new Error(`HTTP ${response.statusCode}`));
+						return;
+					}
+					const type = String(response.headers['content-type'] ?? '');
+					const extension = type.includes('gif') ? 'gif' : type.includes('png') ? 'png' : 'webp';
+					const name = `${safeId}.${extension}`;
+					const target = path.join(dir, name);
+					const out = fs.createWriteStream(target);
+					response.on('error', reject);
+					out.on('error', reject);
+					out.on('finish', () => out.close(() => resolve(name)));
+					response.pipe(out);
+				})
+				.on('error', reject);
+		});
+		return `pelacord-media://peer/${result}`;
+	} catch {
+		return null;
+	}
+});
 
 // ---------- Notificaciones de Windows y globito en la barra ----------
 
@@ -658,9 +779,18 @@ ipcMain.handle('pelacord:check-update', async () => {
 	}
 });
 
+ipcMain.handle('pelacord:get-login-item', () => loginItemEnabled());
+
+ipcMain.handle('pelacord:set-login-item', (_event, enabled) => {
+	setLoginItem(Boolean(enabled));
+	return loginItemEnabled();
+});
+
 ipcMain.handle('pelacord:install-update', () => {
 	if (!autoUpdater) return false;
 	try {
+		// Hay que salir de verdad: si no, el cierre sólo esconde la ventana.
+		isQuitting = true;
 		// Silencioso y volviendo a abrir la app sola: el usuario no ve el instalador.
 		autoUpdater.quitAndInstall(true, true);
 		return true;
@@ -849,6 +979,7 @@ if (!gotLock) {
 		registerMediaProtocol();
 		setupUpdater();
 		createWindow();
+		createTray();
 		app.on('activate', () => {
 			if (BrowserWindow.getAllWindows().length === 0) createWindow();
 		});
@@ -857,4 +988,9 @@ if (!gotLock) {
 
 app.on('window-all-closed', () => {
 	if (process.platform !== 'darwin') app.quit();
+});
+
+// Salir de verdad (bandeja, actualización o apagado) no debe esconderse.
+app.on('before-quit', () => {
+	isQuitting = true;
 });

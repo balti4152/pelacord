@@ -77,6 +77,10 @@ export interface Member {
 	avatarP2P?: boolean;
 	/** Cuadro fijo del avatar (primer cuadro de un GIF): para tamaños chicos y como respaldo. */
 	avatarPoster?: string;
+	/** Foto guardada en disco de un peer (para verla aunque esté desconectado). */
+	cachedAvatar?: string;
+	/** Última URL de avatar vista de ese peer (para saber cuándo volver a guardarla). */
+	lastAvatarUrl?: string;
 	bannerUrl?: string;
 	bannerColor?: string;
 	/** El banner se sirve por P2P (/file/banner): hay que reconstruir la URL al arrancar. */
@@ -188,4 +192,8 @@ export interface AppState {
 	voiceMembers: Record<string, VoiceParticipant[]>;
 	/** Mensajes sin leer por canal (para el puntito rojo y el globito de la barra). */
 	unread: Record<string, number>;
+	/** Canales silenciados (la campanita): no suenan ni avisan, salvo que te mencionen. */
+	mutedChannels: string[];
+	/** Perfiles ya vistos (incluye a los desconectados), para no perderlos. */
+	knownMembers: Record<string, Member>;
 }
