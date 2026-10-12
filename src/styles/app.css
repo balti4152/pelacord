@@ -1417,23 +1417,285 @@
 	animation: deco-spin 14s linear infinite;
 }
 
-.avatar-deco[data-deco='custom']::after {
+/* Partículas nuevas (infierno y escarcha) */
+.po-ember {
+	position: absolute;
+	bottom: -6%;
+	width: 12px;
+	height: 12px;
+	border-radius: var(--radius-full);
+	background: radial-gradient(circle at 50% 60%, #fff3c4 0 25%, var(--ov) 55%, transparent 100%);
+	box-shadow: 0 0 10px var(--ov);
+	opacity: 0;
+	animation: po-move 4.6s linear infinite;
+}
+
+.po-flake {
+	position: absolute;
+	bottom: -6%;
+	width: 15px;
+	height: 15px;
+	background: var(--ov);
+	clip-path: polygon(
+		50% 0%,
+		58% 34%,
+		92% 26%,
+		66% 50%,
+		92% 74%,
+		58% 66%,
+		50% 100%,
+		42% 66%,
+		8% 74%,
+		34% 50%,
+		8% 26%,
+		42% 34%
+	);
+	filter: drop-shadow(0 0 5px var(--ov));
+	opacity: 0;
+	animation: po-move 4.6s linear infinite;
+}
+
+/* Sin teñir: la imagen conserva su color original (el negro se saca con screen) */
+.profile-overlay.is-original .po-image {
+	background-color: transparent;
+	background-image: var(--overlay-image);
+	background-size: contain;
+	background-repeat: no-repeat;
+	background-position: center;
+	mix-blend-mode: screen;
+	-webkit-mask-image: none;
+	mask-image: none;
+}
+
+.profile-overlay.is-original .po-heart,
+.profile-overlay.is-original .po-bubble,
+.profile-overlay.is-original .po-star,
+.profile-overlay.is-original .po-spark,
+.profile-overlay.is-original .po-ember,
+.profile-overlay.is-original .po-flake {
+	mix-blend-mode: screen;
+}
+
+/* ---------- Decoraciones nuevas ---------- */
+
+/* 6) Crimson Inferno — marco metálico con brasas */
+.avatar-deco[data-deco='inferno'] {
+	border: 2px solid var(--deco-color, #ff4d3d);
+	box-shadow:
+		0 0 14px var(--deco-color, #ff4d3d),
+		inset 0 0 12px color-mix(in srgb, var(--deco-color, #ff4d3d) 60%, #000);
+	animation: deco-bounce 2.4s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='inferno']::before,
+.avatar-deco[data-deco='inferno']::after {
+	content: '';
+	position: absolute;
+	width: 20%;
+	height: 20%;
+	border-radius: var(--radius-full);
+	background: radial-gradient(circle at 50% 60%, #fff3c4 0 22%, var(--deco-color, #ff4d3d) 55%, transparent 100%);
+	box-shadow: 0 0 8px var(--deco-color, #ff4d3d);
+	animation: deco-float 2.2s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='inferno']::before {
+	bottom: -2%;
+	left: 10%;
+}
+
+.avatar-deco[data-deco='inferno']::after {
+	top: -4%;
+	right: 14%;
+	animation-delay: 1.1s;
+}
+
+/* 7) Void / Cosmic — nebulosa oscura con estrellas */
+.avatar-deco[data-deco='void'] {
+	background: conic-gradient(
+		from 0deg,
+		transparent 0 18%,
+		var(--deco-color, #8b5cf6) 22% 24%,
+		transparent 28% 46%,
+		color-mix(in srgb, var(--deco-color, #8b5cf6) 60%, #fff) 52% 54%,
+		transparent 58% 78%,
+		var(--deco-color, #8b5cf6) 84% 86%,
+		transparent 90% 100%
+	);
+	mask: radial-gradient(circle, transparent 0 56%, #000 58% 78%, transparent 80%);
+	-webkit-mask: radial-gradient(circle, transparent 0 56%, #000 58% 78%, transparent 80%);
+	filter: drop-shadow(0 0 8px var(--deco-color, #8b5cf6));
+	animation: deco-spin 16s linear infinite;
+}
+
+.avatar-deco[data-deco='void']::before {
 	content: '';
 	position: absolute;
 	inset: 0;
 	border-radius: var(--radius-full);
-	background-color: var(--deco-color, #fff);
-	-webkit-mask-image: var(--deco-image);
-	mask-image: var(--deco-image);
-	-webkit-mask-mode: luminance;
-	mask-mode: luminance;
-	-webkit-mask-size: 22% 22%;
-	mask-size: 22% 22%;
-	-webkit-mask-repeat: no-repeat;
-	mask-repeat: no-repeat;
-	-webkit-mask-position: 50% 0%;
-	mask-position: 50% 0%;
-	animation: deco-spin 4.5s linear infinite;
+	background: radial-gradient(circle at 50% 4%, #fff 0 2%, var(--deco-color, #8b5cf6) 2% 3.5%, transparent 4%);
+	animation: deco-spin 6s linear infinite;
+}
+
+.avatar-deco[data-deco='void']::after {
+	content: '';
+	position: absolute;
+	inset: 6%;
+	border-radius: var(--radius-full);
+	border: 1px dashed color-mix(in srgb, var(--deco-color, #8b5cf6) 60%, transparent);
+	animation: deco-spin 20s linear infinite reverse;
+}
+
+/* 8) Frost Guardian — borde cristalino y nieve */
+.avatar-deco[data-deco='frost'] {
+	border: 2px solid var(--deco-color, #7fe3ff);
+	box-shadow:
+		0 0 12px color-mix(in srgb, var(--deco-color, #7fe3ff) 80%, transparent),
+		inset 0 0 10px color-mix(in srgb, var(--deco-color, #7fe3ff) 55%, transparent);
+	animation: deco-bounce 3.8s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='frost']::before,
+.avatar-deco[data-deco='frost']::after {
+	content: '';
+	position: absolute;
+	width: 22%;
+	height: 22%;
+	background: var(--deco-color, #7fe3ff);
+	clip-path: polygon(
+		50% 0%,
+		58% 34%,
+		92% 26%,
+		66% 50%,
+		92% 74%,
+		58% 66%,
+		50% 100%,
+		42% 66%,
+		8% 74%,
+		34% 50%,
+		8% 26%,
+		42% 34%
+	);
+	filter: drop-shadow(0 0 5px var(--deco-color, #7fe3ff));
+	animation: deco-float 4.4s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='frost']::before {
+	top: -2%;
+	left: 8%;
+}
+
+.avatar-deco[data-deco='frost']::after {
+	bottom: -4%;
+	right: 10%;
+	animation-delay: 2s;
+}
+
+/* 9) Royal Gold — anillo ornamentado con gemas */
+.avatar-deco[data-deco='royal'] {
+	border: 3px double var(--deco-color, #ffd76a);
+	box-shadow:
+		0 0 12px color-mix(in srgb, var(--deco-color, #ffd76a) 85%, transparent),
+		inset 0 0 10px color-mix(in srgb, var(--deco-color, #ffd76a) 50%, transparent);
+	animation: deco-shimmer 3s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='royal']::before,
+.avatar-deco[data-deco='royal']::after {
+	content: '';
+	position: absolute;
+	width: 16%;
+	height: 16%;
+	background: linear-gradient(140deg, #fff, var(--deco-color, #ffd76a));
+	clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+	filter: drop-shadow(0 0 5px var(--deco-color, #ffd76a));
+	animation: deco-shimmer 2.4s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='royal']::before {
+	top: 8%;
+	left: 50%;
+	transform: translateX(-50%);
+}
+
+.avatar-deco[data-deco='royal']::after {
+	bottom: 6%;
+	left: 50%;
+	transform: translateX(-50%);
+	animation-delay: 1.2s;
+}
+
+/* 10) Nature Spirit — hojas y luciérnagas */
+.avatar-deco[data-deco='nature'] {
+	border: 2px dashed color-mix(in srgb, var(--deco-color, #6ee7a8) 70%, transparent);
+	box-shadow:
+		0 0 12px color-mix(in srgb, var(--deco-color, #6ee7a8) 70%, transparent),
+		inset 0 0 10px color-mix(in srgb, var(--deco-color, #6ee7a8) 45%, transparent);
+	animation: deco-bounce 3.6s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='nature']::before,
+.avatar-deco[data-deco='nature']::after {
+	content: '';
+	position: absolute;
+	width: 24%;
+	height: 24%;
+	background: var(--deco-color, #6ee7a8);
+	/* Hoja: dos curvas enfrentadas */
+	clip-path: path('M12 2C7 7 4 12 12 22C20 12 17 7 12 2Z');
+	filter: drop-shadow(0 0 5px var(--deco-color, #6ee7a8));
+	animation: deco-float 3.8s ease-in-out infinite;
+}
+
+.avatar-deco[data-deco='nature']::before {
+	top: -4%;
+	left: 12%;
+	transform: rotate(-20deg);
+}
+
+.avatar-deco[data-deco='nature']::after {
+	bottom: -2%;
+	right: 8%;
+	transform: rotate(24deg);
+	animation-delay: 1.6s;
+}
+
+@keyframes deco-shimmer {
+	0%,
+	100% {
+		opacity: 0.75;
+		filter: brightness(1);
+	}
+	50% {
+		opacity: 1;
+		filter: brightness(1.35);
+	}
+}
+
+/* Marco con imagen propia, sin teñir (mantiene el color original) */
+.avatar-deco[data-deco='custom'][data-original='true'] {
+	background-color: transparent;
+	background-image: var(--deco-image);
+	background-size: 22% 22%;
+	background-repeat: space;
+	mix-blend-mode: screen;
+	-webkit-mask-image: radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
+	mask-image: radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
+	-webkit-mask-mode: alpha;
+	mask-mode: alpha;
+	-webkit-mask-composite: source-over;
+	mask-composite: add;
+}
+
+.avatar-deco[data-deco='custom'][data-original='true']::after {
+	background-color: transparent;
+	background-image: var(--deco-image);
+	background-size: 22% 22%;
+	background-repeat: no-repeat;
+	background-position: 50% 0%;
+	mix-blend-mode: screen;
+	-webkit-mask-image: none;
+	mask-image: none;
 }
 
 @keyframes deco-spin {
@@ -1980,8 +2242,32 @@
 		transform: translate(var(--from-x, 0), var(--from-y, 0)) rotate(-8deg) scale(0.7);
 		opacity: 0;
 	}
-	12% {
+	10% {
 		opacity: 1;
+	}
+	20% {
+		opacity: var(--o2, 1);
+	}
+	30% {
+		opacity: var(--o3, 1);
+	}
+	40% {
+		opacity: var(--o4, 1);
+	}
+	50% {
+		opacity: var(--o5, 1);
+	}
+	60% {
+		opacity: var(--o6, 1);
+	}
+	70% {
+		opacity: var(--o7, 1);
+	}
+	80% {
+		opacity: var(--o8, 1);
+	}
+	90% {
+		opacity: var(--o9, 1);
 	}
 	100% {
 		transform: translate(var(--to-x, 0), var(--to-y, -19rem)) rotate(10deg) scale(1);

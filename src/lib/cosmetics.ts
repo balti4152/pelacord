@@ -46,6 +46,41 @@ export const DECORATIONS: DecorationInfo[] = [
 		color: '#ffd76a',
 	},
 	{
+		id: 'inferno',
+		name: 'Crimson Inferno',
+		description: 'Marco ardiente con brasas que suben.',
+		category: 'Fuego',
+		color: '#ff4d3d',
+	},
+	{
+		id: 'void',
+		name: 'Void / Cosmic',
+		description: 'Nebulosa oscura con estrellas girando.',
+		category: 'Mágico',
+		color: '#8b5cf6',
+	},
+	{
+		id: 'frost',
+		name: 'Frost Guardian',
+		description: 'Borde cristalino con copos de nieve.',
+		category: 'Hielo',
+		color: '#7fe3ff',
+	},
+	{
+		id: 'royal',
+		name: 'Royal Gold',
+		description: 'Anillo ornamentado con gemas que brillan.',
+		category: 'Lujo',
+		color: '#ffd76a',
+	},
+	{
+		id: 'nature',
+		name: 'Nature Spirit',
+		description: 'Hojas flotando y luz de bosque.',
+		category: 'Naturaleza',
+		color: '#6ee7a8',
+	},
+	{
 		id: 'custom',
 		name: 'Personalizado',
 		description: 'Subí tu propio PNG y cae alrededor de tu avatar.',
@@ -55,7 +90,7 @@ export const DECORATIONS: DecorationInfo[] = [
 	},
 ];
 
-export const DECORATION_CATEGORIES = ['Todas', 'Amor', 'Mágico', 'Veneno', 'Tuyo', 'Básico'];
+export const DECORATION_CATEGORIES = ['Todas', 'Amor', 'Mágico', 'Veneno', 'Fuego', 'Hielo', 'Lujo', 'Naturaleza', 'Tuyo', 'Básico'];
 
 /** Colores rápidos para personalizar cada estilo. */
 export const COSMETIC_COLORS = [
@@ -106,6 +141,36 @@ export const PROFILE_OVERLAYS: OverlayInfo[] = [
 		name: 'Polvo de estrellas',
 		description: 'Estrellitas y destellos dorados.',
 		color: '#ffd76a',
+	},
+	{
+		id: 'inferno',
+		name: 'Brasas',
+		description: 'Brasas encendidas que suben.',
+		color: '#ff4d3d',
+	},
+	{
+		id: 'void',
+		name: 'Cosmos',
+		description: 'Estrellas frías en un cielo profundo.',
+		color: '#8b5cf6',
+	},
+	{
+		id: 'frost',
+		name: 'Nevada',
+		description: 'Copos de nieve cayendo.',
+		color: '#7fe3ff',
+	},
+	{
+		id: 'royal',
+		name: 'Destellos dorados',
+		description: 'Brillos dorados que titilan.',
+		color: '#ffd76a',
+	},
+	{
+		id: 'nature',
+		name: 'Luciérnagas',
+		description: 'Luces verdes que flotan en el bosque.',
+		color: '#6ee7a8',
 	},
 	{
 		id: 'custom',

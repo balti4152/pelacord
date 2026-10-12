@@ -22,6 +22,9 @@ export interface PeerPresence {
 	decoImage?: string;
 	particleImage?: string;
 	particleDirection?: string;
+	particleOriginal?: boolean;
+	particleSpeed?: number;
+	particleLife?: number;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -106,6 +109,7 @@ export function peerToParticipant(presence: PeerPresence): VoiceParticipant {
 		customDeco: presence.customDeco,
 		decoImage: presence.decoImage,
 		decoSize: presence.decoSize,
+		original: presence.particleOriginal,
 		muted: presence.muted,
 		deafened: presence.deafened,
 		sharing: presence.sharing,

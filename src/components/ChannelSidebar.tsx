@@ -23,6 +23,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					customDeco={state.me.customDeco}
 					decoImage={state.me.decoImage}
 					decoSize={state.me.decoSize}
+					original={state.me.particleOriginal}
 					size={32}
 					status={state.me.presence}
 					statusBorderColor="var(--background-secondary-alt)"
@@ -64,6 +65,7 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 							customDeco={participant.customDeco}
 							decoImage={participant.decoImage}
 							decoSize={participant.decoSize}
+							original={participant.original}
 							size={22}
 						/>
 						<span className="voice-member-name">{isMe ? 'Tú' : participant.name}</span>

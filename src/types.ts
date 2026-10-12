@@ -4,7 +4,18 @@ export type ThemeName = 'dark' | 'light' | 'coal';
 export type ProfileEffect = 'none' | 'glow' | 'neon' | 'fire' | 'aurora' | 'sparkle';
 
 /** Decoración del avatar: overlay alrededor, sin tapar la cara. */
-export type AvatarDecoration = 'none' | 'hearts' | 'arcane' | 'poison' | 'celestial' | 'custom';
+export type AvatarDecoration =
+	| 'none'
+	| 'hearts'
+	| 'arcane'
+	| 'poison'
+	| 'celestial'
+	| 'inferno'
+	| 'void'
+	| 'frost'
+	| 'royal'
+	| 'nature'
+	| 'custom';
 
 /** Dirección del movimiento de las partículas del overlay. */
 export type ParticleDirection = 'down' | 'up' | 'left' | 'right';
@@ -100,6 +111,12 @@ export interface Member {
 	particleImage?: string;
 	/** Hacia dónde van las partículas del overlay. */
 	particleDirection?: ParticleDirection;
+	/** Si está activo, la imagen mantiene su color original (sin teñir). */
+	particleOriginal?: boolean;
+	/** Velocidad del overlay (1 = normal). */
+	particleSpeed?: number;
+	/** Vida: fracción del recorrido que la partícula sigue visible (0.2 a 1). */
+	particleLife?: number;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -151,6 +168,7 @@ export interface VoiceParticipant {
 	customDeco?: string;
 	decoImage?: string;
 	decoSize?: number;
+	original?: boolean;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

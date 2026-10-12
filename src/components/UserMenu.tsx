@@ -20,9 +20,13 @@ export interface UserLike {
 	customDeco?: string;
 	decoImage?: string;
 	decoSize?: number;
+	original?: boolean;
 	customParticle?: string;
 	particleImage?: string;
 	particleDirection?: ParticleDirection;
+	particleOriginal?: boolean;
+	particleSpeed?: number;
+	particleLife?: number;
 	particleSize?: number;
 	particleCount?: number;
 	profileEffect?: string;
@@ -136,6 +140,9 @@ export function ProfilePopover({
 					direction={user.particleDirection}
 					size={user.particleSize}
 					count={user.particleCount}
+					speed={user.particleSpeed}
+					life={user.particleLife}
+					original={user.particleOriginal}
 				/>
 				<div className="profile-popover-banner" style={bannerStyle} />
 				<div className="profile-popover-body">
@@ -151,6 +158,7 @@ export function ProfilePopover({
 							customDeco={user.customDeco}
 							decoImage={user.decoImage}
 							decoSize={user.decoSize}
+							original={user.original}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"

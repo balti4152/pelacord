@@ -204,6 +204,16 @@ export function CosmeticsTab({
 							/>
 							<span className="cosmetic-slider-value">{(me.decoSize ?? 1).toFixed(1)}×</span>
 						</label>
+						{equipped === 'custom' ? (
+							<label className="settings-toggle">
+								<input
+									type="checkbox"
+									checked={me.particleOriginal ?? false}
+									onChange={(event) => onPatch({particleOriginal: event.target.checked})}
+								/>
+								<span>Mantener el color original de la imagen</span>
+							</label>
+						) : null}
 					</div>
 				) : null}
 			</div>
@@ -238,6 +248,9 @@ export function CosmeticsTab({
 											direction={me.particleDirection}
 											size={me.particleSize}
 											count={me.particleCount}
+											speed={me.particleSpeed}
+											life={me.particleLife}
+											original={me.particleOriginal}
 										/>
 									</span>
 								</span>
@@ -313,6 +326,40 @@ export function CosmeticsTab({
 							/>
 							<span className="cosmetic-slider-value">{me.particleCount ?? 5}</span>
 						</label>
+						<label className="cosmetic-slider">
+							<span>Velocidad</span>
+							<input
+								type="range"
+								min={0.3}
+								max={3}
+								step={0.1}
+								value={me.particleSpeed ?? 1}
+								onChange={(event) => onPatch({particleSpeed: Number(event.target.value)})}
+							/>
+							<span className="cosmetic-slider-value">{(me.particleSpeed ?? 1).toFixed(1)}×</span>
+						</label>
+						<label className="cosmetic-slider">
+							<span>Vida</span>
+							<input
+								type="range"
+								min={0.2}
+								max={1}
+								step={0.05}
+								value={me.particleLife ?? 1}
+								onChange={(event) => onPatch({particleLife: Number(event.target.value)})}
+							/>
+							<span className="cosmetic-slider-value">{Math.round((me.particleLife ?? 1) * 100)}%</span>
+						</label>
+						{equippedOverlay === 'custom' ? (
+							<label className="settings-toggle">
+								<input
+									type="checkbox"
+									checked={me.particleOriginal ?? false}
+									onChange={(event) => onPatch({particleOriginal: event.target.checked})}
+								/>
+								<span>Mantener el color original de la imagen</span>
+							</label>
+						) : null}
 					</div>
 				) : null}
 			</div>

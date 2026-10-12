@@ -84,6 +84,7 @@ function ParticipantCard({
 						customDeco={participant.customDeco}
 						decoImage={participant.decoImage}
 						decoSize={participant.decoSize}
+						original={participant.original}
 						size={compact ? 48 : 88}
 					/>
 				)}
@@ -228,9 +229,13 @@ export function CallStage(): JSX.Element | null {
 			customDeco: member?.customDeco,
 			decoImage: member?.decoImage,
 			decoSize: member?.decoSize,
+			original: member?.particleOriginal,
 			customParticle: member?.customParticle,
 			particleImage: member?.particleImage,
 			particleDirection: member?.particleDirection,
+			particleOriginal: member?.particleOriginal,
+			particleSpeed: member?.particleSpeed,
+			particleLife: member?.particleLife,
 			particleSize: member?.particleSize,
 			particleCount: member?.particleCount,
 			profileEffect: member?.profileEffect,
@@ -305,6 +310,7 @@ export function CallStage(): JSX.Element | null {
 									customDeco={expanded.customDeco}
 									decoImage={expanded.decoImage}
 									decoSize={expanded.decoSize}
+									original={expanded.original}
 									size={140}
 								/>
 							)}

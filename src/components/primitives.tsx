@@ -277,7 +277,7 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 };
 
 /** Decoración del avatar: overlay por encima, con el centro libre para no tapar la cara. */
-function avatarDecoNode(decoration?: string, color?: string, image?: string, size?: number): ReactNode {
+function avatarDecoNode(decoration?: string, color?: string, image?: string, size?: number, original?: boolean): ReactNode {
 	if (!decoration || decoration === 'none') return null;
 	if (decoration === 'custom' && !image) return null;
 	// Se limita la escala del marco: más grande que esto taparía la foto.
@@ -287,7 +287,15 @@ function avatarDecoNode(decoration?: string, color?: string, image?: string, siz
 		'--deco-image': image ? `url(${image})` : undefined,
 		'--particle-size': String(clamped),
 	} as CSSProperties;
-	return <span className="avatar-deco" data-deco={decoration} style={style} aria-hidden="true" />;
+	return (
+		<span
+			className="avatar-deco"
+			data-deco={decoration}
+			data-original={original ? 'true' : undefined}
+			style={style}
+			aria-hidden="true"
+		/>
+	);
 }
 
 /** Anillo/brillo decorativo alrededor del avatar (efecto de perfil elegido). */
@@ -370,6 +378,7 @@ export function Avatar({
 				decorationColor ?? member.decorationColor,
 				customDeco ?? member.customDeco ?? particleUrl(member.decoImage),
 				decoSize ?? member.decoSize,
+				member.particleOriginal,
 			)}
 			{showStatus ? (
 				<span
@@ -394,6 +403,7 @@ export function ColorAvatar({
 	customDeco,
 	decoImage,
 	decoSize,
+	original,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -409,6 +419,7 @@ export function ColorAvatar({
 	customDeco?: string;
 	decoImage?: string;
 	decoSize?: number;
+	original?: boolean;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -439,7 +450,7 @@ export function ColorAvatar({
 					initial
 				)}
 			</div>
-			{avatarDecoNode(decoration, decorationColor, customDeco ?? particleUrl(decoImage), decoSize)}
+			{avatarDecoNode(decoration, decorationColor, customDeco ?? particleUrl(decoImage), decoSize, original)}
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
 			) : null}
