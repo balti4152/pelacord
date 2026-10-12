@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const {pathToFileURL} = require('node:url');
 const {WebSocketServer, WebSocket} = require('ws');
+const {startUpdateLoop} = require('./update-loop.cjs');
 
 let autoUpdater = null;
 try {
@@ -508,6 +509,14 @@ function registerMediaProtocol() {
 
 // ---------- Actualizaciones (electron-updater) ----------
 
+/**
+ * Cada cuánto se vuelve a chequear MIENTRAS la app está abierta, así una versión nueva
+ * aparece sola sin tener que cerrar y volver a abrir. Si un chequeo falla (sin internet,
+ * rate limit), el intervalo se duplica hasta 5 minutos para no golpear de más.
+ */
+const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 10000);
+const UPDATE_MAX_INTERVAL_MS = 300000;
+
 function setupUpdater() {
 	if (!autoUpdater) return;
 	// Se puede pisar el feed con PELACORD_UPDATE_URL (carpeta estática, GitHub Releases, R2, etc.).
@@ -527,11 +536,34 @@ function setupUpdater() {
 	autoUpdater.on('download-progress', (progress) => send({state: 'downloading', percent: Math.round(progress?.percent ?? 0)}));
 	autoUpdater.on('update-downloaded', (info) => send({state: 'downloaded', version: info?.version}));
 	autoUpdater.on('error', (error) => send({state: 'error', error: String(error?.message ?? error)}));
-	if (app.isPackaged) {
-		setTimeout(() => {
-			void autoUpdater.checkForUpdates().catch(() => {});
-		}, 5000);
-	}
+	if (!app.isPackaged) return;
+
+	let downloading = false;
+	let loop = null;
+
+	autoUpdater.on('update-available', () => {
+		downloading = true;
+	});
+	autoUpdater.on('update-downloaded', () => {
+		downloading = false;
+		// Ya está descargada: se deja de chequear (queda el cartel de "Reiniciar").
+		if (loop) loop.stop();
+	});
+	autoUpdater.on('error', () => {
+		downloading = false;
+	});
+
+	// Chequeo periódico mientras la app está abierta: una versión nueva aparece sola,
+	// sin tener que cerrar y volver a abrir.
+	loop = startUpdateLoop({
+		task: () => autoUpdater.checkForUpdates(),
+		interval: UPDATE_INTERVAL_MS,
+		maxInterval: UPDATE_MAX_INTERVAL_MS,
+		delay: 5000,
+		shouldSkip: () => downloading,
+		log: () => console.log(`[pelacord] chequeo de actualización (${new Date().toLocaleTimeString()})`),
+	});
+	app.on('before-quit', () => loop.stop());
 }
 
 ipcMain.handle('pelacord:check-update', async () => {
