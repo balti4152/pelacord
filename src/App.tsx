@@ -119,7 +119,7 @@ export function App(): JSX.Element {
 	}, [state.settings.inputDeviceId]);
 
 	// Sonidos de la interfaz.
-	const prevVoice = useRef({channelId: null as string | null, muted: false, deafened: false});
+	const prevVoice = useRef({channelId: null as string | null, muted: false, deafened: false, sharing: false});
 	useEffect(() => {
 		const previous = prevVoice.current;
 		const voice = state.voice;
@@ -129,9 +129,11 @@ export function App(): JSX.Element {
 		} else if (voice.channelId) {
 			if (voice.deafened !== previous.deafened) playSound(voice.deafened ? 'deafen' : 'undeafen');
 			else if (voice.muted !== previous.muted) playSound(voice.muted ? 'mute' : 'unmute');
+			// Sonido propio al empezar o dejar de compartir pantalla.
+			if (voice.sharing !== previous.sharing) playSound(voice.sharing ? 'streamStart' : 'streamStop');
 		}
-		prevVoice.current = {channelId: voice.channelId, muted: voice.muted, deafened: voice.deafened};
-	}, [state.voice.channelId, state.voice.muted, state.voice.deafened]);
+		prevVoice.current = {channelId: voice.channelId, muted: voice.muted, deafened: voice.deafened, sharing: voice.sharing};
+	}, [state.voice.channelId, state.voice.muted, state.voice.deafened, state.voice.sharing]);
 
 	// Sonido cuando otra persona entra al mismo canal de voz.
 	const remoteInChannel = state.voice.channelId

@@ -3,6 +3,8 @@ import join from '@/assets/sounds/join.mp3';
 import leave from '@/assets/sounds/leave.mp3';
 import message from '@/assets/sounds/message.mp3';
 import mute from '@/assets/sounds/mute.mp3';
+import streamStart from '@/assets/sounds/stream-start.mp3';
+import streamStop from '@/assets/sounds/stream-stop.mp3';
 import undeafen from '@/assets/sounds/undeafen.mp3';
 import unmute from '@/assets/sounds/unmute.mp3';
 import userMoved from '@/assets/sounds/user-moved.mp3';
@@ -15,7 +17,9 @@ export type SoundName =
 	| 'deafen'
 	| 'undeafen'
 	| 'message'
-	| 'userJoined';
+	| 'userJoined'
+	| 'streamStart'
+	| 'streamStop';
 
 const SOURCES: Record<SoundName, string> = {
 	join,
@@ -26,6 +30,8 @@ const SOURCES: Record<SoundName, string> = {
 	undeafen,
 	message,
 	userJoined: userMoved,
+	streamStart,
+	streamStop,
 };
 
 const cache: Partial<Record<SoundName, HTMLAudioElement>> = {};

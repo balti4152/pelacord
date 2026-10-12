@@ -296,6 +296,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	voiceRef.current = state.voice;
 	const peersRef = useRef<Record<string, PeerPresence>>({});
 	const lastSeenRef = useRef<Record<string, number>>({});
+	const sharingRef = useRef<Record<string, boolean>>({});
 	const messageCountRef = useRef<Record<string, number>>({});
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
 
@@ -362,7 +363,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			});
 			if (peer.channelId) {
 				voiceMembers[peer.channelId] = [...(voiceMembers[peer.channelId] ?? []), peerToParticipant(peer)];
+				// Sonido cuando alguien empieza o deja de compartir pantalla.
+				const previousSharing = sharingRef.current[peer.id];
+				if (previousSharing !== undefined && previousSharing !== peer.sharing) {
+					playSound(peer.sharing ? 'streamStart' : 'streamStop');
+				}
 			}
+			sharingRef.current[peer.id] = peer.sharing;
 		}
 		if (voice.channelId) {
 			voiceMembers[voice.channelId] = [
@@ -400,6 +407,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			if (!peersRef.current[id]) return;
 			delete peersRef.current[id];
 			delete lastSeenRef.current[id];
+			delete sharingRef.current[id];
 			applyPresence();
 		});
 	}, [applyPresence]);
@@ -415,6 +423,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				if (now - (lastSeenRef.current[id] ?? 0) > 30000) {
 					delete peersRef.current[id];
 					delete lastSeenRef.current[id];
+					delete sharingRef.current[id];
 					changed = true;
 				}
 			}
@@ -482,7 +491,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					createdAt: Date.now(),
 					attachments,
 				};
-				void postMessage(channelId, message).catch(() => {});
+				void postMessage(channelId, message).catch((error: unknown) => {
+					console.error('[pelacord-error] no se pudo enviar el mensaje:', error);
+				});
 			} else {
 				dispatch({type: 'sendMessage', channelId, content, attachments});
 			}

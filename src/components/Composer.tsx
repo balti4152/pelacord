@@ -227,9 +227,6 @@ export function Composer(): JSX.Element {
 					<button type="button" className="composer-btn is-gif" title="GIF" onClick={() => setShowGifs((value) => !value)}>
 						GIF
 					</button>
-					<button type="button" className="composer-btn" title="Sticker" onClick={() => {}}>
-						<Icon name="sticker" size={20} />
-					</button>
 					<div style={{position: 'relative'}}>
 						<button
 							type="button"

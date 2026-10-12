@@ -12,20 +12,28 @@ import type {Attachment, Message} from '@/types';
  * File bytes are never stored either; a message only carries attachment metadata.
  */
 
-function stripAttachment(attachment: Attachment): Omit<Attachment, 'url'> & {url?: string} {
-	return {
+/**
+ * Prepara un adjunto para guardarlo en Firestore.
+ *
+ * Regla de oro: NUNCA incluir claves con `undefined`, porque Firestore rechaza el documento
+ * completo ("Unsupported field value: undefined") y el mensaje no se guarda. Por eso los
+ * campos opcionales se agregan solo si tienen valor.
+ */
+function stripAttachment(attachment: Attachment): Record<string, unknown> {
+	const clean: Record<string, unknown> = {
 		id: attachment.id,
 		name: attachment.name,
 		size: attachment.size,
 		mime: attachment.mime,
 		kind: attachment.kind,
-		// Se conservan las URLs públicas (ej. GIFs de Giphy); los blob locales no sirven afuera.
-		url: attachment.url.startsWith('http') ? attachment.url : undefined,
-		ownerId: attachment.ownerId,
-		ownerHost: attachment.ownerHost,
-		ownerPort: attachment.ownerPort,
-		thumbnail: attachment.thumbnail,
 	};
+	// Solo se conservan las URLs públicas (GIFs de Giphy). Los blob locales no sirven afuera.
+	if (attachment.url && attachment.url.startsWith('http')) clean.url = attachment.url;
+	if (attachment.ownerId) clean.ownerId = attachment.ownerId;
+	if (attachment.ownerHost) clean.ownerHost = attachment.ownerHost;
+	if (typeof attachment.ownerPort === 'number') clean.ownerPort = attachment.ownerPort;
+	if (attachment.thumbnail) clean.thumbnail = attachment.thumbnail;
+	return clean;
 }
 
 export async function postMessage(channelId: string, message: Message): Promise<void> {
