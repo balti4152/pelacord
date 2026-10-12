@@ -82,7 +82,7 @@ function ParticipantCard({
 						decoration={participant.decoration}
 						decorationColor={participant.decorationColor}
 						customDeco={participant.customDeco}
-						particleSize={participant.particleSize}
+						decoSize={participant.decoSize}
 						size={compact ? 48 : 88}
 					/>
 				)}
@@ -225,8 +225,9 @@ export function CallStage(): JSX.Element | null {
 			decoration: member?.decoration,
 			decorationColor: member?.decorationColor,
 			customDeco: member?.customDeco,
-			particleSize: member?.particleSize,
+			decoSize: member?.decoSize,
 			customParticle: member?.customParticle,
+			particleSize: member?.particleSize,
 			particleCount: member?.particleCount,
 			profileEffect: member?.profileEffect,
 			profileEffectColor: member?.profileEffectColor,
@@ -298,7 +299,7 @@ export function CallStage(): JSX.Element | null {
 									decoration={expanded.decoration}
 									decorationColor={expanded.decorationColor}
 									customDeco={expanded.customDeco}
-									particleSize={expanded.particleSize}
+									decoSize={expanded.decoSize}
 									size={140}
 								/>
 							)}

@@ -279,10 +279,12 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 function avatarDecoNode(decoration?: string, color?: string, image?: string, size?: number): ReactNode {
 	if (!decoration || decoration === 'none') return null;
 	if (decoration === 'custom' && !image) return null;
+	// Se limita la escala del marco: más grande que esto taparía la foto.
+	const clamped = Math.min(1.8, Math.max(0.4, size ?? 1));
 	const style = {
 		'--deco-color': color || undefined,
 		'--deco-image': image ? `url(${image})` : undefined,
-		'--particle-size': size ? String(size) : undefined,
+		'--particle-size': String(clamped),
 	} as CSSProperties;
 	return <span className="avatar-deco" data-deco={decoration} style={style} aria-hidden="true" />;
 }
@@ -316,7 +318,7 @@ export function Avatar({
 	decoration,
 	decorationColor,
 	customDeco,
-	particleSize,
+	decoSize,
 }: {
 	member: Member;
 	size?: number;
@@ -326,7 +328,7 @@ export function Avatar({
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
-	particleSize?: number;
+	decoSize?: number;
 }): JSX.Element {
 	const initial = member.name.trim().charAt(0).toUpperCase() || '?';
 	const primary = avatarSource(member.avatarUrl, member.avatarPoster, size);
@@ -366,7 +368,7 @@ export function Avatar({
 				decoration ?? member.decoration,
 				decorationColor ?? member.decorationColor,
 				customDeco ?? member.customDeco,
-				particleSize ?? member.particleSize,
+				decoSize ?? member.decoSize,
 			)}
 			{showStatus ? (
 				<span
@@ -389,7 +391,7 @@ export function ColorAvatar({
 	decoration,
 	decorationColor,
 	customDeco,
-	particleSize,
+	decoSize,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -403,7 +405,7 @@ export function ColorAvatar({
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
-	particleSize?: number;
+	decoSize?: number;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -434,7 +436,7 @@ export function ColorAvatar({
 					initial
 				)}
 			</div>
-			{avatarDecoNode(decoration, decorationColor, customDeco, particleSize)}
+			{avatarDecoNode(decoration, decorationColor, customDeco, decoSize)}
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
 			) : null}

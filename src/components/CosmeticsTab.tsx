@@ -203,6 +203,25 @@ export function CosmeticsTab({
 				</div>
 			) : null}
 
+			{equipped !== 'none' ? (
+				<div className="settings-section">
+					<span className="settings-label">Marco del avatar</span>
+					<label className="cosmetic-slider">
+						<span>Tamaño</span>
+						<input
+							type="range"
+							min={0.5}
+							max={1.8}
+							step={0.1}
+							value={me.decoSize ?? 1}
+							onChange={(event) => onPatch({decoSize: Number(event.target.value)})}
+						/>
+						<span className="cosmetic-slider-value">{(me.decoSize ?? 1).toFixed(1)}×</span>
+					</label>
+					<p className="settings-hint">Controla sólo las partículas del marco (corazones, burbujas, etc.).</p>
+				</div>
+			) : null}
+
 			<div className="settings-section">
 				<span className="settings-label">Overlay del perfil</span>
 				<p className="settings-hint">Se reproduce cuando alguien abre tu perfil (y también cuando lo abrís vos).</p>
@@ -281,9 +300,9 @@ export function CosmeticsTab({
 				</div>
 			) : null}
 
-			{equipped !== 'none' || equippedOverlay !== 'none' ? (
+			{equippedOverlay !== 'none' ? (
 				<div className="settings-section">
-					<span className="settings-label">Partículas</span>
+					<span className="settings-label">Partículas del overlay</span>
 					<label className="cosmetic-slider">
 						<span>Tamaño</span>
 						<input
@@ -309,7 +328,7 @@ export function CosmeticsTab({
 						<span className="cosmetic-slider-value">{me.particleCount ?? 5}</span>
 					</label>
 					<p className="settings-hint">
-						La cantidad aplica al overlay del perfil. Las partículas salen en posiciones y tiempos al azar.
+						Es independiente del marco. Las partículas salen en posiciones y tiempos al azar.
 					</p>
 				</div>
 			) : null}

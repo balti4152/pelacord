@@ -85,10 +85,12 @@ export interface Member {
 	customDeco?: string;
 	/** La imagen del marco se sirve por P2P (/file/deco). */
 	customDecoP2P?: boolean;
-	/** Escala de las partículas (1 = normal). */
+	/** Escala de las partículas del overlay (1 = normal). */
 	particleSize?: number;
 	/** Cantidad de partículas del overlay. */
 	particleCount?: number;
+	/** Escala de las partículas del MARCO del avatar (independiente del overlay). */
+	decoSize?: number;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -138,7 +140,7 @@ export interface VoiceParticipant {
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
-	particleSize?: number;
+	decoSize?: number;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

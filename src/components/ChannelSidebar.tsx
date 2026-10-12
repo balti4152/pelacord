@@ -21,7 +21,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					decoration={state.me.decoration}
 					decorationColor={state.me.decorationColor}
 					customDeco={state.me.customDeco}
-					particleSize={state.me.particleSize}
+					decoSize={state.me.decoSize}
 					size={32}
 					status={state.me.presence}
 					statusBorderColor="var(--background-secondary-alt)"
@@ -61,7 +61,7 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 							decoration={participant.decoration}
 							decorationColor={participant.decorationColor}
 							customDeco={participant.customDeco}
-							particleSize={participant.particleSize}
+							decoSize={participant.decoSize}
 							size={22}
 						/>
 						<span className="voice-member-name">{isMe ? 'Tú' : participant.name}</span>

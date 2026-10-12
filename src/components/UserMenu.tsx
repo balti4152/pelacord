@@ -18,8 +18,9 @@ export interface UserLike {
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
-	particleSize?: number;
+	decoSize?: number;
 	customParticle?: string;
+	particleSize?: number;
 	particleCount?: number;
 	profileEffect?: string;
 	profileEffectColor?: string;
@@ -143,7 +144,7 @@ export function ProfilePopover({
 							decoration={user.decoration}
 							decorationColor={user.decorationColor}
 							customDeco={user.customDeco}
-							particleSize={user.particleSize}
+							decoSize={user.decoSize}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"
