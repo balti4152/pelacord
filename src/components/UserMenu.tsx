@@ -1,3 +1,4 @@
+import type {CSSProperties} from 'react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {usePeerVolume} from '@/components/RemoteMedia';
 import {voiceMesh} from '@/lib/media';
@@ -10,6 +11,9 @@ export interface UserLike {
 	color: string;
 	avatarUrl?: string;
 	avatarCrop?: AvatarCrop;
+	bannerUrl?: string;
+	bannerColor?: string;
+	effect?: string;
 	presence?: Presence;
 	bio?: string;
 	status?: string;
@@ -102,14 +106,15 @@ export function ProfilePopover({
 	onClose: () => void;
 }): JSX.Element {
 	const volume = usePeerVolume(user.id);
+	// Igual que en Ajustes: si hay banner propio se usa, si no el color o el degradado.
+	const bannerStyle: CSSProperties = user.bannerUrl
+		? {backgroundImage: `url(${user.bannerUrl})`}
+		: {background: user.bannerColor ?? `linear-gradient(135deg, ${user.color}, var(--brand-secondary))`};
 	return (
 		<>
 			<div className="modal-backdrop" onClick={onClose} />
 			<div className="profile-popover" onClick={(event) => event.stopPropagation()}>
-				<div
-					className="profile-popover-banner"
-					style={{background: `linear-gradient(135deg, ${user.color}, var(--brand-secondary))`}}
-				/>
+				<div className="profile-popover-banner" style={bannerStyle} />
 				<div className="profile-popover-body">
 					<div className="profile-popover-avatar">
 						<ColorAvatar
@@ -117,6 +122,7 @@ export function ProfilePopover({
 							color={user.color}
 							url={user.avatarUrl}
 							crop={user.avatarCrop}
+							effect={user.effect}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"

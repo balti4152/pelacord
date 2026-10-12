@@ -12,6 +12,9 @@ function toUser(member: Member): UserLike {
 		color: member.avatarColor,
 		avatarUrl: member.avatarUrl,
 		avatarCrop: member.avatarCrop,
+		bannerUrl: member.bannerUrl,
+		bannerColor: member.bannerColor,
+		effect: member.effect,
 		presence: member.presence,
 		bio: member.bio,
 		status: member.status,
@@ -23,9 +26,12 @@ export function MemberList(): JSX.Element {
 	const [menu, setMenu] = useState<{user: UserLike; x: number; y: number} | null>(null);
 	const [profile, setProfile] = useState<UserLike | null>(null);
 
+	// La entrada propia siempre va con el perfil fresco (si no, el popover mostraba datos viejos).
+	const members = state.members.map((member) => (member.id === state.me.id ? state.me : member));
+
 	const groups: Array<{label: string; members: typeof state.members}> = [
-		{label: 'En línea', members: state.members.filter((m) => m.presence !== 'offline')},
-		{label: 'Desconectados', members: state.members.filter((m) => m.presence === 'offline')},
+		{label: 'En línea', members: members.filter((m) => m.presence !== 'offline')},
+		{label: 'Desconectados', members: members.filter((m) => m.presence === 'offline')},
 	];
 
 	return (

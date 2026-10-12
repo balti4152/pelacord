@@ -17,6 +17,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					color={state.me.avatarColor}
 					url={state.me.avatarUrl}
 					crop={state.me.avatarCrop}
+					effect={state.me.effect}
 					size={32}
 					status={state.me.presence}
 					statusBorderColor="var(--background-secondary-alt)"

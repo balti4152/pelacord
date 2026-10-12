@@ -1,13 +1,13 @@
 import {type ChangeEvent, type CSSProperties, useEffect, useState} from 'react';
 import {AvatarEditor} from '@/components/AvatarEditor';
-import {Avatar, Icon} from '@/components/primitives';
+import {Avatar, ColorAvatar, Icon} from '@/components/primitives';
 import {useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
 import {getDesktopTransport} from '@/lib/desktop';
 import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {useStore} from '@/state/store';
-import type {AvatarCrop, Member, Presence, ThemeName} from '@/types';
+import type {AvatarCrop, Member, Presence, ProfileEffect, ThemeName} from '@/types';
 
 const EDITABLE_VARS = [
 	'--brand-primary',
@@ -35,8 +35,16 @@ const BANNER_PRESETS = [
 	'linear-gradient(135deg, hsl(0, 0%, 20%), hsl(0, 0%, 40%))',
 ];
 
-const THEMES: Array<{id: ThemeName; label: string}> = [
-	{id: 'dark', label: 'Oscuro'},
+const PROFILE_EFFECTS: Array<{id: ProfileEffect; label: string}> = [
+	{id: 'none', label: 'Ninguno'},
+	{id: 'glow', label: 'Glow'},
+	{id: 'neon', label: 'Neón'},
+	{id: 'fire', label: 'Fuego'},
+	{id: 'aurora', label: 'Aurora'},
+	{id: 'sparkle', label: 'Destellos'},
+];
+
+const THEMES: Array<{id: ThemeName; label: string}> = [	{id: 'dark', label: 'Oscuro'},
 	{id: 'light', label: 'Claro'},
 	{id: 'coal', label: 'Carbón (AMOLED)'},
 ];
@@ -182,6 +190,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								onBanner={handleBanner}
 								onBannerColor={(v) => updateProfile({bannerColor: v, bannerUrl: undefined})}
 								onAccent={(v) => updateProfile({accentColor: v})}
+								onEffect={(v) => updateProfile({effect: v})}
 								onResetAvatar={() => updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false})}
 								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined})}
 							/>
@@ -310,6 +319,7 @@ function ProfileTab(props: {
 	onBanner: (e: ChangeEvent<HTMLInputElement>) => void;
 	onBannerColor: (v: string) => void;
 	onAccent: (v: string) => void;
+	onEffect: (v: ProfileEffect) => void;
 	onResetAvatar: () => void;
 	onRemoveBanner: () => void;
 }): JSX.Element {
@@ -349,6 +359,30 @@ function ProfileTab(props: {
 				<p className="settings-hint">
 					Foto o GIF animado desde tu compu. Antes de guardarlo vas a poder mover y hacer zoom para centrarlo.
 				</p>
+			</div>
+
+			<div className="settings-section">
+				<span className="settings-label">Efecto del perfil</span>
+				<div className="effect-grid">
+					{PROFILE_EFFECTS.map((option) => (
+						<button
+							type="button"
+							key={option.id}
+							className={`effect-option${(me.effect ?? 'none') === option.id ? ' is-active' : ''}`}
+							onClick={() => props.onEffect(option.id)}>
+							<ColorAvatar
+								name={me.name}
+								color={me.avatarColor}
+								url={me.avatarUrl}
+								crop={me.avatarCrop}
+								effect={option.id === 'none' ? undefined : option.id}
+								size={44}
+							/>
+							<span className="effect-option-label">{option.label}</span>
+						</button>
+					))}
+				</div>
+				<p className="settings-hint">Se ve alrededor de tu avatar en tu perfil y en el panel de abajo.</p>
 			</div>
 
 			<div className="settings-section">

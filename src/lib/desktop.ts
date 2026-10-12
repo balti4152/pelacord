@@ -7,6 +7,9 @@ export interface PeerPresence {
 	color: string;
 	avatarUrl?: string;
 	avatarCrop?: AvatarCrop;
+	bannerUrl?: string;
+	bannerColor?: string;
+	effect?: string;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;

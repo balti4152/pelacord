@@ -1,5 +1,8 @@
 export type ThemeName = 'dark' | 'light' | 'coal';
 
+/** Efecto decorativo del perfil (alrededor del avatar). */
+export type ProfileEffect = 'none' | 'glow' | 'neon' | 'fire' | 'aurora' | 'sparkle';
+
 export type Presence = 'online' | 'idle' | 'dnd' | 'offline';
 
 export type ChannelType = 'text' | 'voice';
@@ -57,6 +60,8 @@ export interface Member {
 	avatarP2P?: boolean;
 	bannerUrl?: string;
 	bannerColor?: string;
+	/** Efecto decorativo alrededor del avatar. */
+	effect?: ProfileEffect;
 	accentColor: string;
 	bio?: string;
 	status?: string;

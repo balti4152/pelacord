@@ -205,6 +205,25 @@ export function CallStage(): JSX.Element | null {
 	// El volumen de quien comparte solo se controla si es otra persona.
 	const presenter = expanded && expanded.id !== state.me.id ? {id: expanded.id, name: expanded.name} : null;
 
+	/** Perfil completo de un participante (incluye banner y bio, que no viajan en la voz). */
+	function userFor(participant: VoiceParticipant): UserLike {
+		const member = state.members.find((entry) => entry.id === participant.id);
+		return {
+			id: participant.id,
+			name: participant.name,
+			tag: member?.tag,
+			color: participant.color,
+			avatarUrl: participant.avatarUrl,
+			avatarCrop: participant.avatarCrop,
+			bannerUrl: member?.bannerUrl,
+			bannerColor: member?.bannerColor,
+			effect: member?.effect,
+			presence: member?.presence,
+			bio: member?.bio,
+			status: member?.status,
+		};
+	}
+
 	function toggleFullscreen(): void {
 		const element = stageRef.current ?? document.documentElement;
 		if (document.fullscreenElement) void document.exitFullscreen();
@@ -348,26 +367,12 @@ export function CallStage(): JSX.Element | null {
 
 			{menu && menuParticipant ? (
 				<UserContextMenu
-					user={{
-						id: menuParticipant.id,
-						name: menuParticipant.name,
-						color: menuParticipant.color,
-						avatarUrl: menuParticipant.avatarUrl,
-						avatarCrop: menuParticipant.avatarCrop,
-					}}
+					user={userFor(menuParticipant)}
 					x={menu.x}
 					y={menu.y}
 					canVolume={menu.id !== state.me.id}
 					onClose={() => setMenu(null)}
-					onViewProfile={() =>
-						setProfile({
-							id: menuParticipant.id,
-							name: menuParticipant.name,
-							color: menuParticipant.color,
-							avatarUrl: menuParticipant.avatarUrl,
-							avatarCrop: menuParticipant.avatarCrop,
-						})
-					}
+					onViewProfile={() => setProfile(userFor(menuParticipant))}
 				/>
 			) : null}
 			{profile ? <ProfilePopover user={profile} canVolume onClose={() => setProfile(null)} /> : null}

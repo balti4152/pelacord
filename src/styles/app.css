@@ -1061,12 +1061,170 @@
 	color: white;
 	font-weight: 600;
 	user-select: none;
+	/* Por encima del efecto decorativo, que va detrás. */
+	position: relative;
+	z-index: 1;
 }
 
 .avatar-inner img {
 	width: 100%;
 	height: 100%;
 	object-fit: cover;
+}
+
+/* ---------- Efectos de perfil (anillo alrededor del avatar) ---------- */
+
+.avatar-effect {
+	position: absolute;
+	inset: -5px;
+	border-radius: var(--radius-full);
+	pointer-events: none;
+	z-index: 0;
+}
+
+.avatar-effect[data-effect='glow'] {
+	background: conic-gradient(from 0deg, var(--brand-primary), var(--brand-secondary), var(--brand-primary));
+	filter: blur(7px);
+	opacity: 0.85;
+	animation: avatar-spin 4s linear infinite;
+}
+
+.avatar-effect[data-effect='neon'] {
+	border: 2px solid var(--brand-primary-light);
+	box-shadow:
+		0 0 12px var(--brand-primary),
+		inset 0 0 12px var(--brand-primary);
+	animation: avatar-pulse 1.6s ease-in-out infinite;
+}
+
+.avatar-effect[data-effect='fire'] {
+	background: conic-gradient(from 0deg, #ff7a18, #ffd200, #ff2d55, #ff7a18);
+	filter: blur(8px);
+	opacity: 0.9;
+	animation: avatar-spin 2.6s linear infinite reverse;
+}
+
+.avatar-effect[data-effect='aurora'] {
+	background: linear-gradient(120deg, #43e97b, #38f9d7, #4facfe, #a18cd1, #43e97b);
+	background-size: 300% 300%;
+	filter: blur(6px);
+	opacity: 0.9;
+	animation: avatar-aurora 6s ease-in-out infinite;
+}
+
+.avatar-effect[data-effect='sparkle'] {
+	box-shadow:
+		0 0 0 2px hsla(0, 0%, 100%, 0.22),
+		0 0 14px var(--brand-primary-light);
+}
+
+.avatar-effect[data-effect='sparkle']::before,
+.avatar-effect[data-effect='sparkle']::after {
+	content: '';
+	position: absolute;
+	width: 6px;
+	height: 6px;
+	border-radius: var(--radius-full);
+	background-color: white;
+	box-shadow: 0 0 8px white;
+	animation: avatar-twinkle 1.8s ease-in-out infinite;
+}
+
+.avatar-effect[data-effect='sparkle']::before {
+	top: -3px;
+	left: 50%;
+}
+
+.avatar-effect[data-effect='sparkle']::after {
+	bottom: -3px;
+	right: 30%;
+	animation-delay: 0.9s;
+}
+
+@keyframes avatar-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes avatar-pulse {
+	0%,
+	100% {
+		opacity: 0.5;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@keyframes avatar-aurora {
+	0%,
+	100% {
+		background-position: 0% 50%;
+	}
+	50% {
+		background-position: 100% 50%;
+	}
+}
+
+@keyframes avatar-twinkle {
+	0%,
+	100% {
+		opacity: 0;
+		transform: scale(0.6);
+	}
+	50% {
+		opacity: 1;
+		transform: scale(1.1);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.avatar-effect {
+		animation: none !important;
+	}
+	.avatar-effect::before,
+	.avatar-effect::after {
+		animation: none !important;
+	}
+}
+
+/* ---------- Elegir efecto (Ajustes) ---------- */
+
+.effect-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(7rem, 1fr));
+	gap: 0.5rem;
+}
+
+.effect-option {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.5rem;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-secondary);
+	color: var(--text-secondary);
+	font-size: 0.8125rem;
+	text-align: left;
+}
+
+.effect-option:hover {
+	border-color: var(--brand-primary);
+	color: var(--text-primary);
+}
+
+.effect-option.is-active {
+	border-color: var(--brand-primary);
+	background-color: var(--background-modifier-selected);
+	color: var(--text-primary);
+}
+
+.effect-option-label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .status-dot {
@@ -2479,6 +2637,9 @@
 
 .profile-popover-banner {
 	height: 5rem;
+	background-size: cover;
+	background-position: center;
+	background-repeat: no-repeat;
 }
 
 .profile-popover-body {

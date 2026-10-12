@@ -275,6 +275,12 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 	offline: 'Offline',
 };
 
+/** Anillo/brillo decorativo alrededor del avatar (efecto de perfil elegido). */
+function avatarEffectNode(effect?: string): ReactNode {
+	if (!effect || effect === 'none') return null;
+	return <span className="avatar-effect" data-effect={effect} aria-hidden="true" />;
+}
+
 /** Aplica el recorte guardado (zoom + desplazamiento) a la imagen del avatar. */
 function avatarCropStyle(crop?: AvatarCrop): CSSProperties | undefined {
 	if (!crop) return undefined;
@@ -287,11 +293,13 @@ export function Avatar({
 	size = 32,
 	showStatus = false,
 	statusBorderColor,
+	effect,
 }: {
 	member: Member;
 	size?: number;
 	showStatus?: boolean;
 	statusBorderColor?: string;
+	effect?: string;
 }): JSX.Element {
 	const initial = member.name.trim().charAt(0).toUpperCase() || '?';
 	const [broken, setBroken] = useState(false);
@@ -304,6 +312,7 @@ export function Avatar({
 	const innerStyle: CSSProperties = showImage ? {} : {backgroundColor: member.avatarColor};
 	return (
 		<div className="avatar" style={style} title={`${member.name} - ${PRESENCE_LABEL[member.presence]}`}>
+			{avatarEffectNode(effect ?? member.effect)}
 			<div className="avatar-inner" style={innerStyle}>
 				{showImage ? (
 					<img src={member.avatarUrl} alt="" style={avatarCropStyle(member.avatarCrop)} onError={() => setBroken(true)} />
@@ -327,6 +336,7 @@ export function ColorAvatar({
 	color,
 	url,
 	crop,
+	effect,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -335,6 +345,7 @@ export function ColorAvatar({
 	color: string;
 	url?: string;
 	crop?: AvatarCrop;
+	effect?: string;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -344,6 +355,7 @@ export function ColorAvatar({
 	const showImage = Boolean(url) && !broken;
 	return (
 		<div className="avatar" style={{width: size, height: size, fontSize: size * 0.42}}>
+			{avatarEffectNode(effect)}
 			<div className="avatar-inner" style={showImage ? {} : {backgroundColor: color}}>
 				{showImage ? <img src={url} alt="" style={avatarCropStyle(crop)} onError={() => setBroken(true)} /> : initial}
 			</div>
