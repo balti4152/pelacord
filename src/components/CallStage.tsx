@@ -79,6 +79,7 @@ function ParticipantCard({
 						color={participant.color}
 						url={participant.avatarUrl}
 						crop={participant.avatarCrop}
+						decoration={participant.decoration}
 						size={compact ? 48 : 88}
 					/>
 				)}
@@ -218,6 +219,7 @@ export function CallStage(): JSX.Element | null {
 			bannerUrl: member?.bannerUrl,
 			bannerColor: member?.bannerColor,
 			effect: member?.effect,
+			decoration: member?.decoration,
 			presence: member?.presence,
 			bio: member?.bio,
 			status: member?.status,
@@ -283,6 +285,7 @@ export function CallStage(): JSX.Element | null {
 									color={expanded.color}
 									url={expanded.avatarUrl}
 									crop={expanded.avatarCrop}
+									decoration={expanded.decoration}
 									size={140}
 								/>
 							)}

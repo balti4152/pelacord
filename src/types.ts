@@ -3,6 +3,9 @@ export type ThemeName = 'dark' | 'light' | 'coal';
 /** Efecto decorativo del perfil (alrededor del avatar). */
 export type ProfileEffect = 'none' | 'glow' | 'neon' | 'fire' | 'aurora' | 'sparkle';
 
+/** Decoración del avatar: overlay alrededor, sin tapar la cara. */
+export type AvatarDecoration = 'none' | 'hearts' | 'arcane' | 'cyber';
+
 export type Presence = 'online' | 'idle' | 'dnd' | 'offline';
 
 export type ChannelType = 'text' | 'voice';
@@ -66,6 +69,8 @@ export interface Member {
 	bannerP2P?: boolean;
 	/** Efecto decorativo alrededor del avatar. */
 	effect?: ProfileEffect;
+	/** Decoración del avatar (anillo/overlay alrededor). */
+	decoration?: AvatarDecoration;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -90,6 +95,8 @@ export interface Settings {
 	showMembers: boolean;
 	inputDeviceId: string;
 	outputDeviceId: string;
+	/** Si está apagado, las decoraciones no se animan (accesibilidad / rendimiento). */
+	cosmeticAnimations: boolean;
 }
 
 export interface VoiceState {
@@ -110,6 +117,7 @@ export interface VoiceParticipant {
 	color: string;
 	avatarUrl?: string;
 	avatarCrop?: AvatarCrop;
+	decoration?: string;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

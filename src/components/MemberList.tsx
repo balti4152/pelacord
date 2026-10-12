@@ -15,6 +15,7 @@ function toUser(member: Member): UserLike {
 		bannerUrl: member.bannerUrl,
 		bannerColor: member.bannerColor,
 		effect: member.effect,
+		decoration: member.decoration,
 		presence: member.presence,
 		bio: member.bio,
 		status: member.status,

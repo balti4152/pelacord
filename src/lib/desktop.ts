@@ -10,6 +10,7 @@ export interface PeerPresence {
 	bannerUrl?: string;
 	bannerColor?: string;
 	effect?: string;
+	decoration?: string;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -89,6 +90,7 @@ export function peerToParticipant(presence: PeerPresence): VoiceParticipant {
 		color: presence.color,
 		avatarUrl: presence.avatarUrl,
 		avatarCrop: presence.avatarCrop,
+		decoration: presence.decoration,
 		muted: presence.muted,
 		deafened: presence.deafened,
 		sharing: presence.sharing,

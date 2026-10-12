@@ -1,5 +1,6 @@
 import {type ChangeEvent, type CSSProperties, useEffect, useState} from 'react';
 import {AvatarEditor} from '@/components/AvatarEditor';
+import {CosmeticsTab} from '@/components/CosmeticsTab';
 import {Avatar, ColorAvatar, Icon} from '@/components/primitives';
 import {useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
 import {getDesktopTransport} from '@/lib/desktop';
@@ -66,7 +67,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 	const {state, updateProfile, updateSettings, setCssVariable} = useStore();
 	const me = state.me;
 	const outputVolume = useOutputVolume();
-	const [tab, setTab] = useState<'account' | 'profile' | 'appearance' | 'voice' | 'customcss'>('account');
+	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'customcss'>('account');
 	const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
 	function handleAvatar(event: ChangeEvent<HTMLInputElement>): void {
@@ -170,6 +171,12 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 					</button>
 					<button
 						type="button"
+						className={`modal-nav-item${tab === 'cosmetics' ? ' is-active' : ''}`}
+						onClick={() => setTab('cosmetics')}>
+						Cosméticos
+					</button>
+					<button
+						type="button"
 						className={`modal-nav-item${tab === 'appearance' ? ' is-active' : ''}`}
 						onClick={() => setTab('appearance')}>
 						Apariencia
@@ -221,6 +228,15 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 									updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false, avatarPoster: undefined})
 								}
 								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined, bannerP2P: false})}
+							/>
+						) : null}
+
+						{tab === 'cosmetics' ? (
+							<CosmeticsTab
+								me={me}
+								onEquip={(id) => updateProfile({decoration: id})}
+								animations={state.settings.cosmeticAnimations}
+								onAnimations={(value) => updateSettings({cosmeticAnimations: value})}
 							/>
 						) : null}
 

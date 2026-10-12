@@ -14,6 +14,7 @@ export interface UserLike {
 	bannerUrl?: string;
 	bannerColor?: string;
 	effect?: string;
+	decoration?: string;
 	presence?: Presence;
 	bio?: string;
 	status?: string;
@@ -123,6 +124,7 @@ export function ProfilePopover({
 							url={user.avatarUrl}
 							crop={user.avatarCrop}
 							effect={user.effect}
+							decoration={user.decoration}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"

@@ -18,6 +18,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					url={state.me.avatarUrl}
 					crop={state.me.avatarCrop}
 					effect={state.me.effect}
+					decoration={state.me.decoration}
 					size={32}
 					status={state.me.presence}
 					statusBorderColor="var(--background-secondary-alt)"
@@ -54,6 +55,7 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 							color={participant.color}
 							url={participant.avatarUrl}
 							crop={participant.avatarCrop}
+							decoration={participant.decoration}
 							size={22}
 						/>
 						<span className="voice-member-name">{isMe ? 'Tú' : participant.name}</span>

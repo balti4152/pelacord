@@ -275,6 +275,12 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 	offline: 'Offline',
 };
 
+/** Decoración del avatar: overlay por encima, con el centro libre para no tapar la cara. */
+function avatarDecoNode(decoration?: string): ReactNode {
+	if (!decoration || decoration === 'none') return null;
+	return <span className="avatar-deco" data-deco={decoration} aria-hidden="true" />;
+}
+
 /** Anillo/brillo decorativo alrededor del avatar (efecto de perfil elegido). */
 function avatarEffectNode(effect?: string): ReactNode {
 	if (!effect || effect === 'none') return null;
@@ -301,12 +307,14 @@ export function Avatar({
 	showStatus = false,
 	statusBorderColor,
 	effect,
+	decoration,
 }: {
 	member: Member;
 	size?: number;
 	showStatus?: boolean;
 	statusBorderColor?: string;
 	effect?: string;
+	decoration?: string;
 }): JSX.Element {
 	const initial = member.name.trim().charAt(0).toUpperCase() || '?';
 	const primary = avatarSource(member.avatarUrl, member.avatarPoster, size);
@@ -342,6 +350,7 @@ export function Avatar({
 					initial
 				)}
 			</div>
+			{avatarDecoNode(decoration ?? member.decoration)}
 			{showStatus ? (
 				<span
 					className="status-dot"
@@ -360,6 +369,7 @@ export function ColorAvatar({
 	poster,
 	crop,
 	effect,
+	decoration,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -370,6 +380,7 @@ export function ColorAvatar({
 	poster?: string;
 	crop?: AvatarCrop;
 	effect?: string;
+	decoration?: string;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -400,6 +411,7 @@ export function ColorAvatar({
 					initial
 				)}
 			</div>
+			{avatarDecoNode(decoration)}
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
 			) : null}

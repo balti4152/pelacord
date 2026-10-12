@@ -40,6 +40,7 @@ function toParticipant(member: Member, flags: Partial<VoiceParticipant> = {}): V
 		color: member.avatarColor,
 		avatarUrl: member.avatarUrl,
 		avatarCrop: member.avatarCrop,
+		decoration: member.decoration,
 		muted: false,
 		deafened: false,
 		sharing: false,
@@ -105,6 +106,7 @@ function seedState(): AppState {
 			showMembers: true,
 			inputDeviceId: 'default',
 			outputDeviceId: 'default',
+			cosmeticAnimations: true,
 		},
 		voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
 		voiceMembers: remote ? {} : demoVoiceMembers,
@@ -228,6 +230,7 @@ function loadState(): AppState {
 		parsed.voiceMembers = {};
 		if (typeof parsed.settings.inputDeviceId !== 'string') parsed.settings.inputDeviceId = 'default';
 		if (typeof parsed.settings.outputDeviceId !== 'string') parsed.settings.outputDeviceId = 'default';
+		if (typeof parsed.settings.cosmeticAnimations !== 'boolean') parsed.settings.cosmeticAnimations = true;
 		return parsed;
 	} catch {
 		return seedState();
@@ -260,6 +263,8 @@ function applyEffects(state: AppState): void {
 	const themes: ThemeName[] = ['dark', 'light', 'coal'];
 	for (const theme of themes) body.classList.toggle(`theme-${theme}`, state.settings.theme === theme);
 	body.style.fontSize = `${16 * state.settings.fontScale}px`;
+	// Accesibilidad/rendimiento: apaga las animaciones de los cosméticos.
+	body.classList.toggle('no-cosmetic-anim', !state.settings.cosmeticAnimations);
 
 	const root = document.documentElement;
 	for (const name of Object.keys(state.settings.cssVariables)) root.style.removeProperty(name);
@@ -339,6 +344,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			bannerUrl: me.bannerUrl,
 			bannerColor: me.bannerColor,
 			effect: me.effect,
+			decoration: me.decoration,
 			channelId: voice.channelId,
 			muted: voice.muted,
 			deafened: voice.deafened,
@@ -380,6 +386,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				bannerUrl: peer.bannerUrl,
 				bannerColor: peer.bannerColor,
 				effect: peer.effect as Member['effect'],
+				decoration: peer.decoration as Member['decoration'],
 				accentColor: 'hsl(242, 70%, 55%)',
 				bio: peer.bio,
 				status: peer.status,
