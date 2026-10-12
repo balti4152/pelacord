@@ -1397,14 +1397,23 @@
 	animation: deco-spin 6.5s linear infinite reverse;
 }
 
-/* 5) Personalizado — la imagen que sube el usuario */
+/* 5) Personalizado — la imagen que sube o elige el usuario (teñible) */
 .avatar-deco[data-deco='custom'] {
-	background-image: var(--deco-image);
-	background-size: 20% 20%;
-	background-repeat: space;
-	background-position: center;
-	mask: radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
-	-webkit-mask: radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
+	background-color: var(--deco-color, #fff);
+	/*
+	 * Dos máscaras: la imagen (por luminancia, para que el negro no se vea) intersectada
+	 * con el anillo, así las partículas quedan sólo alrededor del avatar.
+	 */
+	-webkit-mask-image: var(--deco-image), radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
+	mask-image: var(--deco-image), radial-gradient(circle, transparent 0 58%, #000 60% 78%, transparent 80%);
+	-webkit-mask-mode: luminance, alpha;
+	mask-mode: luminance, alpha;
+	-webkit-mask-size: 22% 22%, 100% 100%;
+	mask-size: 22% 22%, 100% 100%;
+	-webkit-mask-repeat: space, no-repeat;
+	mask-repeat: space, no-repeat;
+	-webkit-mask-composite: source-in;
+	mask-composite: intersect;
 	animation: deco-spin 14s linear infinite;
 }
 
@@ -1413,10 +1422,17 @@
 	position: absolute;
 	inset: 0;
 	border-radius: var(--radius-full);
-	background-image: var(--deco-image);
-	background-size: 22% 22%;
-	background-repeat: no-repeat;
-	background-position: 50% 0%;
+	background-color: var(--deco-color, #fff);
+	-webkit-mask-image: var(--deco-image);
+	mask-image: var(--deco-image);
+	-webkit-mask-mode: luminance;
+	mask-mode: luminance;
+	-webkit-mask-size: 22% 22%;
+	mask-size: 22% 22%;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: 50% 0%;
+	mask-position: 50% 0%;
 	animation: deco-spin 4.5s linear infinite;
 }
 
@@ -1907,10 +1923,21 @@
 	bottom: -8%;
 	width: 28px;
 	height: 28px;
-	background-image: var(--overlay-image);
-	background-size: contain;
-	background-repeat: no-repeat;
-	background-position: center;
+	/*
+	 * Los PNG de VFX vienen con fondo negro: se usan como MÁSCARA por luminancia, así el
+	 * negro desaparece y el brillo de la partícula toma el color elegido (se puede teñir).
+	 */
+	background-color: var(--ov);
+	-webkit-mask-image: var(--overlay-image);
+	mask-image: var(--overlay-image);
+	-webkit-mask-mode: luminance;
+	mask-mode: luminance;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
 	opacity: 0;
 	animation: po-move 4.6s linear infinite;
 }

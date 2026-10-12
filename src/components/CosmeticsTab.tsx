@@ -172,28 +172,26 @@ export function CosmeticsTab({
 
 				{equipped !== 'none' ? (
 					<div className="cosmetics-controls">
-						{equipped !== 'custom' ? (
-							<div className="cosmetic-colors">
-								<span className="cosmetic-colors-label">Color</span>
-								{COSMETIC_COLORS.map((color) => (
-									<button
-										type="button"
-										key={color}
-										className={`cosmetic-swatch${me.decorationColor === color ? ' is-active' : ''}`}
-										style={{backgroundColor: color}}
-										title={color}
-										onClick={() => onPatch({decorationColor: color})}
-									/>
-								))}
-								<label className="cosmetic-swatch is-input" title="Elegir otro color">
-									<input
-										type="color"
-										value={me.decorationColor ?? '#ff7ab8'}
-										onChange={(event) => onPatch({decorationColor: event.target.value})}
-									/>
-								</label>
-							</div>
-						) : null}
+						<div className="cosmetic-colors">
+							<span className="cosmetic-colors-label">Color</span>
+							{COSMETIC_COLORS.map((color) => (
+								<button
+									type="button"
+									key={color}
+									className={`cosmetic-swatch${me.decorationColor === color ? ' is-active' : ''}`}
+									style={{backgroundColor: color}}
+									title={color}
+									onClick={() => onPatch({decorationColor: color})}
+								/>
+							))}
+							<label className="cosmetic-swatch is-input" title="Elegir otro color">
+								<input
+									type="color"
+									value={me.decorationColor ?? '#ff7ab8'}
+									onChange={(event) => onPatch({decorationColor: event.target.value})}
+								/>
+							</label>
+						</div>
 						<label className="cosmetic-slider">
 							<span>Tamaño del marco</span>
 							<input
@@ -256,28 +254,26 @@ export function CosmeticsTab({
 
 				{equippedOverlay !== 'none' ? (
 					<div className="cosmetics-controls">
-						{equippedOverlay !== 'custom' ? (
-							<div className="cosmetic-colors">
-								<span className="cosmetic-colors-label">Color</span>
-								{COSMETIC_COLORS.map((color) => (
-									<button
-										type="button"
-										key={color}
-										className={`cosmetic-swatch${me.profileEffectColor === color ? ' is-active' : ''}`}
-										style={{backgroundColor: color}}
-										title={color}
-										onClick={() => onPatch({profileEffectColor: color})}
-									/>
-								))}
-								<label className="cosmetic-swatch is-input" title="Elegir otro color">
-									<input
-										type="color"
-										value={me.profileEffectColor ?? '#a78bfa'}
-										onChange={(event) => onPatch({profileEffectColor: event.target.value})}
-									/>
-								</label>
-							</div>
-						) : null}
+						<div className="cosmetic-colors">
+							<span className="cosmetic-colors-label">Color</span>
+							{COSMETIC_COLORS.map((color) => (
+								<button
+									type="button"
+									key={color}
+									className={`cosmetic-swatch${me.profileEffectColor === color ? ' is-active' : ''}`}
+									style={{backgroundColor: color}}
+									title={color}
+									onClick={() => onPatch({profileEffectColor: color})}
+								/>
+							))}
+							<label className="cosmetic-swatch is-input" title="Elegir otro color">
+								<input
+									type="color"
+									value={me.profileEffectColor ?? '#a78bfa'}
+									onChange={(event) => onPatch({profileEffectColor: event.target.value})}
+								/>
+							</label>
+						</div>
 
 						<div className="cosmetic-directions">
 							<span className="cosmetic-colors-label">Dirección</span>
