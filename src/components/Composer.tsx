@@ -1,4 +1,5 @@
 import {type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState} from 'react';
+import {EmojiChooser} from '@/components/EmojiChooser';
 import {GifPicker} from '@/components/GifPicker';
 import {Icon} from '@/components/primitives';
 import {subscribeAttach} from '@/lib/attach';
@@ -6,12 +7,6 @@ import {getDesktopTransport} from '@/lib/desktop';
 import {type GifResult} from '@/lib/giphy';
 import {uid, useStore} from '@/state/store';
 import type {Attachment} from '@/types';
-
-const EMOJIS = [
-	'😀', '😂', '🥲', '😎', '🤔', '😴', '🤯', '🥳',
-	'🔥', '💜', '✨', '🎉', '👍', '👀', '🙌', '🫡',
-	'🐢', '🚀', '🎮', '🍕', '☕', '🌙', '💀', '🤝',
-];
 
 function attachmentKind(file: File): Attachment['kind'] {
 	const name = (file.name || '').toLowerCase();
@@ -190,6 +185,15 @@ export function Composer(): JSX.Element {
 					}}
 				/>
 			) : null}
+			{showEmoji ? (
+				<EmojiChooser
+					onClose={() => setShowEmoji(false)}
+					onSelect={(emoji: string) => {
+						setText((prev) => prev + emoji);
+						textarea.current?.focus();
+					}}
+				/>
+			) : null}
 			{attachments.length > 0 ? (
 				<div className="composer-attachments">
 					{attachments.map((attachment) => (
@@ -227,46 +231,13 @@ export function Composer(): JSX.Element {
 					<button type="button" className="composer-btn is-gif" title="GIF" onClick={() => setShowGifs((value) => !value)}>
 						GIF
 					</button>
-					<div style={{position: 'relative'}}>
-						<button
-							type="button"
-							className="composer-btn"
-							title="Emoji"
-							onClick={() => setShowEmoji((v) => !v)}>							<Icon name="emoji" size={20} />
-						</button>
-						{showEmoji ? (
-							<div
-								style={{
-									position: 'absolute',
-									bottom: '2.5rem',
-									left: 0,
-									zIndex: 10,
-									width: '17rem',
-									padding: '0.5rem',
-									display: 'grid',
-									gridTemplateColumns: 'repeat(8, 1fr)',
-									gap: '0.125rem',
-									backgroundColor: 'var(--background-secondary-alt)',
-									border: '1px solid var(--border-color)',
-									borderRadius: 'var(--radius-lg)',
-									boxShadow: 'var(--shadow-xl)',
-								}}>
-								{EMOJIS.map((emoji) => (
-									<button
-										key={emoji}
-										type="button"
-										style={{fontSize: '1.25rem', padding: '0.25rem', borderRadius: 'var(--radius-sm)'}}
-										onClick={() => {
-											setText((prev) => prev + emoji);
-											setShowEmoji(false);
-											textarea.current?.focus();
-										}}>
-										{emoji}
-									</button>
-								))}
-							</div>
-						) : null}
-					</div>
+					<button
+						type="button"
+						className="composer-btn"
+						title="Emoji"
+						onClick={() => setShowEmoji((value) => !value)}>
+						<Icon name="emoji" size={20} />
+					</button>
 				</div>
 
 				<textarea

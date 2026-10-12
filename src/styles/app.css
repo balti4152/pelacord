@@ -911,6 +911,79 @@
 	letter-spacing: 0.04em;
 }
 
+/* ---------- Selector de emojis ---------- */
+
+.emoji-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-elevated-2);
+}
+
+.emoji-popover {
+	position: absolute;
+	bottom: calc(100% + 0.5rem);
+	left: 1rem;
+	z-index: var(--z-elevated-3);
+	padding: 0.5rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-secondary-alt);
+	border: 1px solid var(--border-color);
+	box-shadow: var(--shadow-xl);
+}
+
+/*
+ * El picker trae su propio tema y redefine las variables en su nodo raíz,
+ * así que hay que pisarlas con más especificidad (3 clases/atributos) y en
+ * los dos juegos (oscuro y claro) para que siga el tema de la app.
+ */
+.emoji-popover .epr-main,
+.emoji-popover [data-epr-part='root'],
+.emoji-popover .epr-main.epr-dark-theme,
+.emoji-popover .epr-main.epr-light-theme {
+	--epr-font-family: var(--font-sans);
+	--epr-bg-color: var(--background-secondary-alt);
+	--epr-dark-bg-color: var(--background-secondary-alt);
+	--epr-category-label-bg-color: var(--background-secondary-alt);
+	--epr-dark-category-label-bg-color: var(--background-secondary-alt);
+	--epr-picker-border-color: var(--border-color);
+	--epr-dark-picker-border-color: var(--border-color);
+	--epr-search-input-bg-color: var(--background-primary);
+	--epr-dark-search-input-bg-color: var(--background-primary);
+	--epr-search-input-bg-color-active: var(--background-primary);
+	--epr-dark-search-input-bg-color-active: var(--background-primary);
+	--epr-text-color: var(--text-primary);
+	--epr-dark-text-color: var(--text-primary);
+	--epr-highlight-color: var(--brand-primary);
+	--epr-dark-highlight-color: var(--brand-primary);
+	--epr-hover-bg-color: var(--background-modifier-hover);
+	--epr-dark-hover-bg-color: var(--background-modifier-hover);
+	--epr-hover-bg-color-reduced-opacity: var(--background-modifier-hover);
+	--epr-dark-hover-bg-color-reduced-opacity: var(--background-modifier-hover);
+	--epr-focus-bg-color: var(--background-modifier-selected);
+	--epr-dark-focus-bg-color: var(--background-modifier-selected);
+	--epr-category-icon-active-color: var(--brand-primary);
+	--epr-dark-category-icon-active-color: var(--brand-primary);
+	--epr-category-icon-inactive-color: var(--text-tertiary);
+	--epr-dark-category-icon-inactive-color: var(--text-tertiary);
+	--epr-emoji-variation-picker-bg-color: var(--background-tertiary);
+	--epr-dark-emoji-variation-picker-bg-color: var(--background-tertiary);
+	--epr-skin-tone-picker-menu-color: var(--background-tertiary);
+	--epr-dark-skin-tone-picker-menu-color: var(--background-tertiary);
+}
+
+/* La librería dibuja su propio borde y radio interior: que no se vean dos marcos. */
+.emoji-popover .epr-main {
+	border: none;
+	border-radius: var(--radius-md);
+}
+
+.emoji-popover .epr-emoji-category-label {
+	font-size: 0.75rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+}
+
 /* ---------- Member list ---------- */
 
 .members {
@@ -1490,6 +1563,70 @@
 	display: flex;
 	align-items: center;
 	gap: 0.25rem;
+}
+
+/* ---------- Controles de sonido de la llamada ---------- */
+
+.call-volume-wrap {
+	position: relative;
+}
+
+.call-volume-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-elevated-2);
+}
+
+.call-volume {
+	position: absolute;
+	top: calc(100% + 0.375rem);
+	right: 0;
+	z-index: var(--z-elevated-3);
+	display: flex;
+	flex-direction: column;
+	gap: 0.625rem;
+	width: 15.5rem;
+	padding: 0.75rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-secondary-alt);
+	border: 1px solid var(--border-color);
+	box-shadow: var(--shadow-xl);
+}
+
+.call-volume-title {
+	font-size: 0.6875rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	color: var(--text-tertiary);
+}
+
+.call-volume-row {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	font-size: 0.8125rem;
+	color: var(--text-primary);
+}
+
+.call-volume-label {
+	width: 5.5rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.call-volume-row input[type='range'] {
+	flex: 1;
+	min-width: 0;
+	accent-color: var(--brand-primary);
+}
+
+.call-volume-value {
+	width: 2.25rem;
+	text-align: right;
+	color: var(--text-tertiary);
+	font-variant-numeric: tabular-nums;
 }
 
 .call-stage-body {
@@ -2185,6 +2322,8 @@
 	padding-bottom: 0.25rem;
 	flex-shrink: 0;
 	min-height: 0;
+	/* Centrados horizontalmente; si no entran, se alinean al inicio (sin cortar). */
+	justify-content: safe center;
 }
 
 .call-strip .pcard {
@@ -2199,8 +2338,8 @@
 }
 
 .call-expanded {
-	display: grid;
-	grid-template-rows: minmax(0, 1fr) auto;
+	display: flex;
+	flex-direction: column;
 	gap: 0.75rem;
 	height: 100%;
 	min-height: 0;
@@ -2208,6 +2347,7 @@
 
 .call-presentation {
 	position: relative;
+	flex: 1 1 auto;
 	display: grid;
 	place-items: center;
 	min-height: 0;
@@ -2218,32 +2358,23 @@
 }
 
 .call-presentation video {
+	display: block;
 	width: 100%;
 	height: 100%;
+	max-width: 100%;
+	max-height: 100%;
 	object-fit: contain;
 }
 
-.call-presentation-bar {
-	position: absolute;
-	left: 0.5rem;
-	right: 0.5rem;
-	bottom: 0.5rem;
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	padding: 0.25rem 0.5rem;
-	border-radius: var(--radius-md);
-	background-color: rgba(0, 0, 0, 0.65);
+/* Que la tira de participantes nunca se coma la presentación ni se salga de la ventana. */
+.call-expanded > .call-strip {
+	flex: 0 1 auto;
+	max-height: 32%;
 }
 
-.call-presentation-name {
-	flex: 1;
-	font-size: 0.875rem;
-	font-weight: 600;
-	color: var(--text-primary);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
+.call-stage:fullscreen {
+	width: 100vw;
+	height: 100vh;
 }
 
 .call-menu-backdrop {

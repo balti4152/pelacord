@@ -4,10 +4,14 @@ import {
 	useLocalScreen,
 	useMeshRemotes,
 	useMeshStates,
+	useOutputVolume,
+	usePeerVolume,
 	useSpeakingIds,
 } from '@/components/RemoteMedia';
 import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
+import {voiceMesh} from '@/lib/media';
 import {openSharePicker} from '@/lib/sharePicker';
+import {setOutputVolume} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 import type {VoiceParticipant} from '@/types';
 
@@ -102,6 +106,50 @@ function useElapsed(joinedAt: number | null): string {
 	return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
 }
 
+function VolumeRow({
+	label,
+	value,
+	onChange,
+}: {
+	label: string;
+	value: number;
+	onChange: (value: number) => void;
+}): JSX.Element {
+	return (
+		<label className="call-volume-row">
+			<span className="call-volume-label">{label}</span>
+			<input
+				type="range"
+				min={0}
+				max={1}
+				step={0.01}
+				value={value}
+				onChange={(event) => onChange(Number(event.target.value))}
+			/>
+			<span className="call-volume-value">{Math.round(value * 100)}%</span>
+		</label>
+	);
+}
+
+/** Controles de sonido: volumen general de salida + el de quien está compartiendo. */
+function VolumeMenu({presenter}: {presenter: {id: string; name: string} | null}): JSX.Element {
+	const output = useOutputVolume();
+	const presenterVolume = usePeerVolume(presenter?.id ?? '');
+	return (
+		<div className="call-volume" onClick={(event) => event.stopPropagation()}>
+			<span className="call-volume-title">Sonido</span>
+			<VolumeRow label="Salida general" value={output} onChange={setOutputVolume} />
+			{presenter ? (
+				<VolumeRow
+					label={presenter.name}
+					value={presenterVolume}
+					onChange={(value) => voiceMesh.setPeerVolume(presenter.id, value)}
+				/>
+			) : null}
+		</div>
+	);
+}
+
 export function CallStage(): JSX.Element | null {
 	const {state, dispatch} = useStore();
 	const {voice} = state;
@@ -113,6 +161,8 @@ export function CallStage(): JSX.Element | null {
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 	const [menu, setMenu] = useState<{id: string; x: number; y: number} | null>(null);
 	const [profile, setProfile] = useState<UserLike | null>(null);
+	const [hideStrip, setHideStrip] = useState(false);
+	const [showVolume, setShowVolume] = useState(false);
 	const stageRef = useRef<HTMLDivElement>(null);
 	if (!voice.channelId) return null;
 
@@ -146,6 +196,8 @@ export function CallStage(): JSX.Element | null {
 
 	const expanded = expandedId ? roster.find((p) => p.id === expandedId) ?? null : null;
 	const menuParticipant = menu ? roster.find((p) => p.id === menu.id) ?? null : null;
+	// El volumen de quien comparte solo se controla si es otra persona.
+	const presenter = expanded && expanded.id !== state.me.id ? {id: expanded.id, name: expanded.name} : null;
 
 	function toggleFullscreen(): void {
 		const element = stageRef.current ?? document.documentElement;
@@ -161,11 +213,35 @@ export function CallStage(): JSX.Element | null {
 				<div className="call-stage-title">
 					<Icon name="speaker" size={18} />
 					<span>{channel?.name ?? 'Voz'}</span>
-					<span className="call-stage-sub">{roster.length} conectados</span>
+					{expanded ? (
+						<span className="call-stage-sub">
+							Compartiendo: {expanded.id === state.me.id ? `${expanded.name} (vos)` : expanded.name}
+						</span>
+					) : (
+						<span className="call-stage-sub">{roster.length} conectados</span>
+					)}
 					<span className="call-stage-timer">{elapsed}</span>
 				</div>
 				<div className="call-stage-header-tools">
-					<IconButton icon="minimize" label="Volver al chat" onClick={() => dispatch({type: 'minimizeVoice'})} />
+					{expanded ? <IconButton icon="grid" label="Volver a la grilla" onClick={() => setExpandedId(null)} /> : null}
+					{expanded ? (
+						<IconButton
+							icon={hideStrip ? 'eyeOff' : 'eye'}
+							label={hideStrip ? 'Mostrar participantes' : 'Ocultar participantes'}
+							active={hideStrip}
+							onClick={() => setHideStrip((value) => !value)}
+						/>
+					) : null}
+					<div className="call-volume-wrap">
+						<IconButton icon="speaker" label="Controles de sonido" active={showVolume} onClick={() => setShowVolume((value) => !value)} />
+						{showVolume ? (
+							<>
+								<div className="call-volume-backdrop" onClick={() => setShowVolume(false)} />
+								<VolumeMenu presenter={presenter} />
+							</>
+						) : null}
+					</div>
+					<IconButton icon="chat" label="Volver al chat" onClick={() => dispatch({type: 'minimizeVoice'})} />
 					<IconButton icon="maximize" label="Pantalla completa" onClick={toggleFullscreen} />
 				</div>
 			</header>
@@ -179,28 +255,24 @@ export function CallStage(): JSX.Element | null {
 							) : (
 								<ColorAvatar name={expanded.name} color={expanded.color} url={expanded.avatarUrl} size={140} />
 							)}
-							<div className="call-presentation-bar">
-								<span className="call-presentation-name">
-									{expanded.id === state.me.id ? `${expanded.name} (vos)` : expanded.name}
-								</span>
-								<IconButton icon="minimize" label="Volver a la grilla" onClick={() => setExpandedId(null)} />
+						</div>
+						{hideStrip ? null : (
+							<div className="call-strip">
+								{roster.map((participant) => (
+									<ParticipantCard
+										key={participant.id}
+										participant={participant}
+										isMe={participant.id === state.me.id}
+										video={videoFor(participant.id)}
+										speaking={speakingIds.includes(participant.id)}
+										state={stateFor(participant.id)}
+										compact
+										onExpand={() => setExpandedId(participant.id)}
+										onMenu={(x, y) => setMenu({id: participant.id, x, y})}
+									/>
+								))}
 							</div>
-						</div>
-						<div className="call-strip">
-							{roster.map((participant) => (
-								<ParticipantCard
-									key={participant.id}
-									participant={participant}
-									isMe={participant.id === state.me.id}
-									video={videoFor(participant.id)}
-									speaking={speakingIds.includes(participant.id)}
-									state={stateFor(participant.id)}
-									compact
-									onExpand={() => setExpandedId(participant.id)}
-									onMenu={(x, y) => setMenu({id: participant.id, x, y})}
-								/>
-							))}
-						</div>
+						)}
 					</div>
 				) : (
 					<div className="call-grid" style={{gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`}}>

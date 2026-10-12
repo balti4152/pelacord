@@ -72,6 +72,34 @@ function formatSpeed(bytesPerSecond: number): string {
 	return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
+/**
+ * Audio: se reproduce en línea, sin descargarlo antes. El servidor P2P del dueño
+ * responde a los pedidos por rango, así que la barra de progreso y "adelantar" funcionan.
+ */
+function AudioAttachment({
+	attachment,
+	url,
+	onFailed,
+}: {
+	attachment: Attachment;
+	url: string;
+	onFailed: () => void;
+}): JSX.Element {
+	return (
+		<div className="attachment-audio">
+			<span className="attachment-audio-icon">
+				<Icon name="music" size={18} />
+			</span>
+			<div className="attachment-audio-body">
+				<span className="attachment-audio-name" title={attachment.name}>
+					{attachment.name}
+				</span>
+				<audio className="attachment-audio-player" src={url} controls preload="metadata" onError={onFailed} />
+			</div>
+		</div>
+	);
+}
+
 function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	const [status, setStatus] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
 	const [progress, setProgress] = useState({received: 0, total: attachment.size});
@@ -161,6 +189,11 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	// Video: se muestra solo la miniatura; al dar play se descarga temporalmente y se reproduce.
 	if (attachment.kind === 'video' && url && !failed) {
 		return <VideoAttachment attachment={attachment} url={url} onFailed={() => setFailed(true)} />;
+	}
+
+	// Audio: reproductor en línea, igual que Discord.
+	if (attachment.kind === 'audio' && url && !failed) {
+		return <AudioAttachment attachment={attachment} url={url} onFailed={() => setFailed(true)} />;
 	}
 
 	// Previsualización de texto plano.
