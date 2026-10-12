@@ -276,9 +276,18 @@ function connectPeer(peerId, host, port) {
 
 // ---------- Ventana ----------
 
+/** Ruta del ícono de la app: en la instalada va a resources, en dev al repo. */
+function appIconPath() {
+	const packaged = process.resourcesPath ? path.join(process.resourcesPath, 'icon.ico') : null;
+	if (packaged && fs.existsSync(packaged)) return packaged;
+	const dev = path.join(__dirname, '..', 'build', 'icon.ico');
+	if (fs.existsSync(dev)) return dev;
+	const png = path.join(__dirname, '..', 'build', 'icons', '32x32.png');
+	return fs.existsSync(png) ? png : null;
+}
+
 function createWindow() {
-	// En la app instalada el ícono sale del .exe; en desarrollo se usa el generado.
-	const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
+	const iconPath = appIconPath();
 	// Si arrancó con la PC (--hidden), se abre directo en la bandeja sin molestar.
 	const startHidden = process.argv.includes('--hidden');
 	mainWindow = new BrowserWindow({
@@ -288,7 +297,7 @@ function createWindow() {
 		show: !startHidden,
 		backgroundColor: '#0b0912',
 		autoHideMenuBar: true,
-		icon: fs.existsSync(iconPath) ? iconPath : undefined,
+		icon: iconPath ?? undefined,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.cjs'),
 			contextIsolation: true,
@@ -301,8 +310,9 @@ function createWindow() {
 		return {action: 'deny'};
 	});
 	// Cerrar (la X) esconde la ventana: la app sigue viva en la bandeja.
+	// Si la bandeja no existe, cerrar cierra DE VERDAD (nunca dejar al usuario encerrado).
 	mainWindow.on('close', (event) => {
-		if (isQuitting) return;
+		if (isQuitting || !tray) return;
 		event.preventDefault();
 		mainWindow.hide();
 	});
@@ -340,10 +350,11 @@ function loginItemEnabled() {
 }
 
 function createTray() {
-	const ico = path.join(__dirname, '..', 'build', 'icon.ico');
-	const png = path.join(__dirname, '..', 'build', 'icons', '32x32.png');
-	const iconPath = fs.existsSync(ico) ? ico : fs.existsSync(png) ? png : null;
-	if (!iconPath) return;
+	const iconPath = appIconPath();
+	if (!iconPath) {
+		console.warn('[pelacord] sin ícono: no se crea la bandeja (cerrar cerrará la app)');
+		return;
+	}
 	try {
 		tray = new Tray(iconPath);
 		tray.setToolTip('Pelacord');
@@ -678,7 +689,7 @@ ipcMain.on('pelacord:notify', (_event, payload) => {
 			title: String(title ?? 'Pelacord'),
 			body: String(body ?? ''),
 			silent: Boolean(silent),
-			icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+			icon: appIconPath() ?? undefined,
 		});
 		notification.on('click', () => {
 			if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -952,10 +963,8 @@ if (!gotLock) {
 	app.quit();
 } else {
 	app.on('second-instance', () => {
-		if (mainWindow) {
-			if (mainWindow.isMinimized()) mainWindow.restore();
-			mainWindow.focus();
-		}
+		// Si ya está abierta (aunque esté oculta en la bandeja), se trae al frente.
+		showWindow();
 	});
 
 	app.whenReady().then(() => {
