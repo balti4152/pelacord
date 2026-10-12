@@ -1,7 +1,9 @@
 import {type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState} from 'react';
+import {GifPicker} from '@/components/GifPicker';
 import {Icon} from '@/components/primitives';
 import {subscribeAttach} from '@/lib/attach';
 import {getDesktopTransport} from '@/lib/desktop';
+import {type GifResult} from '@/lib/giphy';
 import {uid, useStore} from '@/state/store';
 import type {Attachment} from '@/types';
 
@@ -111,6 +113,7 @@ export function Composer(): JSX.Element {
 	const [text, setText] = useState('');
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [showEmoji, setShowEmoji] = useState(false);
+	const [showGifs, setShowGifs] = useState(false);
 	const fileInput = useRef<HTMLInputElement>(null);
 	const textarea = useRef<HTMLTextAreaElement>(null);
 
@@ -170,6 +173,23 @@ export function Composer(): JSX.Element {
 
 	return (
 		<div className="composer">
+			{showGifs ? (
+				<GifPicker
+					onClose={() => setShowGifs(false)}
+					onSelect={(gif: GifResult) => {
+						setShowGifs(false);
+						const attachment: Attachment = {
+							id: uid(),
+							name: gif.title || 'giphy.gif',
+							size: 0,
+							mime: 'image/gif',
+							kind: 'image',
+							url: gif.url,
+						};
+						sendMessage('', [attachment]);
+					}}
+				/>
+			) : null}
 			{attachments.length > 0 ? (
 				<div className="composer-attachments">
 					{attachments.map((attachment) => (
@@ -204,8 +224,8 @@ export function Composer(): JSX.Element {
 						<Icon name="attach" size={20} />
 					</button>
 					<input ref={fileInput} type="file" multiple hidden onChange={handleFiles} />
-					<button type="button" className="composer-btn" title="Regalo" onClick={() => {}}>
-						<Icon name="gift" size={20} />
+					<button type="button" className="composer-btn is-gif" title="GIF" onClick={() => setShowGifs((value) => !value)}>
+						GIF
 					</button>
 					<button type="button" className="composer-btn" title="Sticker" onClick={() => {}}>
 						<Icon name="sticker" size={20} />

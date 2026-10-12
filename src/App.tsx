@@ -32,6 +32,7 @@ export function App(): JSX.Element {
 
 	// Arrastrar y soltar archivos en cualquier parte de la ventana.
 	useEffect(() => {
+		const resetDrag = () => setDragging(false);
 		const onDragOver = (event: DragEvent) => {
 			if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
 				event.preventDefault();
@@ -50,10 +51,14 @@ export function App(): JSX.Element {
 		window.addEventListener('dragover', onDragOver);
 		window.addEventListener('dragleave', onDragLeave);
 		window.addEventListener('drop', onDrop);
+		window.addEventListener('dragend', resetDrag);
+		window.addEventListener('blur', resetDrag);
 		return () => {
 			window.removeEventListener('dragover', onDragOver);
 			window.removeEventListener('dragleave', onDragLeave);
 			window.removeEventListener('drop', onDrop);
+			window.removeEventListener('dragend', resetDrag);
+			window.removeEventListener('blur', resetDrag);
 		};
 	}, []);
 

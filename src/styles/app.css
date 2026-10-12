@@ -833,6 +833,82 @@
 	color: var(--brand-primary);
 }
 
+.composer-btn.is-gif {
+	width: auto;
+	padding: 0 0.375rem;
+	font-size: 0.6875rem;
+	font-weight: 800;
+	letter-spacing: 0.03em;
+}
+
+/* ---------- Selector de GIF (GIPHY) ---------- */
+
+.gif-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: var(--z-elevated-2);
+}
+
+.gif-picker {
+	position: absolute;
+	bottom: 3.5rem;
+	left: 1rem;
+	z-index: var(--z-elevated-3);
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	width: min(26rem, 80vw);
+	height: min(24rem, 60vh);
+	padding: 0.75rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-secondary-alt);
+	border: 1px solid var(--border-color);
+	box-shadow: var(--shadow-xl);
+}
+
+.gif-search {
+	padding: 0.5rem 0.75rem;
+}
+
+.gif-grid {
+	flex: 1;
+	overflow-y: auto;
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.375rem;
+	align-content: start;
+}
+
+.gif-item {
+	display: block;
+	padding: 0;
+	border: none;
+	border-radius: var(--radius-md);
+	overflow: hidden;
+	background-color: var(--background-tertiary);
+	cursor: pointer;
+	aspect-ratio: 1 / 1;
+}
+
+.gif-item:hover {
+	outline: 2px solid var(--brand-primary);
+	outline-offset: -2px;
+}
+
+.gif-item img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+
+.gif-credit {
+	font-size: 0.6875rem;
+	font-weight: 600;
+	color: var(--text-tertiary);
+	text-align: right;
+	letter-spacing: 0.04em;
+}
+
 /* ---------- Member list ---------- */
 
 .members {
