@@ -16,7 +16,10 @@ export interface UserLike {
 	bannerColor?: string;
 	effect?: string;
 	decoration?: string;
+	decorationColor?: string;
+	customParticle?: string;
 	profileEffect?: string;
+	profileEffectColor?: string;
 	presence?: Presence;
 	bio?: string;
 	status?: string;
@@ -117,7 +120,12 @@ export function ProfilePopover({
 		<>
 			<div className="modal-backdrop" onClick={onClose} />
 			<div className="profile-popover" onClick={(event) => event.stopPropagation()}>
-				<ProfileOverlay key={`${user.id}-${user.profileEffect ?? 'none'}`} effect={user.profileEffect} />
+				<ProfileOverlay
+					key={`${user.id}-${user.profileEffect ?? 'none'}`}
+					effect={user.profileEffect}
+					color={user.profileEffectColor}
+					particle={user.customParticle}
+				/>
 				<div className="profile-popover-banner" style={bannerStyle} />
 				<div className="profile-popover-body">
 					<div className="profile-popover-avatar">
@@ -128,6 +136,8 @@ export function ProfilePopover({
 							crop={user.avatarCrop}
 							effect={user.effect}
 							decoration={user.decoration}
+							decorationColor={user.decorationColor}
+							customParticle={user.customParticle}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"

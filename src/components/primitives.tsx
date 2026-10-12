@@ -276,9 +276,14 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 };
 
 /** Decoración del avatar: overlay por encima, con el centro libre para no tapar la cara. */
-function avatarDecoNode(decoration?: string): ReactNode {
+function avatarDecoNode(decoration?: string, color?: string, particle?: string): ReactNode {
 	if (!decoration || decoration === 'none') return null;
-	return <span className="avatar-deco" data-deco={decoration} aria-hidden="true" />;
+	if (decoration === 'custom' && !particle) return null;
+	const style = {
+		'--deco-color': color || undefined,
+		'--deco-image': particle ? `url(${particle})` : undefined,
+	} as CSSProperties;
+	return <span className="avatar-deco" data-deco={decoration} style={style} aria-hidden="true" />;
 }
 
 /** Anillo/brillo decorativo alrededor del avatar (efecto de perfil elegido). */
@@ -308,6 +313,8 @@ export function Avatar({
 	statusBorderColor,
 	effect,
 	decoration,
+	decorationColor,
+	customParticle,
 }: {
 	member: Member;
 	size?: number;
@@ -315,6 +322,8 @@ export function Avatar({
 	statusBorderColor?: string;
 	effect?: string;
 	decoration?: string;
+	decorationColor?: string;
+	customParticle?: string;
 }): JSX.Element {
 	const initial = member.name.trim().charAt(0).toUpperCase() || '?';
 	const primary = avatarSource(member.avatarUrl, member.avatarPoster, size);
@@ -350,7 +359,11 @@ export function Avatar({
 					initial
 				)}
 			</div>
-			{avatarDecoNode(decoration ?? member.decoration)}
+			{avatarDecoNode(
+				decoration ?? member.decoration,
+				decorationColor ?? member.decorationColor,
+				customParticle ?? member.customParticle,
+			)}
 			{showStatus ? (
 				<span
 					className="status-dot"
@@ -370,6 +383,8 @@ export function ColorAvatar({
 	crop,
 	effect,
 	decoration,
+	decorationColor,
+	customParticle,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -381,6 +396,8 @@ export function ColorAvatar({
 	crop?: AvatarCrop;
 	effect?: string;
 	decoration?: string;
+	decorationColor?: string;
+	customParticle?: string;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -411,7 +428,7 @@ export function ColorAvatar({
 					initial
 				)}
 			</div>
-			{avatarDecoNode(decoration)}
+			{avatarDecoNode(decoration, decorationColor, customParticle)}
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
 			) : null}

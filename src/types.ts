@@ -4,7 +4,7 @@ export type ThemeName = 'dark' | 'light' | 'coal';
 export type ProfileEffect = 'none' | 'glow' | 'neon' | 'fire' | 'aurora' | 'sparkle';
 
 /** Decoración del avatar: overlay alrededor, sin tapar la cara. */
-export type AvatarDecoration = 'none' | 'hearts' | 'arcane' | 'cyber';
+export type AvatarDecoration = 'none' | 'hearts' | 'arcane' | 'poison' | 'celestial' | 'custom';
 
 export type Presence = 'online' | 'idle' | 'dnd' | 'offline';
 
@@ -71,8 +71,16 @@ export interface Member {
 	effect?: ProfileEffect;
 	/** Decoración del avatar (anillo/overlay alrededor). */
 	decoration?: AvatarDecoration;
+	/** Color de la decoración (si el estilo lo permite). */
+	decorationColor?: string;
 	/** Overlay animado que se reproduce al abrir el perfil. */
 	profileEffect?: string;
+	/** Color del overlay del perfil. */
+	profileEffectColor?: string;
+	/** Imagen propia (PNG) que cae, para el estilo "Personalizado". */
+	customParticle?: string;
+	/** La imagen propia se sirve por P2P (/file/particle): se reconstruye la URL al arrancar. */
+	customParticleP2P?: boolean;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -120,6 +128,8 @@ export interface VoiceParticipant {
 	avatarUrl?: string;
 	avatarCrop?: AvatarCrop;
 	decoration?: string;
+	decorationColor?: string;
+	customParticle?: string;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

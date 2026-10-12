@@ -412,7 +412,7 @@ ipcMain.handle('pelacord:open-path', async (_event, target) => {
 // mensaje de presencia: así se conserva la animación y el mensaje queda liviano.
 // Los ids "avatar" y "banner" son estables y los archivos se guardan en userData para
 // sobrevivir reinicios (si no, al reiniciar se rompían para los demás).
-const PROFILE_ASSETS = ['avatar', 'banner'];
+const PROFILE_ASSETS = ['avatar', 'banner', 'particle'];
 
 function profileAssetDirectory() {
 	return path.join(app.getPath('userData'), 'profile-assets');
@@ -450,7 +450,7 @@ function registerSavedProfileAssets() {	try {
 		const dir = profileAssetDirectory();
 		let restored = 0;
 		for (const name of fs.readdirSync(dir)) {
-			const match = /^(avatar|banner)\.(gif|webp|png|jpe?g)$/i.exec(name);
+			const match = /^(avatar|banner|particle)\.(gif|webp|png|jpe?g)$/i.exec(name);
 			if (!match) continue;
 			const filePath = path.join(dir, name);
 			sharedFiles.set(match[1], {

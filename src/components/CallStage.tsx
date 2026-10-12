@@ -80,6 +80,8 @@ function ParticipantCard({
 						url={participant.avatarUrl}
 						crop={participant.avatarCrop}
 						decoration={participant.decoration}
+						decorationColor={participant.decorationColor}
+						customParticle={participant.customParticle}
 						size={compact ? 48 : 88}
 					/>
 				)}
@@ -220,7 +222,10 @@ export function CallStage(): JSX.Element | null {
 			bannerColor: member?.bannerColor,
 			effect: member?.effect,
 			decoration: member?.decoration,
+			decorationColor: member?.decorationColor,
+			customParticle: member?.customParticle,
 			profileEffect: member?.profileEffect,
+			profileEffectColor: member?.profileEffectColor,
 			presence: member?.presence,
 			bio: member?.bio,
 			status: member?.status,
@@ -287,6 +292,8 @@ export function CallStage(): JSX.Element | null {
 									url={expanded.avatarUrl}
 									crop={expanded.avatarCrop}
 									decoration={expanded.decoration}
+									decorationColor={expanded.decorationColor}
+									customParticle={expanded.customParticle}
 									size={140}
 								/>
 							)}

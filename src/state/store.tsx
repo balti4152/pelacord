@@ -41,6 +41,8 @@ function toParticipant(member: Member, flags: Partial<VoiceParticipant> = {}): V
 		avatarUrl: member.avatarUrl,
 		avatarCrop: member.avatarCrop,
 		decoration: member.decoration,
+		decorationColor: member.decorationColor,
+		customParticle: member.customParticle,
 		muted: false,
 		deafened: false,
 		sharing: false,
@@ -326,6 +328,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					const url = `http://${endpoint.host}:${endpoint.port}/file/banner`;
 					if (me.bannerUrl !== url) patch.bannerUrl = url;
 				}
+				if (me.customParticleP2P) {
+					const url = `http://${endpoint.host}:${endpoint.port}/file/particle`;
+					if (me.customParticle !== url) patch.customParticle = url;
+				}
 				if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
 			})
 			.catch(() => {});
@@ -345,7 +351,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			bannerColor: me.bannerColor,
 			effect: me.effect,
 			decoration: me.decoration,
+			decorationColor: me.decorationColor,
 			profileEffect: me.profileEffect,
+			profileEffectColor: me.profileEffectColor,
+			customParticle: me.customParticle,
 			channelId: voice.channelId,
 			muted: voice.muted,
 			deafened: voice.deafened,
@@ -388,7 +397,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				bannerColor: peer.bannerColor,
 				effect: peer.effect as Member['effect'],
 				decoration: peer.decoration as Member['decoration'],
+				decorationColor: peer.decorationColor,
 				profileEffect: peer.profileEffect,
+				profileEffectColor: peer.profileEffectColor,
+				customParticle: peer.customParticle,
 				accentColor: 'hsl(242, 70%, 55%)',
 				bio: peer.bio,
 				status: peer.status,
