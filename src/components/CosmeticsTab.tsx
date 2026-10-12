@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {Avatar} from '@/components/primitives';
-import {DECORATIONS, DECORATION_CATEGORIES} from '@/lib/cosmetics';
+import {ProfileOverlay} from '@/components/ProfileOverlay';
+import {DECORATIONS, DECORATION_CATEGORIES, PROFILE_OVERLAYS} from '@/lib/cosmetics';
 import type {Member} from '@/types';
 
 /**
@@ -10,17 +11,20 @@ import type {Member} from '@/types';
 export function CosmeticsTab({
 	me,
 	onEquip,
+	onEquipOverlay,
 	animations,
 	onAnimations,
 }: {
 	me: Member;
 	onEquip: (id: Member['decoration']) => void;
+	onEquipOverlay: (id: string) => void;
 	animations: boolean;
 	onAnimations: (value: boolean) => void;
 }): JSX.Element {
 	const [query, setQuery] = useState('');
 	const [category, setCategory] = useState('Todas');
 	const equipped = me.decoration ?? 'none';
+	const equippedOverlay = me.profileEffect ?? 'none';
 	const search = query.trim().toLowerCase();
 	const list = DECORATIONS.filter((item) => {
 		const inCategory = category === 'Todas' || item.category === category;
@@ -90,6 +94,36 @@ export function CosmeticsTab({
 					);
 				})}
 				{list.length === 0 ? <p className="settings-hint">Sin resultados.</p> : null}
+			</div>
+
+			<div className="settings-section">
+				<span className="settings-label">Overlay del perfil</span>
+				<p className="settings-hint">Se reproduce cuando alguien abre tu perfil (y también cuando lo abrís vos).</p>
+				<div className="cosmetics-grid">
+					{PROFILE_OVERLAYS.map((item) => {
+						const isEquipped = equippedOverlay === item.id;
+						return (
+							<button
+								type="button"
+								key={item.id}
+								className={`cosmetic-card${isEquipped ? ' is-equipped' : ''}`}
+								onClick={() => onEquipOverlay(item.id)}>
+								<span className="cosmetic-card-preview">
+									<span className="cosmetic-overlay-demo">
+										<ProfileOverlay effect={item.id} />
+									</span>
+								</span>
+								<span className="cosmetic-card-name">{item.name}</span>
+								<span className="cosmetic-card-desc">{item.description}</span>
+								<span className="cosmetic-card-foot">
+									<span className={`cosmetic-chip ${isEquipped ? 'is-equipped' : 'is-apply'}`}>
+										{isEquipped ? 'Equipado' : 'Aplicar'}
+									</span>
+								</span>
+							</button>
+						);
+					})}
+				</div>
 			</div>
 
 			<div className="settings-section">

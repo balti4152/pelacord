@@ -235,6 +235,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 							<CosmeticsTab
 								me={me}
 								onEquip={(id) => updateProfile({decoration: id})}
+								onEquipOverlay={(id) => updateProfile({profileEffect: id})}
 								animations={state.settings.cosmeticAnimations}
 								onAnimations={(value) => updateSettings({cosmeticAnimations: value})}
 							/>

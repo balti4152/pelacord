@@ -19,3 +19,20 @@ export const DECORATIONS: DecorationInfo[] = [
 ];
 
 export const DECORATION_CATEGORIES = ['Todas', 'Tierno', 'Mágico', 'Sci-fi', 'Básico'];
+
+export interface OverlayInfo {
+	id: string;
+	name: string;
+	description: string;
+}
+
+/**
+ * Overlays del perfil: se reproducen al abrir el perfil y van a tono con la decoración
+ * del avatar (corazones con Cutie Patootie, energía con Arcane, neón con Cyberpunk).
+ */
+export const PROFILE_OVERLAYS: OverlayInfo[] = [
+	{id: 'none', name: 'Sin overlay', description: 'El perfil se abre limpio.'},
+	{id: 'hearts', name: 'Lluvia de corazones', description: 'Corazones que suben con un brillo rosado.'},
+	{id: 'arcane', name: 'Energía arcana', description: 'Chispas mágicas y un halo violeta.'},
+	{id: 'cyber', name: 'Neón y glitch', description: 'Líneas de escaneo y destellos cian/magenta.'},
+];

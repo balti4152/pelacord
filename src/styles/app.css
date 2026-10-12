@@ -1258,7 +1258,7 @@
 		'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
 	);
 	filter: drop-shadow(0 0 4px rgba(255, 122, 184, 0.9));
-	animation: deco-float 3.6s ease-in-out infinite;
+	animation: deco-float 2.8s ease-in-out infinite;
 }
 
 .avatar-deco[data-deco='hearts']::before {
@@ -1295,7 +1295,7 @@
 	mask: radial-gradient(circle, transparent 0 56%, #000 58% 80%, transparent 82%);
 	-webkit-mask: radial-gradient(circle, transparent 0 56%, #000 58% 80%, transparent 82%);
 	filter: drop-shadow(0 0 6px rgba(124, 92, 255, 0.9));
-	animation: deco-spin 14s linear infinite;
+	animation: deco-spin 8s linear infinite;
 }
 
 .avatar-deco[data-deco='arcane']::before {
@@ -1304,7 +1304,7 @@
 	inset: 4%;
 	border-radius: var(--radius-full);
 	border: 2px dashed rgba(167, 139, 250, 0.7);
-	animation: deco-spin 22s linear infinite reverse;
+	animation: deco-spin 12s linear infinite reverse;
 }
 
 .avatar-deco[data-deco='arcane']::after {
@@ -1313,7 +1313,7 @@
 	inset: 0;
 	border-radius: var(--radius-full);
 	background: radial-gradient(circle at 50% 0%, #f5f3ff 0 3%, rgba(139, 92, 246, 0.9) 3% 4.5%, transparent 5%);
-	animation: deco-spin 5.5s linear infinite;
+	animation: deco-spin 3.5s linear infinite;
 }
 
 /* 3) Cyberpunk Neon — neón cian/magenta y línea de escaneo */
@@ -1336,7 +1336,7 @@
 	mask: radial-gradient(circle, transparent 0 60%, #000 62% 76%, transparent 78%);
 	-webkit-mask: radial-gradient(circle, transparent 0 60%, #000 62% 76%, transparent 78%);
 	filter: drop-shadow(0 0 5px rgba(34, 211, 238, 0.95));
-	animation: deco-spin 7s linear infinite;
+	animation: deco-spin 4.5s linear infinite;
 }
 
 .avatar-deco[data-deco='cyber']::before {
@@ -1348,7 +1348,7 @@
 	border-top-color: #ff2df7;
 	border-bottom-color: #ff2df7;
 	filter: drop-shadow(0 0 4px #ff2df7);
-	animation: deco-spin 3.4s linear infinite reverse;
+	animation: deco-spin 2s linear infinite reverse;
 }
 
 .avatar-deco[data-deco='cyber']::after {
@@ -1360,7 +1360,7 @@
 	background-size: 100% 45%;
 	background-repeat: no-repeat;
 	mix-blend-mode: screen;
-	animation: deco-scan 2.6s linear infinite;
+	animation: deco-scan 1.6s linear infinite;
 }
 
 @keyframes deco-spin {
@@ -1550,6 +1550,136 @@
 	font-size: 0.875rem;
 	color: var(--text-primary);
 	cursor: pointer;
+}
+
+/* ---------- Overlay animado del perfil ---------- */
+
+.profile-overlay {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+	z-index: 3;
+}
+
+.profile-overlay.is-hearts {
+	background: radial-gradient(120% 80% at 50% 0%, rgba(255, 122, 184, 0.22), transparent 70%);
+	animation: po-glow 2.6s ease-in-out infinite;
+}
+
+.profile-overlay.is-arcane {
+	background: radial-gradient(circle at 50% 25%, rgba(124, 92, 255, 0.26), transparent 65%);
+	animation: po-glow 3.2s ease-in-out infinite;
+}
+
+.profile-overlay.is-cyber {
+	background: repeating-linear-gradient(180deg, rgba(34, 211, 238, 0.12) 0 2px, transparent 2px 7px);
+	box-shadow: inset 0 0 18px rgba(255, 45, 247, 0.35);
+	animation: po-scan-move 2.4s linear infinite;
+}
+
+.po-heart {
+	position: absolute;
+	bottom: -10%;
+	width: 22px;
+	height: 22px;
+	background: radial-gradient(circle at 32% 30%, #fff 0 18%, #ff7ab8 60%, #ff4d9d 100%);
+	clip-path: path(
+		'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'
+	);
+	filter: drop-shadow(0 0 6px rgba(255, 122, 184, 0.95));
+	opacity: 0;
+	animation: po-rise 4.2s ease-in infinite;
+}
+
+.po-spark {
+	position: absolute;
+	bottom: -6%;
+	width: 10px;
+	height: 10px;
+	border-radius: var(--radius-full);
+	background: radial-gradient(circle, #f5f3ff 0 30%, rgba(139, 92, 246, 0.9) 60%, transparent 100%);
+	filter: drop-shadow(0 0 6px rgba(139, 92, 246, 0.95));
+	opacity: 0;
+	animation: po-rise 3.6s ease-in infinite;
+}
+
+.po-glitch {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(90deg, transparent 0 46%, rgba(255, 45, 247, 0.35) 50%, transparent 54%);
+	background-size: 100% 100%;
+	animation: po-glitch 1.8s steps(3, end) infinite;
+}
+
+@keyframes po-rise {
+	0% {
+		transform: translateY(0) scale(0.6);
+		opacity: 0;
+	}
+	15% {
+		opacity: 1;
+	}
+	100% {
+		transform: translateY(-18rem) scale(1.05);
+		opacity: 0;
+	}
+}
+
+@keyframes po-glow {
+	0%,
+	100% {
+		opacity: 0.75;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+
+@keyframes po-scan-move {
+	from {
+		background-position: 0 0;
+	}
+	to {
+		background-position: 0 14px;
+	}
+}
+
+@keyframes po-glitch {
+	0% {
+		transform: translateX(-12%);
+		opacity: 0.9;
+	}
+	50% {
+		transform: translateX(14%);
+		opacity: 0.5;
+	}
+	100% {
+		transform: translateX(-12%);
+		opacity: 0.9;
+	}
+}
+
+.cosmetic-overlay-demo {
+	position: relative;
+	display: block;
+	width: 5.5rem;
+	height: 3.5rem;
+	border-radius: var(--radius-md);
+	overflow: hidden;
+	background: linear-gradient(135deg, var(--background-tertiary), var(--background-secondary));
+}
+
+.cosmetic-overlay-demo .profile-overlay {
+	position: absolute;
+	inset: 0;
+}
+
+body.no-cosmetic-anim .profile-overlay,
+body.no-cosmetic-anim .po-heart,
+body.no-cosmetic-anim .po-spark,
+body.no-cosmetic-anim .po-glitch {
+	animation: none !important;
 }
 
 /* Animaciones de cosméticos apagadas (setting o preferencia del sistema) */

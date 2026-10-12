@@ -71,6 +71,8 @@ export interface Member {
 	effect?: ProfileEffect;
 	/** Decoración del avatar (anillo/overlay alrededor). */
 	decoration?: AvatarDecoration;
+	/** Overlay animado que se reproduce al abrir el perfil. */
+	profileEffect?: string;
 	accentColor: string;
 	bio?: string;
 	status?: string;

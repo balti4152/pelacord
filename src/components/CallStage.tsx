@@ -220,6 +220,7 @@ export function CallStage(): JSX.Element | null {
 			bannerColor: member?.bannerColor,
 			effect: member?.effect,
 			decoration: member?.decoration,
+			profileEffect: member?.profileEffect,
 			presence: member?.presence,
 			bio: member?.bio,
 			status: member?.status,

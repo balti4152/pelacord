@@ -11,6 +11,7 @@ export interface PeerPresence {
 	bannerColor?: string;
 	effect?: string;
 	decoration?: string;
+	profileEffect?: string;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
