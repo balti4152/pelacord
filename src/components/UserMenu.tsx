@@ -3,7 +3,7 @@ import {ColorAvatar, Icon} from '@/components/primitives';
 import {ProfileOverlay} from '@/components/ProfileOverlay';
 import {usePeerVolume} from '@/components/RemoteMedia';
 import {voiceMesh} from '@/lib/media';
-import type {AvatarCrop, Presence} from '@/types';
+import type {AvatarCrop, ParticleDirection, Presence} from '@/types';
 
 export interface UserLike {
 	id: string;
@@ -18,8 +18,11 @@ export interface UserLike {
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
+	decoImage?: string;
 	decoSize?: number;
 	customParticle?: string;
+	particleImage?: string;
+	particleDirection?: ParticleDirection;
 	particleSize?: number;
 	particleCount?: number;
 	profileEffect?: string;
@@ -129,6 +132,8 @@ export function ProfilePopover({
 					effect={user.profileEffect}
 					color={user.profileEffectColor}
 					particle={user.customParticle}
+					imageId={user.particleImage}
+					direction={user.particleDirection}
 					size={user.particleSize}
 					count={user.particleCount}
 				/>
@@ -144,6 +149,7 @@ export function ProfilePopover({
 							decoration={user.decoration}
 							decorationColor={user.decorationColor}
 							customDeco={user.customDeco}
+							decoImage={user.decoImage}
 							decoSize={user.decoSize}
 							size={80}
 							status={user.presence}

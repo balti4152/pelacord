@@ -21,6 +21,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					decoration={state.me.decoration}
 					decorationColor={state.me.decorationColor}
 					customDeco={state.me.customDeco}
+					decoImage={state.me.decoImage}
 					decoSize={state.me.decoSize}
 					size={32}
 					status={state.me.presence}
@@ -61,6 +62,7 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 							decoration={participant.decoration}
 							decorationColor={participant.decorationColor}
 							customDeco={participant.customDeco}
+							decoImage={participant.decoImage}
 							decoSize={participant.decoSize}
 							size={22}
 						/>

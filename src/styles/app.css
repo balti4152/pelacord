@@ -1535,7 +1535,7 @@
 	flex-direction: column;
 	align-items: center;
 	gap: 0.375rem;
-	padding: 0.75rem;
+	padding: 0.625rem 0.5rem;
 	border-radius: var(--radius-lg);
 	border: 1px solid var(--border-color);
 	background-color: var(--background-secondary);
@@ -1559,7 +1559,218 @@
 .cosmetic-card-preview {
 	display: grid;
 	place-items: center;
-	height: 5.5rem;
+	height: 4.5rem;
+}
+
+/* ---------- Bloques de cosméticos ---------- */
+
+.cosmetics-block {
+	margin-top: 1rem;
+	padding: 0.875rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-secondary);
+	border: 1px solid var(--border-color);
+}
+
+.cosmetics-block-head {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	margin-bottom: 0.75rem;
+}
+
+.cosmetics-block-title {
+	margin-right: auto;
+	font-size: 0.875rem;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.cosmetics-search {
+	width: 9rem;
+}
+
+.cosmetics-controls {
+	display: flex;
+	flex-direction: column;
+	gap: 0.625rem;
+	margin-top: 0.875rem;
+	padding-top: 0.875rem;
+	border-top: 1px solid var(--border-color);
+}
+
+.cosmetic-colors-label {
+	margin-right: 0.25rem;
+	font-size: 0.8125rem;
+	color: var(--text-tertiary);
+}
+
+.cosmetic-directions {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+}
+
+.cosmetic-direction {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.25rem 0.5rem;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-tertiary);
+	color: var(--text-secondary);
+	font-size: 0.75rem;
+}
+
+.cosmetic-direction:hover {
+	color: var(--text-primary);
+	border-color: var(--brand-primary);
+}
+
+.cosmetic-direction.is-active {
+	background-color: var(--brand-primary);
+	border-color: var(--brand-primary);
+	color: var(--text-on-brand-primary);
+	font-weight: 600;
+}
+
+.cosmetic-direction-icon {
+	font-size: 0.875rem;
+}
+
+.cosmetic-pick {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	margin-top: 0.875rem;
+	padding: 0.625rem;
+	border-radius: var(--radius-md);
+	background-color: var(--background-tertiary);
+}
+
+.cosmetic-pick-preview {
+	display: grid;
+	place-items: center;
+	width: 2.5rem;
+	height: 2.5rem;
+	flex-shrink: 0;
+	border-radius: var(--radius-md);
+	overflow: hidden;
+	background-color: var(--background-primary);
+}
+
+.cosmetic-pick-preview img {
+	width: 100%;
+	height: 100%;
+	object-fit: contain;
+}
+
+.cosmetic-pick-empty {
+	font-weight: 700;
+	color: var(--text-tertiary);
+}
+
+.cosmetic-pick-info {
+	display: flex;
+	flex-direction: column;
+	gap: 0.0625rem;
+	margin-right: auto;
+	min-width: 0;
+}
+
+.cosmetic-pick-title {
+	font-size: 0.8125rem;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.cosmetic-pick-sub {
+	font-size: 0.75rem;
+	color: var(--text-tertiary);
+}
+
+/* ---------- Modal selector de partículas ---------- */
+
+.particle-picker {
+	display: flex;
+	flex-direction: column;
+	width: min(44rem, 94vw);
+	height: min(34rem, 90vh);
+	padding: 1rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-secondary-alt);
+}
+
+.particle-picker-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.particle-picker-toolbar {
+	display: flex;
+	gap: 0.5rem;
+	margin: 0.75rem 0;
+}
+
+.particle-picker-toolbar .input {
+	flex: 1;
+}
+
+.particle-picker-filters {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.375rem;
+	margin-bottom: 0.75rem;
+}
+
+.particle-grid {
+	flex: 1;
+	overflow-y: auto;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr));
+	gap: 0.5rem;
+	align-content: start;
+}
+
+.particle-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.25rem;
+	padding: 0.375rem;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-primary);
+	color: var(--text-tertiary);
+	font-size: 0.6875rem;
+}
+
+.particle-tile:hover {
+	border-color: var(--brand-primary);
+	color: var(--text-primary);
+}
+
+.particle-tile.is-active {
+	border-color: var(--brand-primary);
+	box-shadow: inset 0 0 0 1px var(--brand-primary);
+	color: var(--text-primary);
+}
+
+.particle-tile img {
+	width: 3.5rem;
+	height: 3.5rem;
+	object-fit: contain;
+}
+
+.particle-tile span {
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 .cosmetic-card-name {
@@ -1659,7 +1870,7 @@
 	);
 	filter: drop-shadow(0 0 6px var(--ov));
 	opacity: 0;
-	animation: po-rise 4.2s ease-in infinite;
+	animation: po-move 4.6s linear infinite;
 }
 
 .po-bubble {
@@ -1676,7 +1887,7 @@
 	);
 	box-shadow: 0 0 8px var(--ov);
 	opacity: 0;
-	animation: po-rise 4.6s ease-in infinite;
+	animation: po-move 4.6s linear infinite;
 }
 
 .po-star {
@@ -1688,7 +1899,7 @@
 	clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
 	filter: drop-shadow(0 0 6px var(--ov));
 	opacity: 0;
-	animation: po-rise 3.8s ease-in infinite;
+	animation: po-move 4.6s linear infinite;
 }
 
 .po-image {
@@ -1701,7 +1912,7 @@
 	background-repeat: no-repeat;
 	background-position: center;
 	opacity: 0;
-	animation: po-fall 5.2s linear infinite;
+	animation: po-move 4.6s linear infinite;
 }
 
 .po-spark {
@@ -1713,19 +1924,40 @@
 	background: radial-gradient(circle, #fff 0 30%, var(--ov) 60%, transparent 100%);
 	filter: drop-shadow(0 0 6px var(--ov));
 	opacity: 0;
-	animation: po-rise 3.6s ease-in infinite;
+	animation: po-move 4.6s linear infinite;
 }
 
-@keyframes po-rise {
+/* Dirección del movimiento (el componente pone data-dir). */
+.profile-overlay[data-dir='down'] {
+	--from-y: -0.5rem;
+	--to-y: 19rem;
+}
+
+.profile-overlay[data-dir='up'] {
+	--from-y: 0.5rem;
+	--to-y: -19rem;
+}
+
+.profile-overlay[data-dir='right'] {
+	--from-x: -0.5rem;
+	--to-x: 23rem;
+}
+
+.profile-overlay[data-dir='left'] {
+	--from-x: 0.5rem;
+	--to-x: -23rem;
+}
+
+@keyframes po-move {
 	0% {
-		transform: translateY(0) scale(0.6);
+		transform: translate(var(--from-x, 0), var(--from-y, 0)) rotate(-8deg) scale(0.7);
 		opacity: 0;
 	}
-	15% {
+	12% {
 		opacity: 1;
 	}
 	100% {
-		transform: translateY(-18rem) scale(1.05);
+		transform: translate(var(--to-x, 0), var(--to-y, -19rem)) rotate(10deg) scale(1);
 		opacity: 0;
 	}
 }
@@ -1742,14 +1974,14 @@
 
 @keyframes po-fall {
 	0% {
-		transform: translateY(-10%) rotate(-8deg) scale(0.7);
+		transform: translate(var(--from-x, 0), var(--from-y, 0)) rotate(-8deg) scale(0.7);
 		opacity: 0;
 	}
 	10% {
 		opacity: 1;
 	}
 	100% {
-		transform: translateY(-19rem) rotate(10deg) scale(1);
+		transform: translate(var(--to-x, 0), var(--to-y, -19rem)) rotate(10deg) scale(1);
 		opacity: 0;
 	}
 }

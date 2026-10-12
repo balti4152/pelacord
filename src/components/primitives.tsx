@@ -1,5 +1,6 @@
 import {type CSSProperties, type ReactNode, useEffect, useState} from 'react';
 import type {AvatarCrop, Member, Presence} from '@/types';
+import {particleUrl} from '@/lib/particleImages';
 
 const ICONS: Record<string, ReactNode> = {
 	hash: (
@@ -367,7 +368,7 @@ export function Avatar({
 			{avatarDecoNode(
 				decoration ?? member.decoration,
 				decorationColor ?? member.decorationColor,
-				customDeco ?? member.customDeco,
+				customDeco ?? member.customDeco ?? particleUrl(member.decoImage),
 				decoSize ?? member.decoSize,
 			)}
 			{showStatus ? (
@@ -391,6 +392,7 @@ export function ColorAvatar({
 	decoration,
 	decorationColor,
 	customDeco,
+	decoImage,
 	decoSize,
 	size = 32,
 	status,
@@ -405,6 +407,7 @@ export function ColorAvatar({
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
+	decoImage?: string;
 	decoSize?: number;
 	size?: number;
 	status?: Presence;
@@ -436,7 +439,7 @@ export function ColorAvatar({
 					initial
 				)}
 			</div>
-			{avatarDecoNode(decoration, decorationColor, customDeco, decoSize)}
+			{avatarDecoNode(decoration, decorationColor, customDeco ?? particleUrl(decoImage), decoSize)}
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
 			) : null}

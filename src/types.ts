@@ -6,6 +6,9 @@ export type ProfileEffect = 'none' | 'glow' | 'neon' | 'fire' | 'aurora' | 'spar
 /** Decoración del avatar: overlay alrededor, sin tapar la cara. */
 export type AvatarDecoration = 'none' | 'hearts' | 'arcane' | 'poison' | 'celestial' | 'custom';
 
+/** Dirección del movimiento de las partículas del overlay. */
+export type ParticleDirection = 'down' | 'up' | 'left' | 'right';
+
 export type Presence = 'online' | 'idle' | 'dnd' | 'offline';
 
 export type ChannelType = 'text' | 'voice';
@@ -83,6 +86,8 @@ export interface Member {
 	customParticleP2P?: boolean;
 	/** Imagen propia para el marco del avatar (estilo "Personalizado" de la decoración). */
 	customDeco?: string;
+	/** ID de la partícula incluida usada como marco (carpeta particles/). */
+	decoImage?: string;
 	/** La imagen del marco se sirve por P2P (/file/deco). */
 	customDecoP2P?: boolean;
 	/** Escala de las partículas del overlay (1 = normal). */
@@ -91,6 +96,10 @@ export interface Member {
 	particleCount?: number;
 	/** Escala de las partículas del MARCO del avatar (independiente del overlay). */
 	decoSize?: number;
+	/** ID de la partícula incluida que se usa en el overlay (carpeta particles/). */
+	particleImage?: string;
+	/** Hacia dónde van las partículas del overlay. */
+	particleDirection?: ParticleDirection;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -140,6 +149,7 @@ export interface VoiceParticipant {
 	decoration?: string;
 	decorationColor?: string;
 	customDeco?: string;
+	decoImage?: string;
 	decoSize?: number;
 	muted: boolean;
 	deafened: boolean;
