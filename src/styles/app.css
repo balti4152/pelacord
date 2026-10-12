@@ -1567,17 +1567,17 @@
 
 /* ---------- Controles de sonido de la llamada ---------- */
 
-.call-volume-wrap {
+.call-sound-wrap {
 	position: relative;
 }
 
-.call-volume-backdrop {
+.call-sound-backdrop {
 	position: fixed;
 	inset: 0;
 	z-index: var(--z-elevated-2);
 }
 
-.call-volume {
+.call-sound {
 	position: absolute;
 	top: calc(100% + 0.375rem);
 	right: 0;
@@ -1593,7 +1593,7 @@
 	box-shadow: var(--shadow-xl);
 }
 
-.call-volume-title {
+.call-sound-title {
 	font-size: 0.6875rem;
 	font-weight: 700;
 	text-transform: uppercase;
@@ -1601,29 +1601,33 @@
 	color: var(--text-tertiary);
 }
 
-.call-volume-row {
-	display: flex;
+/*
+ * Grid (no flex) para que el slider no pueda desbordar el panel:
+ * el carril del medio es minmax(0, 1fr), así siempre encaja.
+ */
+.call-sound-row {
+	display: grid;
+	grid-template-columns: 5.5rem minmax(0, 1fr) 2.5rem;
 	align-items: center;
 	gap: 0.5rem;
 	font-size: 0.8125rem;
 	color: var(--text-primary);
 }
 
-.call-volume-label {
-	width: 5.5rem;
+.call-sound-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
 
-.call-volume-row input[type='range'] {
-	flex: 1;
+.call-sound-row input[type='range'] {
+	width: 100%;
 	min-width: 0;
+	margin: 0;
 	accent-color: var(--brand-primary);
 }
 
-.call-volume-value {
-	width: 2.25rem;
+.call-sound-value {
 	text-align: right;
 	color: var(--text-tertiary);
 	font-variant-numeric: tabular-nums;
@@ -1781,17 +1785,6 @@
 	white-space: nowrap;
 }
 
-.call-big-volume {
-	display: flex;
-	align-items: center;
-	gap: 0.375rem;
-	margin-left: auto;
-}
-
-.call-big-volume input {
-	width: 6rem;
-}
-
 .call-dot {
 	width: 0.5rem;
 	height: 0.5rem;
@@ -1861,18 +1854,6 @@
 .call-control.is-danger {
 	background-color: var(--status-dnd);
 	color: white;
-}
-
-.call-volume {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	margin-right: 0.5rem;
-	color: var(--text-tertiary);
-}
-
-.call-volume input {
-	width: 7rem;
 }
 
 /* ---------- Selector de pantalla ---------- */
@@ -2407,14 +2388,18 @@
 }
 
 .call-menu-volume {
-	display: flex;
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr) 2.25rem;
 	align-items: center;
 	gap: 0.5rem;
 	color: var(--text-secondary);
 }
 
 .call-menu-volume input {
-	flex: 1;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	accent-color: var(--brand-primary);
 }
 
 .call-menu-value {

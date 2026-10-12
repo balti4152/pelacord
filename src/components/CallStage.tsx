@@ -116,8 +116,8 @@ function VolumeRow({
 	onChange: (value: number) => void;
 }): JSX.Element {
 	return (
-		<label className="call-volume-row">
-			<span className="call-volume-label">{label}</span>
+		<label className="call-sound-row">
+			<span className="call-sound-label">{label}</span>
 			<input
 				type="range"
 				min={0}
@@ -126,7 +126,7 @@ function VolumeRow({
 				value={value}
 				onChange={(event) => onChange(Number(event.target.value))}
 			/>
-			<span className="call-volume-value">{Math.round(value * 100)}%</span>
+			<span className="call-sound-value">{Math.round(value * 100)}%</span>
 		</label>
 	);
 }
@@ -136,8 +136,8 @@ function VolumeMenu({presenter}: {presenter: {id: string; name: string} | null})
 	const output = useOutputVolume();
 	const presenterVolume = usePeerVolume(presenter?.id ?? '');
 	return (
-		<div className="call-volume" onClick={(event) => event.stopPropagation()}>
-			<span className="call-volume-title">Sonido</span>
+		<div className="call-sound" onClick={(event) => event.stopPropagation()}>
+			<span className="call-sound-title">Sonido</span>
 			<VolumeRow label="Salida general" value={output} onChange={setOutputVolume} />
 			{presenter ? (
 				<VolumeRow
@@ -232,11 +232,11 @@ export function CallStage(): JSX.Element | null {
 							onClick={() => setHideStrip((value) => !value)}
 						/>
 					) : null}
-					<div className="call-volume-wrap">
+					<div className="call-sound-wrap">
 						<IconButton icon="speaker" label="Controles de sonido" active={showVolume} onClick={() => setShowVolume((value) => !value)} />
 						{showVolume ? (
 							<>
-								<div className="call-volume-backdrop" onClick={() => setShowVolume(false)} />
+								<div className="call-sound-backdrop" onClick={() => setShowVolume(false)} />
 								<VolumeMenu presenter={presenter} />
 							</>
 						) : null}
