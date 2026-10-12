@@ -58,6 +58,8 @@ export interface Member {
 	avatarCrop?: AvatarCrop;
 	/** El avatar se sirve por P2P (/file/avatar): hay que reconstruir la URL al arrancar. */
 	avatarP2P?: boolean;
+	/** Cuadro fijo del avatar (primer cuadro de un GIF): para tamaños chicos y como respaldo. */
+	avatarPoster?: string;
 	bannerUrl?: string;
 	bannerColor?: string;
 	/** El banner se sirve por P2P (/file/banner): hay que reconstruir la URL al arrancar. */

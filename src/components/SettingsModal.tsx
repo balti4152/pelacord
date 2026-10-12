@@ -97,10 +97,13 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 				const ok = await transport.shareProfileAsset({kind: 'avatar', name: file.name, mime: file.type || 'image/gif', data});
 				const endpoint = ok ? await transport.getFileEndpoint() : null;
 				if (endpoint?.host && endpoint.port) {
+					// Cuadro fijo (primer cuadro del GIF): para los tamaños chicos y de respaldo.
+					const poster = await fileToDataUrl(file, 96, 0.8).catch(() => undefined);
 					updateProfile({
 						avatarUrl: `http://${endpoint.host}:${endpoint.port}/file/avatar`,
 						avatarCrop: crop,
 						avatarP2P: true,
+						avatarPoster: poster,
 					});
 					return;
 				}
@@ -110,7 +113,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 		}
 
 		const dataUrl = animated ? await fileToRawDataUrl(file) : await fileToDataUrl(file, AVATAR_SOURCE, 0.9);
-		updateProfile({avatarUrl: dataUrl, avatarCrop: crop, avatarP2P: false});
+		updateProfile({avatarUrl: dataUrl, avatarCrop: crop, avatarP2P: false, avatarPoster: undefined});
 	}
 
 	/**
@@ -214,7 +217,9 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								onBannerColor={(v) => updateProfile({bannerColor: v, bannerUrl: undefined, bannerP2P: false})}
 								onAccent={(v) => updateProfile({accentColor: v})}
 								onEffect={(v) => updateProfile({effect: v})}
-								onResetAvatar={() => updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false})}
+								onResetAvatar={() =>
+									updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false, avatarPoster: undefined})
+								}
 								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined, bannerP2P: false})}
 							/>
 						) : null}

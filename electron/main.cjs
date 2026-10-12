@@ -425,8 +425,28 @@ function assetMime(filePath) {
 	return 'image/webp';
 }
 
-function registerSavedProfileAssets() {
+/**
+ * Las versiones anteriores (0.1.5 a 0.1.9) guardaban sólo el avatar en userData/avatar.
+ * Se migra una vez para que al actualizar no se pierda la foto.
+ */
+function migrateLegacyAvatar() {
 	try {
+		const legacy = path.join(app.getPath('userData'), 'avatar');
+		const files = fs.readdirSync(legacy).filter((name) => name.startsWith('avatar.'));
+		if (files.length === 0) return;
+		const dir = profileAssetDirectory();
+		fs.mkdirSync(dir, {recursive: true});
+		const target = path.join(dir, files[0]);
+		if (!fs.existsSync(target)) {
+			fs.copyFileSync(path.join(legacy, files[0]), target);
+			console.log('[pelacord] avatar migrado a la carpeta nueva');
+		}
+	} catch {
+		// nada que migrar
+	}
+}
+
+function registerSavedProfileAssets() {	try {
 		const dir = profileAssetDirectory();
 		let restored = 0;
 		for (const name of fs.readdirSync(dir)) {
@@ -773,6 +793,7 @@ if (!gotLock) {
 		startServer();
 		startDiscovery();
 		startFileServer();
+		migrateLegacyAvatar();
 		registerSavedProfileAssets();
 		registerMediaProtocol();
 		setupUpdater();

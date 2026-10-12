@@ -1,4 +1,4 @@
-import {type CSSProperties, type ReactNode, useState} from 'react';
+import {type CSSProperties, type ReactNode, useEffect, useState} from 'react';
 import type {AvatarCrop, Member, Presence} from '@/types';
 
 const ICONS: Record<string, ReactNode> = {
@@ -281,6 +281,13 @@ function avatarEffectNode(effect?: string): ReactNode {
 	return <span className="avatar-effect" data-effect={effect} aria-hidden="true" />;
 }
 
+/** Elige la imagen del avatar: para tamaños chicos conviene un cuadro fijo (un GIF grande rinde peor). */
+function avatarSource(url: string | undefined, poster: string | undefined, size: number): string | undefined {
+	if (!url) return undefined;
+	if (poster && size <= 48) return poster;
+	return url;
+}
+
 /** Aplica el recorte guardado (zoom + desplazamiento) a la imagen del avatar. */
 function avatarCropStyle(crop?: AvatarCrop): CSSProperties | undefined {
 	if (!crop) return undefined;
@@ -302,8 +309,18 @@ export function Avatar({
 	effect?: string;
 }): JSX.Element {
 	const initial = member.name.trim().charAt(0).toUpperCase() || '?';
-	const [broken, setBroken] = useState(false);
-	const showImage = Boolean(member.avatarUrl) && !broken;
+	const primary = avatarSource(member.avatarUrl, member.avatarPoster, size);
+	const fallback = member.avatarPoster && member.avatarPoster !== primary ? member.avatarPoster : undefined;
+	const [brokenPrimary, setBrokenPrimary] = useState(false);
+	const [brokenFallback, setBrokenFallback] = useState(false);
+	// Si cambia la URL (p. ej. al reconstruirse con el puerto nuevo) se vuelve a intentar:
+	// si no, un error durante el arranque dejaba el avatar sin foto para siempre.
+	useEffect(() => {
+		setBrokenPrimary(false);
+		setBrokenFallback(false);
+	}, [primary]);
+	const src = !brokenPrimary ? primary : !brokenFallback ? fallback : undefined;
+	const showImage = Boolean(src);
 	const style: CSSProperties = {
 		width: size,
 		height: size,
@@ -314,8 +331,13 @@ export function Avatar({
 		<div className="avatar" style={style} title={`${member.name} - ${PRESENCE_LABEL[member.presence]}`}>
 			{avatarEffectNode(effect ?? member.effect)}
 			<div className="avatar-inner" style={innerStyle}>
-				{showImage ? (
-					<img src={member.avatarUrl} alt="" style={avatarCropStyle(member.avatarCrop)} onError={() => setBroken(true)} />
+				{src ? (
+					<img
+						src={src}
+						alt=""
+						style={avatarCropStyle(member.avatarCrop)}
+						onError={() => (brokenPrimary ? setBrokenFallback(true) : setBrokenPrimary(true))}
+					/>
 				) : (
 					initial
 				)}
@@ -335,6 +357,7 @@ export function ColorAvatar({
 	name,
 	color,
 	url,
+	poster,
 	crop,
 	effect,
 	size = 32,
@@ -344,6 +367,7 @@ export function ColorAvatar({
 	name: string;
 	color: string;
 	url?: string;
+	poster?: string;
 	crop?: AvatarCrop;
 	effect?: string;
 	size?: number;
@@ -351,13 +375,30 @@ export function ColorAvatar({
 	statusBorderColor?: string;
 }): JSX.Element {
 	const initial = name.trim().charAt(0).toUpperCase() || '?';
-	const [broken, setBroken] = useState(false);
-	const showImage = Boolean(url) && !broken;
+	const primary = avatarSource(url, poster, size);
+	const fallback = poster && poster !== primary ? poster : undefined;
+	const [brokenPrimary, setBrokenPrimary] = useState(false);
+	const [brokenFallback, setBrokenFallback] = useState(false);
+	// Igual que en Avatar: si cambia la URL, se reintenta.
+	useEffect(() => {
+		setBrokenPrimary(false);
+		setBrokenFallback(false);
+	}, [primary]);
+	const src = !brokenPrimary ? primary : !brokenFallback ? fallback : undefined;
 	return (
 		<div className="avatar" style={{width: size, height: size, fontSize: size * 0.42}}>
 			{avatarEffectNode(effect)}
-			<div className="avatar-inner" style={showImage ? {} : {backgroundColor: color}}>
-				{showImage ? <img src={url} alt="" style={avatarCropStyle(crop)} onError={() => setBroken(true)} /> : initial}
+			<div className="avatar-inner" style={src ? {} : {backgroundColor: color}}>
+				{src ? (
+					<img
+						src={src}
+						alt=""
+						style={avatarCropStyle(crop)}
+						onError={() => (brokenPrimary ? setBrokenFallback(true) : setBrokenPrimary(true))}
+					/>
+				) : (
+					initial
+				)}
 			</div>
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
