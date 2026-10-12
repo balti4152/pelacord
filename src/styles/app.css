@@ -2416,19 +2416,19 @@
 	font-weight: 600;
 }
 
-/* Mención resaltada en los mensajes */
+/* Mención resaltada en los mensajes (usa el color de link, configurable por easy CSS) */
 .mention {
 	padding: 0 0.125rem;
 	border-radius: var(--radius-sm);
-	background-color: color-mix(in srgb, var(--brand-primary) 30%, transparent);
-	color: var(--brand-primary-light);
+	background-color: var(--markup-mention-fill);
+	color: var(--markup-mention-text);
 	font-weight: 600;
 	cursor: pointer;
 }
 
 .mention:hover {
-	background-color: var(--brand-primary);
-	color: var(--text-on-brand-primary);
+	background-color: color-mix(in srgb, var(--markup-mention-text) 38%, transparent);
+	text-decoration: underline;
 }
 
 /* Lista de menciones al escribir @ */
@@ -2465,6 +2465,11 @@
 .mention-picker-item.is-active {
 	background-color: var(--background-modifier-selected);
 	color: var(--text-primary);
+}
+
+.mention-picker-item span {
+	color: var(--markup-mention-text);
+	font-weight: 600;
 }
 
 .mention-picker-hint {
