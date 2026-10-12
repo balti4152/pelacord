@@ -1,3 +1,4 @@
+import {useEffect, useState} from 'react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {formatBuildTime} from '@/lib/build';
@@ -67,10 +68,42 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 
 function UpdateBanner(): JSX.Element | null {
 	const status = useUpdater();
+	const {state} = useStore();
+	// No se reinicia con una llamada en curso: se espera a salir de la llamada.
+	const inCall = state.voice.channelId !== null;
+	const [countdown, setCountdown] = useState<number | null>(null);
+
+	useEffect(() => {
+		if (status.state !== 'downloaded' || inCall) {
+			setCountdown(null);
+			return;
+		}
+		setCountdown(5);
+		const timer = setInterval(() => {
+			setCountdown((value) => {
+				if (value === null) return null;
+				if (value <= 1) {
+					clearInterval(timer);
+					installUpdate();
+					return 0;
+				}
+				return value - 1;
+			});
+		}, 1000);
+		return () => clearInterval(timer);
+	}, [status.state, inCall]);
+
 	if (status.state === 'downloaded') {
+		if (inCall) {
+			return (
+				<div className="update-banner is-ready">
+					<Icon name="download" size={14} /> Actualización lista · se reinicia al salir de la llamada
+				</div>
+			);
+		}
 		return (
 			<button type="button" className="update-banner is-ready" onClick={installUpdate}>
-				<Icon name="download" size={14} /> Actualización lista · Reiniciar
+				<Icon name="download" size={14} /> Reiniciando en {countdown ?? 0}… (click para reiniciar ya)
 			</button>
 		);
 	}

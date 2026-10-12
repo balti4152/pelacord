@@ -579,7 +579,8 @@ ipcMain.handle('pelacord:check-update', async () => {
 ipcMain.handle('pelacord:install-update', () => {
 	if (!autoUpdater) return false;
 	try {
-		autoUpdater.quitAndInstall();
+		// Silencioso y volviendo a abrir la app sola: el usuario no ve el instalador.
+		autoUpdater.quitAndInstall(true, true);
 		return true;
 	} catch {
 		return false;
