@@ -68,6 +68,11 @@ interface DesktopTransport {
 	cancelDownload(id: string): Promise<boolean>;
 	onDownloadProgress(callback: (message: {id: string; name: string; received?: number; total?: number; speed?: number; done?: boolean; cancelled?: boolean; resumable?: boolean; path?: string; error?: string}) => void): () => void;
 	getPathForFile(file: File): string;
+	/** Notificación nativa de Windows (toast). */
+	notify(payload: {title: string; body: string; channelId?: string; silent?: boolean}): void;
+	/** Globito sobre el ícono de la barra de tareas (dataUrl vacío = sacarlo). */
+	setBadge(payload: {dataUrl?: string; description?: string}): void;
+	onNotificationClick(callback: (message: {channelId?: string}) => void): () => void;
 	checkUpdate(): Promise<{ok: boolean; error?: string}>;
 	installUpdate(): Promise<boolean>;
 	onUpdateStatus(callback: (status: {state: string; percent?: number; version?: string; error?: string}) => void): () => void;

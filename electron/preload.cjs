@@ -41,6 +41,13 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 		return () => ipcRenderer.removeListener('pelacord:download-progress', handler);
 	},
 	getPathForFile: (file) => webUtils.getPathForFile(file),
+	notify: (payload) => ipcRenderer.send('pelacord:notify', payload),
+	setBadge: (payload) => ipcRenderer.send('pelacord:badge', payload),
+	onNotificationClick: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:notification-click', handler);
+		return () => ipcRenderer.removeListener('pelacord:notification-click', handler);
+	},
 	checkUpdate: () => ipcRenderer.invoke('pelacord:check-update'),
 	installUpdate: () => ipcRenderer.invoke('pelacord:install-update'),
 	onUpdateStatus: (callback) => {

@@ -250,6 +250,8 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								onFontScale={(v) => updateSettings({fontScale: v})}
 								onMessageDisplay={(v) => updateSettings({messageDisplay: v})}
 								onShowMembers={(v) => updateSettings({showMembers: v})}
+								notifications={state.settings.notifications}
+								onNotifications={(v) => updateSettings({notifications: v})}
 								volume={outputVolume}
 								onVolume={setOutputVolume}
 								onTestSound={() => playSound('join')}
@@ -490,17 +492,34 @@ function AppearanceTab(props: {
 	fontScale: number;
 	messageDisplay: 'cozy' | 'compact';
 	showMembers: boolean;
+	notifications: boolean;
 	volume: number;
 	onTheme: (v: ThemeName) => void;
 	onFontScale: (v: number) => void;
 	onMessageDisplay: (v: 'cozy' | 'compact') => void;
 	onShowMembers: (v: boolean) => void;
+	onNotifications: (v: boolean) => void;
 	onVolume: (v: number) => void;
 	onTestSound: () => void;
 }): JSX.Element {
 	return (
 		<>
 			<h2 className="modal-title">Apariencia</h2>
+			<div className="settings-section">
+				<span className="settings-label">Notificaciones</span>
+				<label className="settings-toggle">
+					<input
+						type="checkbox"
+						checked={props.notifications}
+						onChange={(event) => props.onNotifications(event.target.checked)}
+					/>
+					<span>Avisos de Windows</span>
+				</label>
+				<p className="settings-hint">
+					Muestra una notificación cuando alguien escribe (si no estás mirando ese canal) y el puntito rojo en la
+					barra de tareas.
+				</p>
+			</div>
 			<div className="settings-section">
 				<span className="settings-label">Tema</span>
 				<div className="input-row">

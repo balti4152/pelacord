@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import logo from '@/assets/logo.png';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {formatBuildTime} from '@/lib/build';
@@ -156,6 +157,7 @@ export function ChannelSidebar({
 	return (
 		<div className="sidebar">
 			<button type="button" className="sidebar-header">
+				<img className="sidebar-logo" src={logo} alt="" />
 				<span className="sidebar-header-title">Pelacord</span>
 				<span className="build-time" title="Versión: fecha y hora de compilación">
 					{formatBuildTime()}
@@ -179,12 +181,13 @@ export function ChannelSidebar({
 									<div key={channel.id}>
 										<button
 											type="button"
-											className={`channel${isActive || isConnected ? ' is-active' : ''}`}
+											className={`channel${isActive || isConnected ? ' is-active' : ''}${state.unread[channel.id] ? ' is-unread' : ''}`}
 											onClick={() => openChannel(channel)}>
 											<span className="channel-icon">
 												<Icon name={channel.type === 'text' ? 'hash' : 'speaker'} size={18} />
 											</span>
 											<span className="channel-name">{channel.name}</span>
+											{state.unread[channel.id] ? <span className="channel-unread" title="Mensajes sin leer" /> : null}
 										</button>
 										{channel.type === 'voice' ? <VoiceChannelMembers channelId={channel.id} /> : null}
 									</div>

@@ -143,6 +143,8 @@ export interface Settings {
 	outputDeviceId: string;
 	/** Si está apagado, las decoraciones no se animan (accesibilidad / rendimiento). */
 	cosmeticAnimations: boolean;
+	/** Notificaciones nativas de Windows. */
+	notifications: boolean;
 }
 
 export interface VoiceState {
@@ -184,4 +186,6 @@ export interface AppState {
 	voice: VoiceState;
 	/** Member ids currently connected to each voice channel. */
 	voiceMembers: Record<string, VoiceParticipant[]>;
+	/** Mensajes sin leer por canal (para el puntito rojo y el globito de la barra). */
+	unread: Record<string, number>;
 }

@@ -1,7 +1,7 @@
 {
   "name": "pelacord",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "Pelacord - a peer-to-peer voice, screen share and chat app. UI design derived from Fluxer (AGPL-3.0-or-later).",
@@ -11,6 +11,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node tests/update-loop.test.cjs",
+    "icons": "node scripts/make-icons.mjs",
     "electron": "electron .",
     "desktop": "electron .",
     "dist": "vite build && electron-builder",
@@ -42,7 +43,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": true,
@@ -52,17 +54,22 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "Pelacord"
+      "shortcutName": "Pelacord",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "mac": {
       "target": [
         "dmg"
-      ]
+      ],
+      "icon": "build/icons/512x512.png"
     },
     "linux": {
       "target": [
         "AppImage"
-      ]
+      ],
+      "icon": "build/icons"
     }
   },
   "dependencies": {
@@ -80,6 +87,7 @@
     "@vitejs/plugin-react": "4.3.4",
     "electron": "^44.7.0",
     "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.2",
     "typescript": "5.6.3",
     "vite": "5.4.11"
   }

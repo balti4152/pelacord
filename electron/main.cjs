@@ -7,7 +7,7 @@
 //
 // Nadie edita nada: cada uno abre la app, pone su nombre y ya se ve con los demás.
 
-const {app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, session, shell} = require('electron');
+const {app, BrowserWindow, desktopCapturer, ipcMain, net, protocol, session, shell, Notification, nativeImage} = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const dgram = require('node:dgram');
@@ -274,12 +274,15 @@ function connectPeer(peerId, host, port) {
 // ---------- Ventana ----------
 
 function createWindow() {
+	// En la app instalada el ícono sale del .exe; en desarrollo se usa el generado.
+	const iconPath = path.join(__dirname, '..', 'build', 'icon.ico');
 	mainWindow = new BrowserWindow({
 		width: 1280,
 		height: 800,
 		minWidth: 940,
 		backgroundColor: '#0b0912',
 		autoHideMenuBar: true,
+		icon: fs.existsSync(iconPath) ? iconPath : undefined,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.cjs'),
 			contextIsolation: true,
@@ -537,6 +540,54 @@ function registerMediaProtocol() {
 		return net.fetch(pathToFileURL(filePath).toString());
 	});
 }
+
+// ---------- Notificaciones de Windows y globito en la barra ----------
+
+/**
+ * Windows necesita que el AppUserModelID coincida con el del acceso directo para que las
+ * notificaciones aparezcan con el nombre y el ícono de la app (no como "Electron").
+ */
+app.setAppUserModelId('app.pelacord.desktop');
+
+ipcMain.on('pelacord:notify', (_event, payload) => {
+	const {title, body, channelId, silent} = payload ?? {};
+	if (!title && !body) return;
+	try {
+		const notification = new Notification({
+			title: String(title ?? 'Pelacord'),
+			body: String(body ?? ''),
+			silent: Boolean(silent),
+			icon: path.join(__dirname, '..', 'build', 'icon.ico'),
+		});
+		notification.on('click', () => {
+			if (!mainWindow || mainWindow.isDestroyed()) return;
+			if (mainWindow.isMinimized()) mainWindow.restore();
+			mainWindow.show();
+			mainWindow.focus();
+			sendToRenderer('pelacord:notification-click', {channelId});
+		});
+		notification.show();
+	} catch (error) {
+		console.error('[pelacord] notify error', String(error));
+	}
+});
+
+/** Globito (overlay icon) sobre el ícono de la barra de tareas: el típico puntito rojo. */
+ipcMain.on('pelacord:badge', (_event, payload) => {
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	const {dataUrl, description} = payload ?? {};
+	try {
+		if (!dataUrl) {
+			mainWindow.setOverlayIcon(null, '');
+			return;
+		}
+		const image = nativeImage.createFromDataURL(String(dataUrl));
+		if (image.isEmpty()) return;
+		mainWindow.setOverlayIcon(image, String(description ?? 'Mensajes sin leer'));
+	} catch (error) {
+		console.error('[pelacord] badge error', String(error));
+	}
+});
 
 // ---------- Actualizaciones (electron-updater) ----------
 

@@ -1,4 +1,5 @@
 import {type FormEvent, useState} from 'react';
+import logo from '@/assets/logo.png';
 import {confirmName, getIdentity} from '@/lib/identity';
 import {useStore} from '@/state/store';
 
@@ -17,7 +18,7 @@ export function Onboarding(): JSX.Element {
 	return (
 		<div className="onboarding">
 			<form className="onboarding-card" onSubmit={submit}>
-				<div className="onboarding-logo">P</div>
+				<img className="onboarding-logo-img" src={logo} alt="Pelacord" />
 				<h1>Bienvenido a Pelacord</h1>
 				<input
 					className="input"

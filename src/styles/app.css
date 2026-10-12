@@ -2410,6 +2410,21 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* Puntito de mensajes sin leer en la lista de canales */
+.channel.is-unread {
+	color: var(--text-primary);
+	font-weight: 600;
+}
+
+.channel-unread {
+	margin-left: auto;
+	width: 0.5rem;
+	height: 0.5rem;
+	flex-shrink: 0;
+	border-radius: var(--radius-full);
+	background-color: var(--status-dnd);
+}
+
 /* ---------- Tamaño de partículas (slider) ---------- */
 
 .profile-overlay .po-heart,
@@ -3582,6 +3597,23 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: var(--text-on-brand-primary);
 	font-size: 2rem;
 	font-weight: 700;
+}
+
+/* Logo real de la app (se genera con `npm run icons`). */
+.onboarding-logo-img {
+	display: block;
+	width: 5rem;
+	height: 5rem;
+	margin: 0 auto 0.5rem;
+	border-radius: var(--radius-2xl);
+}
+
+.sidebar-logo {
+	width: 1.75rem;
+	height: 1.75rem;
+	flex-shrink: 0;
+	border-radius: var(--radius-sm);
+	object-fit: contain;
 }
 
 .onboarding-card h1 {

@@ -2,6 +2,7 @@ import {createContext, type Dispatch, type ReactNode, useCallback, useContext, u
 import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
 import {getIdentity, saveIdentity} from '@/lib/identity';
+import {setTaskbarBadge, showNotification, subscribeNotificationClick} from '@/lib/notifications';
 import {deleteMessage as deleteRemoteMessage, postMessage, subscribeMessages, updateMessage} from '@/lib/remote';
 import {playSound} from '@/lib/sounds';
 import type {
@@ -112,9 +113,11 @@ function seedState(): AppState {
 			inputDeviceId: 'default',
 			outputDeviceId: 'default',
 			cosmeticAnimations: true,
+			notifications: true,
 		},
 		voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
 		voiceMembers: remote ? {} : demoVoiceMembers,
+		unread: {},
 	};
 }
 
@@ -122,6 +125,8 @@ type Action =
 	| {type: 'selectChannel'; channelId: string}
 	| {type: 'sendMessage'; channelId: string; content: string; attachments: Attachment[]}
 	| {type: 'setChannelMessages'; channelId: string; messages: Message[]}
+	| {type: 'markRead'; channelId: string}
+	| {type: 'bumpUnread'; channelId: string}
 	| {type: 'editMessage'; channelId: string; messageId: string; content: string}
 	| {type: 'deleteMessage'; channelId: string; messageId: string}
 	| {type: 'setRemoteMembers'; members: Member[]}
@@ -137,8 +142,22 @@ type Action =
 
 function reducer(state: AppState, action: Action): AppState {
 	switch (action.type) {
-		case 'selectChannel':
-			return {...state, activeChannelId: action.channelId, voice: {...state.voice, stageOpen: false}};
+		case 'selectChannel': {
+			const unread = {...state.unread};
+			delete unread[action.channelId];
+			return {...state, activeChannelId: action.channelId, unread, voice: {...state.voice, stageOpen: false}};
+		}
+		case 'markRead': {
+			if (!state.unread[action.channelId]) return state;
+			const unread = {...state.unread};
+			delete unread[action.channelId];
+			return {...state, unread};
+		}
+		case 'bumpUnread':
+			return {
+				...state,
+				unread: {...state.unread, [action.channelId]: (state.unread[action.channelId] ?? 0) + 1},
+			};
 		case 'sendMessage': {
 			const message: Message = {
 				id: uid(),
@@ -236,6 +255,8 @@ function loadState(): AppState {
 		if (typeof parsed.settings.inputDeviceId !== 'string') parsed.settings.inputDeviceId = 'default';
 		if (typeof parsed.settings.outputDeviceId !== 'string') parsed.settings.outputDeviceId = 'default';
 		if (typeof parsed.settings.cosmeticAnimations !== 'boolean') parsed.settings.cosmeticAnimations = true;
+		if (typeof parsed.settings.notifications !== 'boolean') parsed.settings.notifications = true;
+		if (!parsed.unread || typeof parsed.unread !== 'object') parsed.unread = {};
 		return parsed;
 	} catch {
 		return seedState();
@@ -309,6 +330,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const lastSeenRef = useRef<Record<string, number>>({});
 	const sharingRef = useRef<Record<string, boolean>>({});
 	const messageCountRef = useRef<Record<string, number>>({});
+	const activeChannelRef = useRef(state.activeChannelId);
+	activeChannelRef.current = state.activeChannelId;
+	const notificationsRef = useRef(state.settings.notifications);
+	notificationsRef.current = state.settings.notifications;
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
 
 	useEffect(() => {
@@ -533,19 +558,60 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 
 	// Messages come from Firestore. Voice presence deliberately does NOT: it runs peer-to-peer
 	// over ZeroTier through the desktop transport, so it never touches the Firebase quota.
+	//
+	// Se escuchan TODOS los canales de texto: así llegan las notificaciones y el puntito rojo
+	// aunque estés mirando otro canal.
 	useEffect(() => {
 		if (!isRemoteEnabled()) return;
-		const channelId = state.activeChannelId;
-		return subscribeMessages(channelId, (messages) => {
-			const previous = messageCountRef.current[channelId];
-			const last = messages[messages.length - 1];
-			if (previous !== undefined && messages.length > previous && last && last.authorId !== meRef.current.id) {
-				playSound('message');
-			}
-			messageCountRef.current[channelId] = messages.length;
-			dispatch({type: 'setChannelMessages', channelId, messages});
-		});
-	}, [state.activeChannelId]);
+		const textChannels = CHANNELS.filter((channel) => channel.type === 'text');
+		const unsubscribe = textChannels.map((channel) =>
+			subscribeMessages(channel.id, (messages) => {
+				const previous = messageCountRef.current[channel.id];
+				const last = messages[messages.length - 1];
+				const isNew =
+					previous !== undefined && messages.length > previous && Boolean(last) && last.authorId !== meRef.current.id;
+				if (isNew && last) {
+					playSound('message');
+					const watching = channel.id === activeChannelRef.current && document.hasFocus();
+					if (!watching) {
+						dispatch({type: 'bumpUnread', channelId: channel.id});
+						if (notificationsRef.current) {
+							const attachment = last.attachments?.[0];
+							const body = last.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
+							showNotification({
+								title: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
+								body: body.slice(0, 180),
+								channelId: channel.id,
+							});
+						}
+					}
+				}
+				messageCountRef.current[channel.id] = messages.length;
+				dispatch({type: 'setChannelMessages', channelId: channel.id, messages});
+			}),
+		);
+		return () => {
+			for (const off of unsubscribe) off();
+		};
+	}, []);
+
+	// El globito de la barra de tareas sigue el total de mensajes sin leer.
+	useEffect(() => {
+		const total = Object.values(state.unread).reduce((sum, value) => sum + value, 0);
+		setTaskbarBadge(total);
+	}, [state.unread]);
+
+	// Al volver a la ventana, el canal que estás mirando queda como leído.
+	useEffect(() => {
+		const onFocus = () => dispatch({type: 'markRead', channelId: activeChannelRef.current});
+		window.addEventListener('focus', onFocus);
+		return () => window.removeEventListener('focus', onFocus);
+	}, []);
+
+	// Click en una notificación de Windows: trae la app al frente en ese canal.
+	useEffect(() => subscribeNotificationClick((channelId) => {
+		if (channelId) dispatch({type: 'selectChannel', channelId});
+	}), []);
 
 	const sendMessage = useCallback(
 		(content: string, attachments: Attachment[]) => {
