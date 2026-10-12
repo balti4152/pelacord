@@ -94,7 +94,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 		if (animated && transport) {
 			try {
 				const data = await file.arrayBuffer();
-				const ok = await transport.shareAvatar({name: file.name, mime: file.type || 'image/gif', data});
+				const ok = await transport.shareProfileAsset({kind: 'avatar', name: file.name, mime: file.type || 'image/gif', data});
 				const endpoint = ok ? await transport.getFileEndpoint() : null;
 				if (endpoint?.host && endpoint.port) {
 					updateProfile({
@@ -113,12 +113,35 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 		updateProfile({avatarUrl: dataUrl, avatarCrop: crop, avatarP2P: false});
 	}
 
+	/**
+	 * Banner: si es un GIF animado se sirve por P2P (así no se pierde la animación ni se
+	 * mandan varios MB en cada mensaje de presencia); si no, se reduce a un data URL.
+	 */
 	async function handleBanner(event: ChangeEvent<HTMLInputElement>): Promise<void> {
 		const file = event.target.files?.[0];
 		event.target.value = '';
 		if (!file) return;
-		const dataUrl = await fileToDataUrl(file, BANNER_MAX, 0.8);
-		updateProfile({bannerUrl: dataUrl, bannerColor: undefined});
+		const transport = getDesktopTransport();
+		const animated = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+		if (animated && transport) {
+			try {
+				const data = await file.arrayBuffer();
+				const ok = await transport.shareProfileAsset({kind: 'banner', name: file.name, mime: file.type || 'image/gif', data});
+				const endpoint = ok ? await transport.getFileEndpoint() : null;
+				if (endpoint?.host && endpoint.port) {
+					updateProfile({
+						bannerUrl: `http://${endpoint.host}:${endpoint.port}/file/banner`,
+						bannerColor: undefined,
+						bannerP2P: true,
+					});
+					return;
+				}
+			} catch {
+				// cae al data URL
+			}
+		}
+		const dataUrl = animated ? await fileToRawDataUrl(file) : await fileToDataUrl(file, BANNER_MAX, 0.8);
+		updateProfile({bannerUrl: dataUrl, bannerColor: undefined, bannerP2P: false});
 	}
 
 	const bannerStyle = me.bannerUrl
@@ -188,11 +211,11 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								bannerStyle={bannerStyle}
 								onAvatar={handleAvatar}
 								onBanner={handleBanner}
-								onBannerColor={(v) => updateProfile({bannerColor: v, bannerUrl: undefined})}
+								onBannerColor={(v) => updateProfile({bannerColor: v, bannerUrl: undefined, bannerP2P: false})}
 								onAccent={(v) => updateProfile({accentColor: v})}
 								onEffect={(v) => updateProfile({effect: v})}
 								onResetAvatar={() => updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false})}
-								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined})}
+								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined, bannerP2P: false})}
 							/>
 						) : null}
 

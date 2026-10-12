@@ -1237,6 +1237,8 @@
 	border: 3px solid var(--background-secondary);
 	background-color: var(--status-offline);
 	box-sizing: content-box;
+	/* Por encima de la imagen del avatar (que tiene z-index 1) y del efecto. */
+	z-index: 2;
 }
 
 .status-dot[data-status='online'] {

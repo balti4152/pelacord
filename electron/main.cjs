@@ -406,66 +406,77 @@ ipcMain.handle('pelacord:open-path', async (_event, target) => {
 	if (typeof target === 'string') await shell.openPath(target);
 });
 
-// ---------- Avatar propio (persistente) ----------
+// ---------- Assets propios del perfil (avatar y banner, persistentes) ----------
 //
-// El avatar animado (GIF) se sirve desde el servidor P2P en vez de viajar como data URL en
-// cada mensaje de presencia: así se conserva la animación y el mensaje queda liviano.
-// El id "avatar" es estable y el archivo se guarda en userData para sobrevivir reinicios.
-const AVATAR_ID = 'avatar';
+// Un GIF animado se sirve desde el servidor P2P en vez de viajar como data URL en cada
+// mensaje de presencia: así se conserva la animación y el mensaje queda liviano.
+// Los ids "avatar" y "banner" son estables y los archivos se guardan en userData para
+// sobrevivir reinicios (si no, al reiniciar se rompían para los demás).
+const PROFILE_ASSETS = ['avatar', 'banner'];
 
-function avatarDirectory() {
-	return path.join(app.getPath('userData'), 'avatar');
+function profileAssetDirectory() {
+	return path.join(app.getPath('userData'), 'profile-assets');
 }
 
-function avatarMimeFor(filePath) {
+function assetMime(filePath) {
 	if (/\.gif$/i.test(filePath)) return 'image/gif';
 	if (/\.png$/i.test(filePath)) return 'image/png';
+	if (/\.jpe?g$/i.test(filePath)) return 'image/jpeg';
 	return 'image/webp';
 }
 
-function registerSavedAvatar() {
+function registerSavedProfileAssets() {
 	try {
-		const dir = avatarDirectory();
-		const files = fs.readdirSync(dir).filter((name) => name.startsWith('avatar.'));
-		if (files.length === 0) return;
-		const filePath = path.join(dir, files[0]);
-		sharedFiles.set(AVATAR_ID, {
-			path: filePath,
-			name: path.basename(filePath),
-			mime: avatarMimeFor(filePath),
-			size: fs.statSync(filePath).size,
-		});
-		console.log('[pelacord] avatar restaurado');
+		const dir = profileAssetDirectory();
+		let restored = 0;
+		for (const name of fs.readdirSync(dir)) {
+			const match = /^(avatar|banner)\.(gif|webp|png|jpe?g)$/i.exec(name);
+			if (!match) continue;
+			const filePath = path.join(dir, name);
+			sharedFiles.set(match[1], {
+				path: filePath,
+				name,
+				mime: assetMime(name),
+				size: fs.statSync(filePath).size,
+			});
+			restored += 1;
+		}
+		if (restored > 0) console.log(`[pelacord] assets de perfil restaurados: ${restored}`);
 	} catch {
-		// sin avatar guardado: no pasa nada
+		// sin assets guardados: no pasa nada
 	}
 }
 
-ipcMain.handle('pelacord:share-avatar', (_event, payload) => {
-	const {name, mime, data} = payload ?? {};
-	if (!data) return false;
+ipcMain.handle('pelacord:share-profile-asset', (_event, payload) => {
+	const {kind, name, mime, data} = payload ?? {};
+	if (!PROFILE_ASSETS.includes(kind) || !data) return false;
 	try {
-		const dir = avatarDirectory();
+		const dir = profileAssetDirectory();
 		fs.mkdirSync(dir, {recursive: true});
+		// Se borra la versión anterior de ese asset (puede tener otra extensión).
 		for (const existing of fs.readdirSync(dir)) {
-			try {
-				fs.unlinkSync(path.join(dir, existing));
-			} catch {
-				// se ignora
+			if (existing.startsWith(`${kind}.`)) {
+				try {
+					fs.unlinkSync(path.join(dir, existing));
+				} catch {
+					// se ignora
+				}
 			}
 		}
 		const animated = mime === 'image/gif' || /\.gif$/i.test(String(name ?? ''));
-		const filePath = path.join(dir, animated ? 'avatar.gif' : 'avatar.webp');
+		const ext = animated ? 'gif' : 'webp';
+		const fileName = `${kind}.${ext}`;
+		const filePath = path.join(dir, fileName);
 		fs.writeFileSync(filePath, Buffer.from(data));
-		sharedFiles.set(AVATAR_ID, {
+		sharedFiles.set(kind, {
 			path: filePath,
-			name: path.basename(filePath),
+			name: fileName,
 			mime: animated ? 'image/gif' : mime || 'image/webp',
 			size: fs.statSync(filePath).size,
 		});
 		return true;
 	} catch (error) {
-		console.error('[pelacord] share-avatar error', String(error));
+		console.error('[pelacord] share-profile-asset error', String(error));
 		return false;
 	}
 });
@@ -762,7 +773,7 @@ if (!gotLock) {
 		startServer();
 		startDiscovery();
 		startFileServer();
-		registerSavedAvatar();
+		registerSavedProfileAssets();
 		registerMediaProtocol();
 		setupUpdater();
 		createWindow();

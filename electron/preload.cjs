@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
 	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),
 	shareAvatar: (payload) => ipcRenderer.invoke('pelacord:share-avatar', payload),
+	shareProfileAsset: (payload) => ipcRenderer.invoke('pelacord:share-profile-asset', payload),
 	cacheMedia: (payload) => ipcRenderer.invoke('pelacord:cache-media', payload),
 	openPath: (target) => ipcRenderer.invoke('pelacord:open-path', target),
 	downloadFile: (payload) => ipcRenderer.invoke('pelacord:download-file', payload),

@@ -308,12 +308,20 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			.getFileEndpoint()
 			.then((endpoint) => {
 				fileEndpointRef.current = endpoint;
-				// Un avatar propio servido por P2P cambia de puerto en cada arranque: se reconstruye la URL.
+				if (!endpoint.host || !endpoint.port) return;
+				// Los assets propios servidos por P2P cambian de puerto en cada arranque:
+				// se reconstruyen las URLs para que sigan funcionando.
 				const me = meRef.current;
-				if (me.avatarP2P && endpoint.host && endpoint.port) {
+				const patch: Partial<Member> = {};
+				if (me.avatarP2P) {
 					const url = `http://${endpoint.host}:${endpoint.port}/file/avatar`;
-					if (me.avatarUrl !== url) dispatch({type: 'updateProfile', patch: {avatarUrl: url}});
+					if (me.avatarUrl !== url) patch.avatarUrl = url;
 				}
+				if (me.bannerP2P) {
+					const url = `http://${endpoint.host}:${endpoint.port}/file/banner`;
+					if (me.bannerUrl !== url) patch.bannerUrl = url;
+				}
+				if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
 			})
 			.catch(() => {});
 	}, []);

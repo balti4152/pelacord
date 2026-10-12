@@ -60,6 +60,8 @@ export interface Member {
 	avatarP2P?: boolean;
 	bannerUrl?: string;
 	bannerColor?: string;
+	/** El banner se sirve por P2P (/file/banner): hay que reconstruir la URL al arrancar. */
+	bannerP2P?: boolean;
 	/** Efecto decorativo alrededor del avatar. */
 	effect?: ProfileEffect;
 	accentColor: string;

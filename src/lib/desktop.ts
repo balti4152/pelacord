@@ -40,8 +40,13 @@ interface DesktopTransport {
 	getFileEndpoint(): Promise<{host: string; port: number}>;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
-	/** Guarda el avatar propio (incluye GIF animado) y lo sirve en /file/avatar. */
-	shareAvatar(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<boolean>;
+	/** Guarda un asset del perfil (avatar o banner, incluido GIF animado) y lo sirve por P2P. */
+	shareProfileAsset(payload: {
+		kind: 'avatar' | 'banner';
+		name: string;
+		mime: string;
+		data: ArrayBuffer;
+	}): Promise<boolean>;
 	cacheMedia(payload: {url: string; name: string}): Promise<{ok: boolean; name?: string; error?: string}>;
 	openPath(target: string): Promise<void>;
 	downloadFile(payload: {url: string; name: string; size?: number}): Promise<{ok: boolean; path?: string; error?: string; cancelled?: boolean; resumable?: boolean}>;
