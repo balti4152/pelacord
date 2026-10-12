@@ -42,7 +42,8 @@ function toParticipant(member: Member, flags: Partial<VoiceParticipant> = {}): V
 		avatarCrop: member.avatarCrop,
 		decoration: member.decoration,
 		decorationColor: member.decorationColor,
-		customParticle: member.customParticle,
+		customDeco: member.customDeco,
+		particleSize: member.particleSize,
 		muted: false,
 		deafened: false,
 		sharing: false,
@@ -332,6 +333,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					const url = `http://${endpoint.host}:${endpoint.port}/file/particle`;
 					if (me.customParticle !== url) patch.customParticle = url;
 				}
+				if (me.customDecoP2P) {
+					const url = `http://${endpoint.host}:${endpoint.port}/file/deco`;
+					if (me.customDeco !== url) patch.customDeco = url;
+				}
 				if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
 			})
 			.catch(() => {});
@@ -355,6 +360,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			profileEffect: me.profileEffect,
 			profileEffectColor: me.profileEffectColor,
 			customParticle: me.customParticle,
+			customDeco: me.customDeco,
+			particleSize: me.particleSize,
+			particleCount: me.particleCount,
 			channelId: voice.channelId,
 			muted: voice.muted,
 			deafened: voice.deafened,
@@ -401,6 +409,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				profileEffect: peer.profileEffect,
 				profileEffectColor: peer.profileEffectColor,
 				customParticle: peer.customParticle,
+				customDeco: peer.customDeco,
+				particleSize: peer.particleSize,
+				particleCount: peer.particleCount,
 				accentColor: 'hsl(242, 70%, 55%)',
 				bio: peer.bio,
 				status: peer.status,

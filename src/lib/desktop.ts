@@ -15,6 +15,9 @@ export interface PeerPresence {
 	profileEffect?: string;
 	profileEffectColor?: string;
 	customParticle?: string;
+	customDeco?: string;
+	particleSize?: number;
+	particleCount?: number;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -47,7 +50,7 @@ interface DesktopTransport {
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
 	/** Guarda un asset del perfil (avatar o banner, incluido GIF animado) y lo sirve por P2P. */
 	shareProfileAsset(payload: {
-		kind: 'avatar' | 'banner' | 'particle';
+		kind: 'avatar' | 'banner' | 'particle' | 'deco';
 		name: string;
 		mime: string;
 		data: ArrayBuffer;
@@ -96,7 +99,8 @@ export function peerToParticipant(presence: PeerPresence): VoiceParticipant {
 		avatarCrop: presence.avatarCrop,
 		decoration: presence.decoration,
 		decorationColor: presence.decorationColor,
-		customParticle: presence.customParticle,
+		customDeco: presence.customDeco,
+		particleSize: presence.particleSize,
 		muted: presence.muted,
 		deafened: presence.deafened,
 		sharing: presence.sharing,

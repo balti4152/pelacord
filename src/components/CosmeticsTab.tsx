@@ -7,8 +7,8 @@ import {fileToDataUrl} from '@/lib/image';
 import type {Member} from '@/types';
 
 /**
- * Galería de cosméticos: se elige decoración y overlay, se personaliza el color y se ve
- * al instante cómo queda en el avatar grande y en los tamaños chicos.
+ * Galería de cosméticos: decoración y overlay, con color, tamaño y cantidad ajustables.
+ * La imagen del marco y la que cae son independientes.
  */
 export function CosmeticsTab({
 	me,
@@ -30,26 +30,74 @@ export function CosmeticsTab({
 		const inCategory = category === 'Todas' || item.category === category;
 		return inCategory && `${item.name} ${item.description} ${item.category}`.toLowerCase().includes(search);
 	});
-	const needsImage = equipped === 'custom' || equippedOverlay === 'custom';
 
-	/** La imagen propia se guarda chica (96px) y, si se puede, se sirve por P2P. */
-	async function uploadParticle(file: File): Promise<void> {
+	/** Sube una imagen propia (96px) y la sirve por P2P si se puede. */
+	async function uploadImage(kind: 'deco' | 'particle', file: File): Promise<void> {
 		const dataUrl = await fileToDataUrl(file, 96, 0.9);
 		const transport = getDesktopTransport();
 		if (transport) {
 			try {
 				const data = await (await fetch(dataUrl)).arrayBuffer();
-				const ok = await transport.shareProfileAsset({kind: 'particle', name: 'particle.webp', mime: 'image/webp', data});
+				const ok = await transport.shareProfileAsset({kind, name: `${kind}.webp`, mime: 'image/webp', data});
 				const endpoint = ok ? await transport.getFileEndpoint() : null;
 				if (endpoint?.host && endpoint.port) {
-					onPatch({customParticle: `http://${endpoint.host}:${endpoint.port}/file/particle`, customParticleP2P: true});
+					const url = `http://${endpoint.host}:${endpoint.port}/file/${kind}`;
+					onPatch(kind === 'deco' ? {customDeco: url, customDecoP2P: true} : {customParticle: url, customParticleP2P: true});
 					return;
 				}
 			} catch {
 				// cae al data URL
 			}
 		}
-		onPatch({customParticle: dataUrl, customParticleP2P: false});
+		onPatch(kind === 'deco' ? {customDeco: dataUrl, customDecoP2P: false} : {customParticle: dataUrl, customParticleP2P: false});
+	}
+
+	function UploadRow({
+		kind,
+		label,
+		hint,
+		current,
+	}: {
+		kind: 'deco' | 'particle';
+		label: string;
+		hint: string;
+		current?: string;
+	}): JSX.Element {
+		return (
+			<div className="settings-section">
+				<span className="settings-label">{label}</span>
+				<div className="input-row">
+					<label className="button primary" style={{cursor: 'pointer'}}>
+						{current ? 'Cambiar imagen' : 'Subir PNG'}
+						<input
+							type="file"
+							accept="image/png,image/webp,image/*"
+							hidden
+							onChange={(event) => {
+								const file = event.target.files?.[0];
+								event.target.value = '';
+								if (file) void uploadImage(kind, file);
+							}}
+						/>
+					</label>
+					{current ? (
+						<button
+							type="button"
+							className="button secondary"
+							onClick={() =>
+								onPatch(
+									kind === 'deco'
+										? {customDeco: undefined, customDecoP2P: false}
+										: {customParticle: undefined, customParticleP2P: false},
+								)
+							}>
+							Quitar
+						</button>
+					) : null}
+				</div>
+				<p className="settings-hint">{hint}</p>
+			</div>
+		);
 	}
 
 	return (
@@ -122,6 +170,15 @@ export function CosmeticsTab({
 				{list.length === 0 ? <p className="settings-hint">Sin resultados.</p> : null}
 			</div>
 
+			{equipped === 'custom' ? (
+				<UploadRow
+					kind="deco"
+					label="Imagen del marco"
+					hint="Tu PNG forma un anillo alrededor del avatar. Se ve mejor chico y con fondo transparente."
+					current={me.customDeco}
+				/>
+			) : null}
+
 			{equipped !== 'none' && equipped !== 'custom' ? (
 				<div className="settings-section">
 					<span className="settings-label">Color de la decoración</span>
@@ -169,6 +226,8 @@ export function CosmeticsTab({
 											effect={item.id}
 											color={me.profileEffectColor ?? item.color}
 											particle={me.customParticle}
+											size={me.particleSize}
+											count={me.particleCount}
 										/>
 									</span>
 								</span>
@@ -184,6 +243,15 @@ export function CosmeticsTab({
 					})}
 				</div>
 			</div>
+
+			{equippedOverlay === 'custom' ? (
+				<UploadRow
+					kind="particle"
+					label="Imagen que cae"
+					hint="Tu PNG cae sobre el perfil, tipo nieve. Es independiente de la imagen del marco."
+					current={me.customParticle}
+				/>
+			) : null}
 
 			{equippedOverlay !== 'none' && equippedOverlay !== 'custom' ? (
 				<div className="settings-section">
@@ -213,34 +281,35 @@ export function CosmeticsTab({
 				</div>
 			) : null}
 
-			{needsImage ? (
+			{equipped !== 'none' || equippedOverlay !== 'none' ? (
 				<div className="settings-section">
-					<span className="settings-label">Tu imagen</span>
-					<div className="input-row">
-						<label className="button primary" style={{cursor: 'pointer'}}>
-							{me.customParticle ? 'Cambiar imagen' : 'Subir PNG'}
-							<input
-								type="file"
-								accept="image/png,image/webp,image/*"
-								hidden
-								onChange={(event) => {
-									const file = event.target.files?.[0];
-									event.target.value = '';
-									if (file) void uploadParticle(file);
-								}}
-							/>
-						</label>
-						{me.customParticle ? (
-							<button
-								type="button"
-								className="button secondary"
-								onClick={() => onPatch({customParticle: undefined, customParticleP2P: false})}>
-								Quitar
-							</button>
-						) : null}
-					</div>
+					<span className="settings-label">Partículas</span>
+					<label className="cosmetic-slider">
+						<span>Tamaño</span>
+						<input
+							type="range"
+							min={0.5}
+							max={3}
+							step={0.1}
+							value={me.particleSize ?? 1}
+							onChange={(event) => onPatch({particleSize: Number(event.target.value)})}
+						/>
+						<span className="cosmetic-slider-value">{(me.particleSize ?? 1).toFixed(1)}×</span>
+					</label>
+					<label className="cosmetic-slider">
+						<span>Cantidad</span>
+						<input
+							type="range"
+							min={1}
+							max={20}
+							step={1}
+							value={me.particleCount ?? 5}
+							onChange={(event) => onPatch({particleCount: Number(event.target.value)})}
+						/>
+						<span className="cosmetic-slider-value">{me.particleCount ?? 5}</span>
+					</label>
 					<p className="settings-hint">
-						Se ve mejor un PNG chico y con fondo transparente. Cae alrededor de tu avatar y sobre tu perfil.
+						La cantidad aplica al overlay del perfil. Las partículas salen en posiciones y tiempos al azar.
 					</p>
 				</div>
 			) : null}

@@ -77,10 +77,18 @@ export interface Member {
 	profileEffect?: string;
 	/** Color del overlay del perfil. */
 	profileEffectColor?: string;
-	/** Imagen propia (PNG) que cae, para el estilo "Personalizado". */
+	/** Imagen propia (PNG) que cae, para el overlay "Mi imagen cayendo". */
 	customParticle?: string;
 	/** La imagen propia se sirve por P2P (/file/particle): se reconstruye la URL al arrancar. */
 	customParticleP2P?: boolean;
+	/** Imagen propia para el marco del avatar (estilo "Personalizado" de la decoración). */
+	customDeco?: string;
+	/** La imagen del marco se sirve por P2P (/file/deco). */
+	customDecoP2P?: boolean;
+	/** Escala de las partículas (1 = normal). */
+	particleSize?: number;
+	/** Cantidad de partículas del overlay. */
+	particleCount?: number;
 	accentColor: string;
 	bio?: string;
 	status?: string;
@@ -129,7 +137,8 @@ export interface VoiceParticipant {
 	avatarCrop?: AvatarCrop;
 	decoration?: string;
 	decorationColor?: string;
-	customParticle?: string;
+	customDeco?: string;
+	particleSize?: number;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

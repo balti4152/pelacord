@@ -81,7 +81,8 @@ function ParticipantCard({
 						crop={participant.avatarCrop}
 						decoration={participant.decoration}
 						decorationColor={participant.decorationColor}
-						customParticle={participant.customParticle}
+						customDeco={participant.customDeco}
+						particleSize={participant.particleSize}
 						size={compact ? 48 : 88}
 					/>
 				)}
@@ -223,7 +224,10 @@ export function CallStage(): JSX.Element | null {
 			effect: member?.effect,
 			decoration: member?.decoration,
 			decorationColor: member?.decorationColor,
+			customDeco: member?.customDeco,
+			particleSize: member?.particleSize,
 			customParticle: member?.customParticle,
+			particleCount: member?.particleCount,
 			profileEffect: member?.profileEffect,
 			profileEffectColor: member?.profileEffectColor,
 			presence: member?.presence,
@@ -293,7 +297,8 @@ export function CallStage(): JSX.Element | null {
 									crop={expanded.avatarCrop}
 									decoration={expanded.decoration}
 									decorationColor={expanded.decorationColor}
-									customParticle={expanded.customParticle}
+									customDeco={expanded.customDeco}
+									particleSize={expanded.particleSize}
 									size={140}
 								/>
 							)}

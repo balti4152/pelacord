@@ -1842,6 +1842,72 @@
 	color: var(--text-primary);
 }
 
+.cosmetic-slider {
+	display: grid;
+	grid-template-columns: 4.5rem minmax(0, 1fr) 2.75rem;
+	align-items: center;
+	gap: 0.5rem;
+	margin-top: 0.5rem;
+	font-size: 0.8125rem;
+	color: var(--text-secondary);
+}
+
+.cosmetic-slider input[type='range'] {
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	accent-color: var(--brand-primary);
+}
+
+.cosmetic-slider-value {
+	text-align: right;
+	color: var(--text-tertiary);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ---------- Tamaño de partículas (slider) ---------- */
+
+.profile-overlay .po-heart,
+.profile-overlay .po-bubble,
+.profile-overlay .po-star,
+.profile-overlay .po-image,
+.profile-overlay .po-spark {
+	width: calc(var(--p-base, 20px) * var(--particle-size, 1) * var(--p-scale, 1));
+	height: calc(var(--p-base, 20px) * var(--particle-size, 1) * var(--p-scale, 1));
+}
+
+.profile-overlay .po-heart {
+	--p-base: 22px;
+}
+
+.profile-overlay .po-bubble {
+	--p-base: 16px;
+}
+
+.profile-overlay .po-star {
+	--p-base: 14px;
+}
+
+.profile-overlay .po-image {
+	--p-base: 30px;
+}
+
+.profile-overlay .po-spark {
+	--p-base: 11px;
+}
+
+.avatar-deco[data-deco='hearts']::before,
+.avatar-deco[data-deco='hearts']::after {
+	width: calc(28% * var(--particle-size, 1));
+	height: calc(28% * var(--particle-size, 1));
+}
+
+.avatar-deco[data-deco='poison']::before,
+.avatar-deco[data-deco='poison']::after {
+	width: calc(24% * var(--particle-size, 1));
+	height: calc(24% * var(--particle-size, 1));
+}
+
 body.no-cosmetic-anim .profile-overlay,
 body.no-cosmetic-anim .po-heart,
 body.no-cosmetic-anim .po-bubble,
