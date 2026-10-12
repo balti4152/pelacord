@@ -74,7 +74,13 @@ function ParticipantCard({
 				{video ? (
 					<VideoSurface stream={video} />
 				) : (
-					<ColorAvatar name={participant.name} color={participant.color} url={participant.avatarUrl} size={compact ? 48 : 88} />
+					<ColorAvatar
+						name={participant.name}
+						color={participant.color}
+						url={participant.avatarUrl}
+						crop={participant.avatarCrop}
+						size={compact ? 48 : 88}
+					/>
 				)}
 			</div>
 			<div className="pcard-footer">
@@ -253,7 +259,13 @@ export function CallStage(): JSX.Element | null {
 							{videoFor(expanded.id) ? (
 								<VideoSurface stream={videoFor(expanded.id)!} />
 							) : (
-								<ColorAvatar name={expanded.name} color={expanded.color} url={expanded.avatarUrl} size={140} />
+								<ColorAvatar
+									name={expanded.name}
+									color={expanded.color}
+									url={expanded.avatarUrl}
+									crop={expanded.avatarCrop}
+									size={140}
+								/>
 							)}
 						</div>
 						{hideStrip ? null : (
@@ -336,13 +348,25 @@ export function CallStage(): JSX.Element | null {
 
 			{menu && menuParticipant ? (
 				<UserContextMenu
-					user={{id: menuParticipant.id, name: menuParticipant.name, color: menuParticipant.color, avatarUrl: menuParticipant.avatarUrl}}
+					user={{
+						id: menuParticipant.id,
+						name: menuParticipant.name,
+						color: menuParticipant.color,
+						avatarUrl: menuParticipant.avatarUrl,
+						avatarCrop: menuParticipant.avatarCrop,
+					}}
 					x={menu.x}
 					y={menu.y}
 					canVolume={menu.id !== state.me.id}
 					onClose={() => setMenu(null)}
 					onViewProfile={() =>
-						setProfile({id: menuParticipant.id, name: menuParticipant.name, color: menuParticipant.color, avatarUrl: menuParticipant.avatarUrl})
+						setProfile({
+							id: menuParticipant.id,
+							name: menuParticipant.name,
+							color: menuParticipant.color,
+							avatarUrl: menuParticipant.avatarUrl,
+							avatarCrop: menuParticipant.avatarCrop,
+						})
 					}
 				/>
 			) : null}

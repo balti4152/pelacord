@@ -1,4 +1,4 @@
-import type {VoiceParticipant} from '@/types';
+import type {AvatarCrop, VoiceParticipant} from '@/types';
 
 /** Presence payload a peer publishes over the ZeroTier mesh. */
 export interface PeerPresence {
@@ -6,6 +6,7 @@ export interface PeerPresence {
 	name: string;
 	color: string;
 	avatarUrl?: string;
+	avatarCrop?: AvatarCrop;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -36,6 +37,8 @@ interface DesktopTransport {
 	getFileEndpoint(): Promise<{host: string; port: number}>;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
+	/** Guarda el avatar propio (incluye GIF animado) y lo sirve en /file/avatar. */
+	shareAvatar(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<boolean>;
 	cacheMedia(payload: {url: string; name: string}): Promise<{ok: boolean; name?: string; error?: string}>;
 	openPath(target: string): Promise<void>;
 	downloadFile(payload: {url: string; name: string; size?: number}): Promise<{ok: boolean; path?: string; error?: string; cancelled?: boolean; resumable?: boolean}>;
@@ -77,6 +80,7 @@ export function peerToParticipant(presence: PeerPresence): VoiceParticipant {
 		name: presence.name,
 		color: presence.color,
 		avatarUrl: presence.avatarUrl,
+		avatarCrop: presence.avatarCrop,
 		muted: presence.muted,
 		deafened: presence.deafened,
 		sharing: presence.sharing,

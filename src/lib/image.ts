@@ -1,15 +1,19 @@
 /**
  * Convierte un archivo de imagen a un data URL reducido (webp), para poder mandarlo por el mesh
- * de ZeroTier sin depender de ningún servicio de almacenamiento. Un avatar de 128px pesa unos
+ * de ZeroTier sin depender de ningún servicio de almacenamiento. Un avatar de 256px pesa unos
  * pocos KB, así que entra sin problema en el mensaje de presencia.
  */
-export async function fileToDataUrl(file: File, maxDimension: number, quality = 0.85): Promise<string> {
-	const original = await new Promise<string>((resolve, reject) => {
+export async function fileToRawDataUrl(file: File): Promise<string> {
+	return await new Promise<string>((resolve, reject) => {
 		const reader = new FileReader();
 		reader.onload = () => resolve(String(reader.result));
 		reader.onerror = () => reject(reader.error);
 		reader.readAsDataURL(file);
 	});
+}
+
+export async function fileToDataUrl(file: File, maxDimension: number, quality = 0.85): Promise<string> {
+	const original = await fileToRawDataUrl(file);
 
 	const image = await new Promise<HTMLImageElement>((resolve, reject) => {
 		const element = new Image();

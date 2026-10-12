@@ -51,11 +51,25 @@ export interface Member {
 	isBot?: boolean;
 	avatarColor: string;
 	avatarUrl?: string;
+	/** Recorte del avatar: zoom y desplazamiento (para no perder la animación de un GIF). */
+	avatarCrop?: AvatarCrop;
+	/** El avatar se sirve por P2P (/file/avatar): hay que reconstruir la URL al arrancar. */
+	avatarP2P?: boolean;
 	bannerUrl?: string;
 	bannerColor?: string;
 	accentColor: string;
 	bio?: string;
 	status?: string;
+}
+
+/** Recorte del avatar, en porcentaje del contenedor cuadrado. */
+export interface AvatarCrop {
+	/** 1 = sin zoom. */
+	zoom: number;
+	/** Desplazamiento horizontal (%). */
+	x: number;
+	/** Desplazamiento vertical (%). */
+	y: number;
 }
 
 export interface Settings {
@@ -86,6 +100,7 @@ export interface VoiceParticipant {
 	name: string;
 	color: string;
 	avatarUrl?: string;
+	avatarCrop?: AvatarCrop;
 	muted: boolean;
 	deafened: boolean;
 	sharing: boolean;

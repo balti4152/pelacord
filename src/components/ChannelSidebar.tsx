@@ -15,6 +15,7 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 					name={state.me.name}
 					color={state.me.avatarColor}
 					url={state.me.avatarUrl}
+					crop={state.me.avatarCrop}
 					size={32}
 					status={state.me.presence}
 					statusBorderColor="var(--background-secondary-alt)"
@@ -46,7 +47,13 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 				const speaking = speakingIds.includes(participant.id);
 				return (
 					<div className={`voice-member${speaking ? ' is-speaking' : ''}`} key={participant.id}>
-						<ColorAvatar name={participant.name} color={participant.color} url={participant.avatarUrl} size={22} />
+						<ColorAvatar
+							name={participant.name}
+							color={participant.color}
+							url={participant.avatarUrl}
+							crop={participant.avatarCrop}
+							size={22}
+						/>
 						<span className="voice-member-name">{isMe ? 'Tú' : participant.name}</span>
 						{participant.sharing ? <span className="live-badge">EN VIVO</span> : null}
 						{participant.deafened ? <Icon name="headphonesOff" size={13} /> : null}

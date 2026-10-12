@@ -39,6 +39,7 @@ function toParticipant(member: Member, flags: Partial<VoiceParticipant> = {}): V
 		name: member.name,
 		color: member.avatarColor,
 		avatarUrl: member.avatarUrl,
+		avatarCrop: member.avatarCrop,
 		muted: false,
 		deafened: false,
 		sharing: false,
@@ -307,6 +308,12 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			.getFileEndpoint()
 			.then((endpoint) => {
 				fileEndpointRef.current = endpoint;
+				// Un avatar propio servido por P2P cambia de puerto en cada arranque: se reconstruye la URL.
+				const me = meRef.current;
+				if (me.avatarP2P && endpoint.host && endpoint.port) {
+					const url = `http://${endpoint.host}:${endpoint.port}/file/avatar`;
+					if (me.avatarUrl !== url) dispatch({type: 'updateProfile', patch: {avatarUrl: url}});
+				}
 			})
 			.catch(() => {});
 	}, []);
@@ -320,6 +327,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			name: me.name,
 			color: me.avatarColor,
 			avatarUrl: me.avatarUrl,
+			avatarCrop: me.avatarCrop,
 			channelId: voice.channelId,
 			muted: voice.muted,
 			deafened: voice.deafened,

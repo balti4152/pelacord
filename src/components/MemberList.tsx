@@ -11,6 +11,7 @@ function toUser(member: Member): UserLike {
 		tag: member.tag,
 		color: member.avatarColor,
 		avatarUrl: member.avatarUrl,
+		avatarCrop: member.avatarCrop,
 		presence: member.presence,
 		bio: member.bio,
 		status: member.status,

@@ -1,11 +1,13 @@
 import {type ChangeEvent, type CSSProperties, useEffect, useState} from 'react';
+import {AvatarEditor} from '@/components/AvatarEditor';
 import {Avatar, Icon} from '@/components/primitives';
 import {useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
-import {fileToDataUrl} from '@/lib/image';
+import {getDesktopTransport} from '@/lib/desktop';
+import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {useStore} from '@/state/store';
-import type {Member, Presence, ThemeName} from '@/types';
+import type {AvatarCrop, Member, Presence, ThemeName} from '@/types';
 
 const EDITABLE_VARS = [
 	'--brand-primary',
@@ -48,20 +50,59 @@ const PRESENCE_LABELS: Record<Presence, string> = {
 	offline: 'Desconectado',
 };
 
-const AVATAR_MAX = 128;
 const BANNER_MAX = 640;
+/** Tamaño del avatar estático que se guarda (entra cómodo en el mensaje de presencia). */
+const AVATAR_SOURCE = 256;
 
 export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 	const {state, updateProfile, updateSettings, setCssVariable} = useStore();
 	const me = state.me;
 	const outputVolume = useOutputVolume();
 	const [tab, setTab] = useState<'account' | 'profile' | 'appearance' | 'voice' | 'customcss'>('account');
-	async function handleAvatar(event: ChangeEvent<HTMLInputElement>): Promise<void> {
+	const [avatarFile, setAvatarFile] = useState<File | null>(null);
+
+	function handleAvatar(event: ChangeEvent<HTMLInputElement>): void {
 		const file = event.target.files?.[0];
 		event.target.value = '';
 		if (!file) return;
-		const dataUrl = await fileToDataUrl(file, AVATAR_MAX, 0.85);
-		updateProfile({avatarUrl: dataUrl});
+		// Abre el recortador: recién al confirmar se guarda el avatar.
+		setAvatarFile(file);
+	}
+
+	/**
+	 * Guarda el avatar con el recorte elegido.
+	 *
+	 * - GIF animado: se sirve por P2P (id fijo "avatar") y se guarda el recorte como
+	 *   parámetros, porque recomprimir en canvas le borraría la animación.
+	 * - Foto: se reduce y se manda como data URL (chico, y funciona sin depender de nadie).
+	 */
+	async function saveAvatar(crop: AvatarCrop): Promise<void> {
+		const file = avatarFile;
+		setAvatarFile(null);
+		if (!file) return;
+		const transport = getDesktopTransport();
+		const animated = file.type === 'image/gif' || /\.gif$/i.test(file.name);
+
+		if (animated && transport) {
+			try {
+				const data = await file.arrayBuffer();
+				const ok = await transport.shareAvatar({name: file.name, mime: file.type || 'image/gif', data});
+				const endpoint = ok ? await transport.getFileEndpoint() : null;
+				if (endpoint?.host && endpoint.port) {
+					updateProfile({
+						avatarUrl: `http://${endpoint.host}:${endpoint.port}/file/avatar`,
+						avatarCrop: crop,
+						avatarP2P: true,
+					});
+					return;
+				}
+			} catch {
+				// cae al data URL
+			}
+		}
+
+		const dataUrl = animated ? await fileToRawDataUrl(file) : await fileToDataUrl(file, AVATAR_SOURCE, 0.9);
+		updateProfile({avatarUrl: dataUrl, avatarCrop: crop, avatarP2P: false});
 	}
 
 	async function handleBanner(event: ChangeEvent<HTMLInputElement>): Promise<void> {
@@ -141,7 +182,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								onBanner={handleBanner}
 								onBannerColor={(v) => updateProfile({bannerColor: v, bannerUrl: undefined})}
 								onAccent={(v) => updateProfile({accentColor: v})}
-								onResetAvatar={() => updateProfile({avatarUrl: undefined})}
+								onResetAvatar={() => updateProfile({avatarUrl: undefined, avatarCrop: undefined, avatarP2P: false})}
 								onRemoveBanner={() => updateProfile({bannerUrl: undefined, bannerColor: undefined})}
 							/>
 						) : null}
@@ -186,6 +227,9 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 					</div>
 				</div>
 			</div>
+			{avatarFile ? (
+				<AvatarEditor file={avatarFile} onCancel={() => setAvatarFile(null)} onSave={(crop) => void saveAvatar(crop)} />
+			) : null}
 		</div>
 	);
 }
@@ -294,7 +338,7 @@ function ProfileTab(props: {
 				<div className="input-row">
 					<label className="button primary" style={{cursor: 'pointer'}}>
 						Cambiar avatar
-						<input type="file" accept="image/*" hidden onChange={props.onAvatar} />
+						<input type="file" accept="image/*,.gif" hidden onChange={props.onAvatar} />
 					</label>
 					{me.avatarUrl ? (
 						<button type="button" className="button danger" onClick={props.onResetAvatar}>
@@ -302,7 +346,9 @@ function ProfileTab(props: {
 						</button>
 					) : null}
 				</div>
-				<p className="settings-hint">Las imágenes cuadradas se ven mejor.</p>
+				<p className="settings-hint">
+					Foto o GIF animado desde tu compu. Antes de guardarlo vas a poder mover y hacer zoom para centrarlo.
+				</p>
 			</div>
 
 			<div className="settings-section">

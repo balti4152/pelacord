@@ -1,7 +1,7 @@
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {usePeerVolume} from '@/components/RemoteMedia';
 import {voiceMesh} from '@/lib/media';
-import type {Presence} from '@/types';
+import type {AvatarCrop, Presence} from '@/types';
 
 export interface UserLike {
 	id: string;
@@ -9,6 +9,7 @@ export interface UserLike {
 	tag?: string;
 	color: string;
 	avatarUrl?: string;
+	avatarCrop?: AvatarCrop;
 	presence?: Presence;
 	bio?: string;
 	status?: string;
@@ -115,6 +116,7 @@ export function ProfilePopover({
 							name={user.name}
 							color={user.color}
 							url={user.avatarUrl}
+							crop={user.avatarCrop}
 							size={80}
 							status={user.presence}
 							statusBorderColor="var(--background-secondary)"

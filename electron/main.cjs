@@ -405,6 +405,70 @@ ipcMain.handle('pelacord:open-path', async (_event, target) => {
 	if (typeof target === 'string') await shell.openPath(target);
 });
 
+// ---------- Avatar propio (persistente) ----------
+//
+// El avatar animado (GIF) se sirve desde el servidor P2P en vez de viajar como data URL en
+// cada mensaje de presencia: así se conserva la animación y el mensaje queda liviano.
+// El id "avatar" es estable y el archivo se guarda en userData para sobrevivir reinicios.
+const AVATAR_ID = 'avatar';
+
+function avatarDirectory() {
+	return path.join(app.getPath('userData'), 'avatar');
+}
+
+function avatarMimeFor(filePath) {
+	if (/\.gif$/i.test(filePath)) return 'image/gif';
+	if (/\.png$/i.test(filePath)) return 'image/png';
+	return 'image/webp';
+}
+
+function registerSavedAvatar() {
+	try {
+		const dir = avatarDirectory();
+		const files = fs.readdirSync(dir).filter((name) => name.startsWith('avatar.'));
+		if (files.length === 0) return;
+		const filePath = path.join(dir, files[0]);
+		sharedFiles.set(AVATAR_ID, {
+			path: filePath,
+			name: path.basename(filePath),
+			mime: avatarMimeFor(filePath),
+			size: fs.statSync(filePath).size,
+		});
+		console.log('[pelacord] avatar restaurado');
+	} catch {
+		// sin avatar guardado: no pasa nada
+	}
+}
+
+ipcMain.handle('pelacord:share-avatar', (_event, payload) => {
+	const {name, mime, data} = payload ?? {};
+	if (!data) return false;
+	try {
+		const dir = avatarDirectory();
+		fs.mkdirSync(dir, {recursive: true});
+		for (const existing of fs.readdirSync(dir)) {
+			try {
+				fs.unlinkSync(path.join(dir, existing));
+			} catch {
+				// se ignora
+			}
+		}
+		const animated = mime === 'image/gif' || /\.gif$/i.test(String(name ?? ''));
+		const filePath = path.join(dir, animated ? 'avatar.gif' : 'avatar.webp');
+		fs.writeFileSync(filePath, Buffer.from(data));
+		sharedFiles.set(AVATAR_ID, {
+			path: filePath,
+			name: path.basename(filePath),
+			mime: animated ? 'image/gif' : mime || 'image/webp',
+			size: fs.statSync(filePath).size,
+		});
+		return true;
+	} catch (error) {
+		console.error('[pelacord] share-avatar error', String(error));
+		return false;
+	}
+});
+
 // ---------- Cache temporal de videos (se reproducen y se borran solos) ----------
 
 function mediaDirectory() {
@@ -665,6 +729,7 @@ if (!gotLock) {
 		startServer();
 		startDiscovery();
 		startFileServer();
+		registerSavedAvatar();
 		registerMediaProtocol();
 		setupUpdater();
 		createWindow();

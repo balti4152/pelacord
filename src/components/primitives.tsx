@@ -1,5 +1,5 @@
 import {type CSSProperties, type ReactNode, useState} from 'react';
-import type {Member, Presence} from '@/types';
+import type {AvatarCrop, Member, Presence} from '@/types';
 
 const ICONS: Record<string, ReactNode> = {
 	hash: (
@@ -275,6 +275,13 @@ const PRESENCE_LABEL: Record<Presence, string> = {
 	offline: 'Offline',
 };
 
+/** Aplica el recorte guardado (zoom + desplazamiento) a la imagen del avatar. */
+function avatarCropStyle(crop?: AvatarCrop): CSSProperties | undefined {
+	if (!crop) return undefined;
+	if (crop.zoom === 1 && crop.x === 0 && crop.y === 0) return undefined;
+	return {transform: `translate(${crop.x}%, ${crop.y}%) scale(${crop.zoom})`};
+}
+
 export function Avatar({
 	member,
 	size = 32,
@@ -298,7 +305,11 @@ export function Avatar({
 	return (
 		<div className="avatar" style={style} title={`${member.name} - ${PRESENCE_LABEL[member.presence]}`}>
 			<div className="avatar-inner" style={innerStyle}>
-				{showImage ? <img src={member.avatarUrl} alt="" onError={() => setBroken(true)} /> : initial}
+				{showImage ? (
+					<img src={member.avatarUrl} alt="" style={avatarCropStyle(member.avatarCrop)} onError={() => setBroken(true)} />
+				) : (
+					initial
+				)}
 			</div>
 			{showStatus ? (
 				<span
@@ -315,6 +326,7 @@ export function ColorAvatar({
 	name,
 	color,
 	url,
+	crop,
 	size = 32,
 	status,
 	statusBorderColor,
@@ -322,6 +334,7 @@ export function ColorAvatar({
 	name: string;
 	color: string;
 	url?: string;
+	crop?: AvatarCrop;
 	size?: number;
 	status?: Presence;
 	statusBorderColor?: string;
@@ -332,7 +345,7 @@ export function ColorAvatar({
 	return (
 		<div className="avatar" style={{width: size, height: size, fontSize: size * 0.42}}>
 			<div className="avatar-inner" style={showImage ? {} : {backgroundColor: color}}>
-				{showImage ? <img src={url} alt="" onError={() => setBroken(true)} /> : initial}
+				{showImage ? <img src={url} alt="" style={avatarCropStyle(crop)} onError={() => setBroken(true)} /> : initial}
 			</div>
 			{status ? (
 				<span className="status-dot" data-status={status} style={statusBorderColor ? {borderColor: statusBorderColor} : undefined} />
