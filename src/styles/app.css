@@ -995,6 +995,16 @@
 	border-radius: var(--radius-md);
 }
 
+/* Mientras se cargan los datos en español (se piden una sola vez). */
+.emoji-loading {
+	display: grid;
+	place-items: center;
+	width: 352px;
+	height: 352px;
+	color: var(--text-tertiary);
+	font-size: 0.875rem;
+}
+
 .emoji-popover .epr-emoji-category-label {
 	font-size: 0.75rem;
 	font-weight: 700;

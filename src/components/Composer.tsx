@@ -1,4 +1,4 @@
-import {type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useEffect, useRef, useState} from 'react';
+import {type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState} from 'react';
 import {EmojiChooser} from '@/components/EmojiChooser';
 import {GifPicker} from '@/components/GifPicker';
 import {Icon} from '@/components/primitives';
@@ -119,6 +119,14 @@ export function Composer(): JSX.Element {
 	const fileInput = useRef<HTMLInputElement>(null);
 	const textarea = useRef<HTMLTextAreaElement>(null);
 
+	// Callbacks estables para el selector de emojis: si se crearan en cada render, el picker
+	// (miles de emojis) se volvería a renderizar y la ventana se trabaría.
+	const closeEmoji = useCallback(() => setShowEmoji(false), []);
+	const insertEmoji = useCallback((emoji: string) => {
+		setText((prev) => prev + emoji);
+		textarea.current?.focus();
+	}, []);
+
 	useEffect(() => {
 		return subscribeAttach((files) => {
 			void Promise.all(files.map((file) => buildAttachment(file, state.me.id))).then((next) => {
@@ -234,11 +242,8 @@ export function Composer(): JSX.Element {
 			) : null}
 			{showEmoji ? (
 				<EmojiChooser
-					onClose={() => setShowEmoji(false)}
-					onSelect={(emoji: string) => {
-						setText((prev) => prev + emoji);
-						textarea.current?.focus();
-					}}
+					onClose={closeEmoji}
+					onSelect={insertEmoji}
 				/>
 			) : null}
 			{mention && mentionList.length > 0 ? (

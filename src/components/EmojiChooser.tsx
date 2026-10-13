@@ -1,18 +1,34 @@
-import EmojiPicker, {EmojiStyle, SkinTonePickerLocation, type EmojiClickData} from 'emoji-picker-react';
+import {memo, useCallback, useEffect, useState} from 'react';
+import EmojiPicker, {EmojiStyle, Theme, type EmojiClickData} from 'emoji-picker-react';
+import type {EmojiData} from 'emoji-picker-react/dist/types/exposedTypes';
 import {useStore} from '@/state/store';
 
 /**
- * Carga diferida del set de emojis en español: el picker lo pide recién al abrirse,
- * así los datos (varios cientos de KB) no engordan el bundle principal.
- * Debe quedar a nivel de módulo: una función nueva en cada render vuelve a cargar.
+ * Datos de emojis en español, cargados una sola vez (promesa cacheada a nivel de módulo).
+ *
+ * Ojo con la ruta: en la v4 los archivos viven en `dist/data/`. El resultado se guarda porque el
+ * prop `emojiData` de la v4 quiere el objeto ya resuelto (no una promesa).
  */
-const loadSpanishEmojiData = () => import('emoji-picker-react/data/emojis-es');
+let spanishEmojiData: Promise<EmojiData> | null = null;
+const loadSpanishEmojiData = (): Promise<EmojiData> => {
+	spanishEmojiData ??= import('emoji-picker-react/dist/data/emojis-es').then(
+		(mod) => (mod.default ?? mod) as unknown as EmojiData,
+	);
+	return spanishEmojiData;
+};
+
+const PREVIEW_CONFIG = {showPreview: false};
 
 /**
- * Selector de emojis completo: todas las categorías, búsqueda y tonos de piel.
- * El tono de piel no se muestra como botón fijo (ese cuadradito confundía): se elige
- * manteniendo apretado un emoji que tenga variantes.
+ * El picker es pesado (miles de emojis). Se memoiza para que NO se vuelva a renderizar cuando el
+ * store cambia (presencia, mensajes, etc.).
+ *
+ * Se usa la v4 a propósito: la v5.0.0 (la última) renderiza los emojis de a tandas de 64 y el
+ * resto queda en blanco reservando miles de píxeles de alto, así que el selector se veía vacío
+ * y trababa al scrollear.
  */
+const MemoEmojiPicker = memo(EmojiPicker);
+
 export function EmojiChooser({
 	onSelect,
 	onClose,
@@ -21,27 +37,40 @@ export function EmojiChooser({
 	onClose: () => void;
 }): JSX.Element {
 	const {state} = useStore();
+	const theme = state.settings.theme === 'light' ? Theme.LIGHT : Theme.DARK;
+	const [emojiData, setEmojiData] = useState<EmojiData | null>(null);
+
+	useEffect(() => {
+		let activo = true;
+		void loadSpanishEmojiData().then((data) => {
+			if (activo) setEmojiData(data);
+		});
+		return () => {
+			activo = false;
+		};
+	}, []);
+
+	const handleEmojiClick = useCallback((data: EmojiClickData) => onSelect(data.emoji), [onSelect]);
+
 	return (
 		<>
 			<div className="emoji-backdrop" onClick={onClose} />
 			<div className="emoji-popover" onClick={(event) => event.stopPropagation()}>
-				<EmojiPicker
-					emojiData={loadSpanishEmojiData}
-					emojiStyle={EmojiStyle.NATIVE}
-					colorScheme={state.settings.theme === 'light' ? 'light' : 'dark'}
-					width={352}
-					height={352}
-					autoFocusSearch
-					lazyLoadEmojis
-					skinTonePickerLocation={SkinTonePickerLocation.NONE}
-					previewConfig={{showPreview: false}}
-					labels={{
-						searchPlaceholder: 'Buscar emoji…',
-						searchResultsNone: 'Sin resultados',
-						loading: 'Cargando emojis…',
-					}}
-					onEmojiClick={(data: EmojiClickData) => onSelect(data.emoji)}
-				/>
+				{emojiData ? (
+					<MemoEmojiPicker
+						emojiData={emojiData}
+						emojiStyle={EmojiStyle.NATIVE}
+						theme={theme}
+						width={352}
+						height={352}
+						autoFocusSearch
+						previewConfig={PREVIEW_CONFIG}
+						searchPlaceholder="Buscar emoji…"
+						onEmojiClick={handleEmojiClick}
+					/>
+				) : (
+					<div className="emoji-loading">Cargando emojis…</div>
+				)}
 			</div>
 		</>
 	);
