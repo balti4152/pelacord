@@ -432,8 +432,7 @@ ipcMain.on('pelacord:presence', (_event, payload) => {
 	broadcast({type: 'presence', from: myPeerId, payload});
 });
 
-ipcMain.on('pelacord:signal', (_event, message) => {
-	if (!myPeerId || !message) return;
+ipcMain.on('pelacord:signal', (_event, message) => {	if (!myPeerId || !message) return;
 	broadcast({type: 'signal', from: myPeerId, to: message.to, payload: message.payload});
 });
 
@@ -444,6 +443,93 @@ ipcMain.on('pelacord:command', (_event, message) => {
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);
+
+// ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------
+
+const linkPreviews = new Map();
+
+/** Saca las etiquetas og: del HTML, sin traer un parser de por medio. */
+function extractLinkMeta(html, url) {
+	const meta = (name) => {
+		const patterns = [
+			new RegExp(`<meta[^>]+property=["']og:${name}["'][^>]+content=["']([^"']+)["']`, 'i'),
+			new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:${name}["']`, 'i'),
+			new RegExp(`<meta[^>]+name=["']${name}["'][^>]+content=["']([^"']+)["']`, 'i'),
+		];
+		for (const pattern of patterns) {
+			const match = html.match(pattern);
+			if (match && match[1]) return match[1];
+		}
+		return '';
+	};
+	const decode = (value) =>
+		value
+			.replace(/&quot;/g, '"')
+			.replace(/&#0?39;/g, "'")
+			.replace(/&amp;/g, '&')
+			.replace(/&lt;/g, '<')
+			.replace(/&gt;/g, '>')
+			.trim();
+	const rawTitle = meta('title') || (html.match(/<title[^>]*>([^<]*)<\/title>/i) || [])[1] || '';
+	let image = meta('image');
+	if (image.startsWith('//')) image = `https:${image}`;
+	else if (image.startsWith('/')) {
+		try {
+			image = new URL(image, url).toString();
+		} catch {
+			image = '';
+		}
+	}
+	return {
+		url,
+		title: decode(rawTitle).slice(0, 160),
+		description: decode(meta('description')).slice(0, 300),
+		image,
+		siteName: decode(meta('site_name')).slice(0, 80),
+	};
+}
+
+ipcMain.handle('pelacord:link-preview', async (_event, target) => {
+	if (typeof target !== 'string' || !/^https?:/i.test(target)) return null;
+	if (linkPreviews.has(target)) return linkPreviews.get(target);
+	// YouTube no manda og: en el HTML que se baja sin sesión, pero tiene su propia API de datos.
+	const YOUTUBE_PATTERN = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/|live\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/i;
+
+	try {
+		const videoId = (target.match(YOUTUBE_PATTERN) || [])[1];
+		if (videoId) {
+			const info = await net.fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(target)}&format=json`);
+			if (info.ok) {
+				const data = await info.json();
+				const preview = {
+					url: target,
+					title: String(data.title || '').slice(0, 160),
+					description: String(data.author_name || '').slice(0, 120),
+					image: String(data.thumbnail_url || ''),
+					siteName: 'YouTube',
+				};
+				linkPreviews.set(target, preview);
+				return preview;
+			}
+		}
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), 6000);
+		const response = await net.fetch(target, {redirect: 'follow', signal: controller.signal});
+		clearTimeout(timer);
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		const type = response.headers.get('content-type') || '';
+		if (!type.includes('html')) throw new Error('no es HTML');
+		// Sólo el principio: alcanza para las etiquetas y no baja un sitio entero.
+		const html = (await response.text()).slice(0, 250000);
+		const preview = extractLinkMeta(html, target);
+		linkPreviews.set(target, preview);
+		return preview;
+	} catch (error) {
+		console.warn('[pelacord] sin preview de', target, String(error));
+		linkPreviews.set(target, null);
+		return null;
+	}
+});
 
 // ---------- Compartir archivos (servidos desde el disco, con reanudación) ----------
 

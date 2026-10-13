@@ -644,6 +644,78 @@
 	word-break: break-word;
 }
 
+/* ---------- Embeds de links (estilo Discord) ---------- */
+
+.embeds {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-top: 0.375rem;
+	max-width: 26rem;
+}
+
+.embed {
+	display: flex;
+	flex-direction: column;
+	border-radius: var(--radius-lg);
+	border: 1px solid var(--border-color);
+	border-left: 3px solid var(--brand-primary);
+	background-color: var(--background-secondary);
+	overflow: hidden;
+}
+
+.embed-image {
+	display: block;
+	width: 100%;
+	max-height: 14rem;
+	object-fit: cover;
+	background-color: var(--background-tertiary);
+}
+
+.embed-body {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	padding: 0.625rem 0.75rem;
+}
+
+.embed-site {
+	font-size: 0.6875rem;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	color: var(--text-tertiary);
+}
+
+.embed-title {
+	font-size: 0.9375rem;
+	font-weight: 700;
+	color: var(--text-link);
+}
+
+.embed-description {
+	font-size: 0.8125rem;
+	line-height: 1.4;
+	color: var(--text-secondary);
+	display: -webkit-box;
+	-webkit-line-clamp: 4;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+/* Video de YouTube: reproductor embebido. */
+.embed-video {
+	border-left-color: #ff0000;
+}
+
+.embed-player {
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	border: none;
+	background-color: #000;
+}
+
 /* ---------- Links directos a imagen / video / audio ---------- */
 
 .media-links {

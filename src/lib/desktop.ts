@@ -58,6 +58,8 @@ interface DesktopTransport {
 	getPeers(): Promise<string[]>;
 	getDesktopSources(): Promise<DesktopSource[]>;	selectSource(id: string): void;
 	getFileEndpoint(): Promise<{host: string; port: number}>;
+	/** Preview de un link (título, descripción, imagen). Se baja desde el proceso principal. */
+	getLinkPreview(url: string): Promise<LinkPreviewData | null>;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
 	/** Guarda un asset del perfil (avatar o banner, incluido GIF animado) y lo sirve por P2P. */
@@ -92,6 +94,15 @@ interface DesktopTransport {
 	checkUpdate(): Promise<{ok: boolean; error?: string}>;
 	installUpdate(): Promise<boolean>;
 	onUpdateStatus(callback: (status: {state: string; percent?: number; version?: string; error?: string}) => void): () => void;
+}
+
+/** Lo que devuelve el preview de un link. */
+export interface LinkPreviewData {
+	url: string;
+	title: string;
+	description: string;
+	image: string;
+	siteName: string;
 }
 
 export interface DesktopSource {

@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	getDesktopSources: () => ipcRenderer.invoke('pelacord:desktop-sources'),
 	selectSource: (id) => ipcRenderer.send('pelacord:select-source', id),
 	getFileEndpoint: () => ipcRenderer.invoke('pelacord:file-endpoint'),
+	/** Preview de un link (título, descripción, imagen). */
+	getLinkPreview: (url) => ipcRenderer.invoke('pelacord:link-preview', url),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
 	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),
 	shareAvatar: (payload) => ipcRenderer.invoke('pelacord:share-avatar', payload),

@@ -4,6 +4,7 @@ import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
 import {resolveMember, splitMentions, useStore} from '@/state/store';
 import {findMediaLinks, stripMediaUrls, type MediaLink} from '@/lib/mediaLinks';
+import {fetchLinkPreview, findPreviewLinks, youtubeId, type LinkPreview} from '@/lib/linkPreview';
 import type {AppState, Attachment, Message} from '@/types';
 
 const FALLBACK_COLOR = 'hsl(0, 0%, 40%)';
@@ -106,6 +107,68 @@ function isJumboEmojis(text: string): boolean {
 			// Banderas: son dos "regional indicators" y no cuentan como pictográficos.
 			/[\u{1F1E6}-\u{1F1FF}]/u.test(part.segment) ||
 			/^\s+$/.test(part.segment),
+	);
+}
+
+/**
+ * Tarjetas de preview de los links del mensaje (estilo Discord).
+ * Los videos de YouTube van con reproductor; el link del texto queda igual, como pidió el usuario.
+ */
+function LinkEmbeds({urls}: {urls: string[]}): JSX.Element | null {
+	if (urls.length === 0) return null;
+	return (
+		<div className="embeds">
+			{urls.map((url) => (
+				<LinkEmbed key={url} url={url} />
+			))}
+		</div>
+	);
+}
+
+function LinkEmbed({url}: {url: string}): JSX.Element | null {
+	const videoId = youtubeId(url);
+	const [preview, setPreview] = useState<LinkPreview | null | undefined>(undefined);
+
+	useEffect(() => {
+		let activo = true;
+		void fetchLinkPreview(url).then((value) => {
+			if (activo) setPreview(value);
+		});
+		return () => {
+			activo = false;
+		};
+	}, [url]);
+
+	if (videoId) {
+		return (
+			<div className="embed embed-video">
+				<iframe
+					className="embed-player"
+					src={`https://www.youtube.com/embed/${videoId}`}
+					title="Video de YouTube"
+					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+					allowFullScreen
+				/>
+				<div className="embed-body">
+					<span className="embed-site">YouTube</span>
+					{preview?.title ? <span className="embed-title">{preview.title}</span> : null}
+					{preview?.description ? <span className="embed-description">{preview.description}</span> : null}
+				</div>
+			</div>
+		);
+	}
+
+	if (!preview) return null;
+
+	return (
+		<div className="embed">
+			{preview.image ? <img className="embed-image" src={preview.image} alt="" loading="lazy" /> : null}
+			<div className="embed-body">
+				{preview.siteName ? <span className="embed-site">{preview.siteName}</span> : null}
+				{preview.title ? <span className="embed-title">{preview.title}</span> : null}
+				{preview.description ? <span className="embed-description">{preview.description}</span> : null}
+			</div>
+		</div>
 	);
 }
 
@@ -636,6 +699,7 @@ function MessageRow({
 	// Los links que se muestran como media se sacan del texto (no se ven dos veces).
 	const mediaLinks = message.content ? findMediaLinks(message.content) : [];
 	const visibleContent = stripMediaUrls(message.content ?? '', mediaLinks);
+	const previewLinks = message.content ? findPreviewLinks(message.content) : [];
 	return (
 		<div
 			className={classes.join(' ')}
@@ -717,6 +781,7 @@ function MessageRow({
 					</div>
 				) : null}
 				<MediaLinks links={mediaLinks} />
+				<LinkEmbeds urls={previewLinks} />
 				{message.attachments.length > 0 ? (
 					<div className="attachments">
 						{message.attachments.map((attachment) => (
