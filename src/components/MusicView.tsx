@@ -7,6 +7,10 @@ import {useSpotifyImport} from '@/lib/spotifyImport';
 import {SPOTIFY_GREEN, SpotifyView} from '@/components/SpotifyView';
 import {useStore} from '@/state/store';
 
+/** Dónde se guardan las portadas del fondo del buscador (y por cuánto se consideran frescas). */
+const SPOTIFY_COVERS_KEY = 'pelacord.spotify.covers.v1';
+const SPOTIFY_COVERS_TTL_MS = 2 * 60 * 60 * 1000;
+
 /** Convierte un resultado de búsqueda en un tema de la cola. */
 function toMusicTrack(track: TrackResult, addedBy: string): MusicTrack {
 	return {
@@ -50,6 +54,21 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	/** Playlists destacadas para el buscador (se ven cuando no hay búsqueda). */
 	const [discover, setDiscover] = useState<SpotifyPlaylist[]>([]);
 	const [discoverLoading, setDiscoverLoading] = useState(true);
+	/**
+	 * Portadas de álbumes al azar para el fondo decorativo del buscador. Se guardan en disco 2 horas
+	 * (así al abrir están al toque y van cambiando solas de vez en cuando). Son sólo decoración.
+	 */
+	const [covers, setCovers] = useState<string[]>(() => {
+		try {
+			const raw = localStorage.getItem(SPOTIFY_COVERS_KEY);
+			if (!raw) return [];
+			const parsed = JSON.parse(raw) as {covers: string[]; at: number};
+			if (parsed?.covers?.length && Date.now() - parsed.at < SPOTIFY_COVERS_TTL_MS) return parsed.covers;
+		} catch {
+			// sin caché
+		}
+		return [];
+	});
 	const spotifyImport = useSpotifyImport();
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
@@ -111,8 +130,28 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 		};
 	}, []);
 
-	/** Lee una playlist destacada (del embed público) y la agrega entera a la cola. */
-	async function addDiscover(playlist: SpotifyPlaylist): Promise<void> {
+	// Portadas del fondo: sólo si no hay guardadas y frescas (si no, se piden y quedan 2 horas).
+	useEffect(() => {
+		if (covers.length > 0) return;
+		let alive = true;
+		void getDesktopTransport()
+			?.spotifyCovers()
+			.then((result) => {
+				if (!alive || !result?.covers?.length) return;
+				setCovers(result.covers);
+				try {
+					localStorage.setItem(SPOTIFY_COVERS_KEY, JSON.stringify({covers: result.covers, at: Date.now()}));
+				} catch {
+					// best effort
+				}
+			})
+			.catch(() => {});
+		return () => {
+			alive = false;
+		};
+	}, [covers.length]);
+
+	/** Lee una playlist destacada (del embed público) y la agrega entera a la cola. */	async function addDiscover(playlist: SpotifyPlaylist): Promise<void> {
 		if (spotifyImport.isBusy()) return;
 		if (!inVoice) {
 			spotifyImport.setError('Unite a un canal de voz para escuchar la música.');
@@ -210,7 +249,15 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 									</p>
 								) : null}
 								{discover.length > 0 ? (
-									<>
+									<section className="music-discover">
+										{/* Fondo decorativo: 10 portadas al azar, difuminadas y apagadas en los costados. */}
+										{covers.length > 0 ? (
+											<div className="music-discover-art" aria-hidden="true">
+												{covers.map((url) => (
+													<span key={url} style={{backgroundImage: `url("${url}")`}} />
+												))}
+											</div>
+										) : null}
 										<span className="music-grid-title">
 											<SiSpotify size={15} color={SPOTIFY_GREEN} /> Playlists para escuchar
 										</span>
@@ -240,7 +287,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 												</button>
 											))}
 										</div>
-									</>
+									</section>
 								) : null}
 							</>
 						) : null}
