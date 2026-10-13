@@ -58,7 +58,9 @@ export type MusicCommand =
 	| {kind: 'skip'}
 	| {kind: 'enqueue'; track: MusicTrack}
 	| {kind: 'remove'; index: number}
-	| {kind: 'move'; from: number; to: number};
+	| {kind: 'move'; from: number; to: number}
+	/** Un peer le pasa su Jam al host (cuando el host arrancó sin nada). */
+	| {kind: 'adopt'; state: MusicState};
 
 /**
  * Elige quién manda el audio, de forma DETERMINÍSTICA.

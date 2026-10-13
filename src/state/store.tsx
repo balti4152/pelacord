@@ -773,6 +773,14 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			// Órdenes de la Jam (play, pausa, cola): las aplica sólo el host de turno y las difunde.
 			if (command.kind === 'music' && command.command) {
 				if (electHost(musicParticipantsRef.current) !== meRef.current.id) return;
+				// "Adoptar": el otro sabe de una Jam que yo no (arranqué vacío). Sólo si no tengo nada.
+				if (command.command.kind === 'adopt') {
+					if (musicStateRef.current.track) return;
+					const adoptado = {...command.command.state, hostId: meRef.current.id};
+					setMusicState(adoptado);
+					broadcastMusic(adoptado);
+					return;
+				}
 				const next = applyMusicCommand(musicStateRef.current, command.command);
 				setMusicState(next);
 				broadcastMusic(next);
@@ -1303,12 +1311,24 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		broadcastMusic(musicStateRef.current);
 	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey, broadcastMusic]);
 
+	// Si tengo una Jam y el host de turno no la tiene (por ejemplo volvieron al canal y el host
+	// arrancó vacío), se la paso: así la música vuelve a sonar sin tener que poner otra canción.
+	useEffect(() => {
+		if (iAmHost || !jamChannelId || !musicState.track) return;
+		const host = electHost(musicParticipants);
+		if (!host) return;
+		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicState}});
+	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey]);
+
 	// Volumen guardado de la música: se aplica al grupo (los demás) y también al host, que
 	// escucha desde su propio reproductor.
 	useEffect(() => {
 		const volume = state.settings.musicVolume ?? 0.8;
-		voiceMesh.setMusicVolume(volume);
-		setHostVolume(state.settings.musicMuted ? 0 : volume);
+		// Curva cuadrada: al oído el slider queda parejo en todo el recorrido. Con la lineal se
+		// siente que abajo sigue fuerte y que arriba no termina de subir.
+		const curva = volume * volume;
+		voiceMesh.setMusicVolume(curva);
+		setHostVolume(state.settings.musicMuted ? 0 : curva);
 	}, [state.settings.musicVolume, state.settings.musicMuted]);
 
 	/** Hay una Jam con algo: es lo que hace que aparezca todo lo de m�sica (si no, queda dormida). */
