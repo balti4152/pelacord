@@ -2161,6 +2161,10 @@
 	font-variant-numeric: tabular-nums;
 }
 
+.hotkey-hint {
+	color: var(--text-link);
+}
+
 /* ---------- Overlay animado del perfil ---------- */
 
 .profile-overlay {

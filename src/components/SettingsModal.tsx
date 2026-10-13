@@ -812,6 +812,7 @@ function HotkeysTab({
 	onHotkey: (action: string, accelerator: string | undefined) => void;
 }): JSX.Element {
 	const [recording, setRecording] = useState<string | null>(null);
+	const [hint, setHint] = useState<string | null>(null);
 
 	// Mientras graba, escucha el teclado de toda la ventana.
 	useEffect(() => {
@@ -821,13 +822,18 @@ function HotkeysTab({
 			event.stopPropagation();
 			if (event.key === 'Escape') {
 				setRecording(null);
+				setHint(null);
 				return;
 			}
 			const accelerator = eventToAccelerator(event);
-			// Si sólo apretó modificadores, sigue esperando la tecla.
-			if (!accelerator) return;
+			if (!accelerator) {
+				// Se avisa por qué no sirve: si no, parecería que no detecta la tecla.
+				setHint(`"${event.key}" no sirve sola: usá Ctrl/Alt/Shift, o una tecla F1-F24 (ej. F8).`);
+				return;
+			}
 			onHotkey(recording, accelerator);
 			setRecording(null);
+			setHint(null);
 		};
 		window.addEventListener('keydown', onKey, true);
 		return () => window.removeEventListener('keydown', onKey, true);
@@ -871,6 +877,11 @@ function HotkeysTab({
 			<p className="settings-hint">
 				Si un atajo no funciona, probablemente lo esté usando otro programa: probá con otra combinación.
 			</p>
+			{recording ? (
+				<p className="settings-hint hotkey-hint">
+					{hint ?? 'Apretá la combinación. Podés usar Ctrl/Alt/Shift + una tecla, o una tecla F1-F24 sola (ej. F8).'}
+				</p>
+			) : null}
 		</>
 	);
 }

@@ -57,10 +57,16 @@ const NAMED_KEYS: Record<string, string> = {
 	'-': 'Minus',
 };
 
+/** Teclas que se pueden usar SOLAS (sin modificador) porque no se usan para escribir. */
+const SAFE_ALONE_KEY = /^F([1-9]|1[0-9]|2[0-4])$/;
+const SAFE_ALONE_NAMED = ['PrintScreen', 'ScrollLock', 'Pause', 'Insert'];
+
 /**
  * Convierte lo que apretó el usuario al formato de Electron ("Control+Shift+M").
- * Devuelve null si sólo apretó modificadores o ninguna tecla: un atajo global sin
- * modificador se comería el teclado de todo el sistema.
+ *
+ * Devuelve null si apretó sólo modificadores, o una tecla "peligrosa" sin modificador
+ * (una letra o número sola se comería esa tecla en TODO el sistema). Las teclas F1-F24
+ * y algunas especiales sí se permiten solas: no se usan para escribir.
  */
 export function eventToAccelerator(event: KeyboardEvent): string | null {
 	const modifiers: string[] = [];
@@ -68,10 +74,10 @@ export function eventToAccelerator(event: KeyboardEvent): string | null {
 	if (event.altKey) modifiers.push('Alt');
 	if (event.shiftKey) modifiers.push('Shift');
 	if (event.metaKey) modifiers.push('Super');
-	if (modifiers.length === 0) return null;
 	const key = event.key;
 	if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return null;
 	const name = NAMED_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+	if (modifiers.length === 0 && !SAFE_ALONE_KEY.test(name) && !SAFE_ALONE_NAMED.includes(name)) return null;
 	return [...modifiers, name].join('+');
 }
 
