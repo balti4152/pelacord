@@ -1082,13 +1082,25 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 
 	// ---------- Música: la Jam (una por canal de voz) ----------
 
-	const [musicState, setMusicState] = useState<MusicState>(EMPTY_MUSIC_STATE);
-	/** Última Jam vista y canal actual, para operar sin depender del render. */
-	const musicStateRef = useRef<MusicState>(EMPTY_MUSIC_STATE);
-	musicStateRef.current = musicState;
+	/**
+	 * La Jam se guarda POR CANAL: así, si te movés de canal, la música se queda donde estaba y
+	 * el host cambia solo entre los que quedaron. Antes era un único estado "de mi canal actual",
+	 * y por eso al moverte se frenaba o se borraba la cola para todos.
+	 */
+	const [musicByChannel, setMusicByChannel] = useState<Record<string, MusicState>>({});
 	const jamChannelId = state.voice.channelId;
+	const musicState = (jamChannelId ? musicByChannel[jamChannelId] : undefined) ?? EMPTY_MUSIC_STATE;
 	const jamChannelRef = useRef<string | null>(jamChannelId);
 	jamChannelRef.current = jamChannelId;
+	/** Última Jam vista de MI canal (para operar sin depender del render). */
+	const musicStateRef = useRef<MusicState>(EMPTY_MUSIC_STATE);
+	musicStateRef.current = musicState;
+	/** Cambia la Jam del canal actual. */
+	const setMusicState = useCallback((next: MusicState) => {
+		const channelId = jamChannelRef.current;
+		if (!channelId) return;
+		setMusicByChannel((prev) => ({...prev, [channelId]: next}));
+	}, []);
 	/** Id del track que estoy mandando (para saber si tengo que cambiar de tema). */
 	const myMusicTrackId = useRef<string | null>(null);
 
@@ -1108,6 +1120,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const broadcastMusic = useCallback((next: MusicState) => {
 		const channelId = jamChannelRef.current;
 		if (!channelId) return;
+		// Nunca se difunde una Jam vacía: si no, al volver a un canal con música se borraría para
+		// todos (que era justo el bug de "vuelvo y se frena la música").
+		if (!next.track && next.queue.length === 0) return;
 		getDesktopTransport()?.sendMusic({channelId, state: {...next, hostId: meRef.current.id}});
 	}, []);
 
@@ -1265,22 +1280,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [musicState, jamChannelId, state.me.id, musicSkip, musicParticipantsKey, iAmHost]);
 
-	// Si se van TODOS del canal, la Jam se limpia: no queda una cola vieja sonando cuando vuelvan.
-	// (Sin Firestore: el estado vive en memoria, así que alcanza con vaciarlo al salir.)
+	// Si me voy de un canal en el que NO quedaba nadie más, se limpia la Jam DE ESE canal.
+	// (Se limpia el canal que dejo, no el que abro: por eso antes, al volver, se borraba todo.)
 	const lastJamChannel = useRef<string | null>(null);
-	const lastOthersInChannel = useRef(0);
+	const othersByChannel = useRef<Record<string, number>>({});
 	useEffect(() => {
 		const channelId = state.voice.channelId;
 		const others = channelId
 			? (state.voiceMembers[channelId] ?? []).filter((participant) => participant.id !== state.me.id).length
 			: 0;
+		if (channelId) othersByChannel.current[channelId] = others;
 		const previous = lastJamChannel.current;
-		// Me fui de un canal y no quedaba nadie más: se borra la música de ese canal.
-		if (previous && previous !== channelId && lastOthersInChannel.current === 0) {
-			setMusicState(EMPTY_MUSIC_STATE);
+		if (previous && previous !== channelId && (othersByChannel.current[previous] ?? 0) === 0) {
+			setMusicByChannel((prev) => ({...prev, [previous]: EMPTY_MUSIC_STATE}));
 		}
 		lastJamChannel.current = channelId;
-		lastOthersInChannel.current = others;
 	}, [state.voice.channelId, state.voiceMembers, state.me.id]);
 
 	// El host difunde el estado: cuando cambia y cuando entra alguien (así el que llega se sincroniza).
