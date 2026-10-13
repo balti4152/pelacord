@@ -325,11 +325,6 @@
 	gap: 0.5rem;
 	height: 3rem;
 	padding: 0 1rem;
-	/* Espacio para los botones de la ventana (minimizar/maximizar/cerrar), que Windows dibuja
-	   ENCIMA del contenido arriba a la derecha. El ancho lo calcula el renderer según la escala
-	   de pantalla (--window-controls-width). Tiene que ir en ESTA regla: si se pone en otra más
-	   arriba, este `padding` la pisa. */
-	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 	background-color: var(--background-channel-header);
 	box-shadow: var(--shadow-sm);
 	flex-shrink: 0;
@@ -2158,8 +2153,17 @@
 	-webkit-app-region: drag;
 }
 
-/* Nota: la reserva de espacio para los botones de la ventana está en la regla de cada cabecera
-   (.chat-header y .call-stage-header), porque un `padding` puesto acá lo pisaba el de abajo. */
+/* Nota: la reserva de espacio para los botones de la ventana está en la regla de abajo. */
+
+/* Espacio para los botones de la ventana (minimizar/maximizar/cerrar), que Windows dibuja ENCIMA
+   del contenido, arriba a la derecha. Sólo hace falta cuando la cabecera LLEGA al borde derecho
+   de la ventana, o sea cuando la lista de miembros está oculta (con la lista abierta la cabecera
+   termina antes y esa reserva dejaba un hueco enorme al lado de los botones del chat). El ancho
+   lo calcula el renderer según la escala de pantalla: --window-controls-width. */
+.app-shell.is-members-hidden .chat-header,
+.app-shell.is-members-hidden .call-stage-header {
+	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
+}
 
 /* Información de la versión (Ajustes) */
 .version-info {
@@ -3153,9 +3157,6 @@ body.no-cosmetic-anim .avatar-effect::after {
 	justify-content: space-between;
 	height: 3rem;
 	padding: 0 1rem;
-	/* Misma reserva que el header del chat: si no, los botones de pantalla completa y compañía
-	   quedan debajo de los de Windows. */
-	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 	flex-shrink: 0;
 }
 
