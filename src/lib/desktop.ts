@@ -70,6 +70,14 @@ interface DesktopTransport {
 	getYtDlpVersion(): Promise<string | null>;
 	/** Música: busca en YouTube (título, duración, miniatura, autor). */
 	searchYouTube(query: string, limit?: number): Promise<TrackResult[]>;
+	/** Música: resuelve varias búsquedas de YouTube de una sola vez (para playlists enteras). */
+	searchYouTubeBatch(queries: string[]): Promise<Array<TrackResult | null>>;
+	/** Spotify: iniciar sesión (abre el navegador) y ver las playlists del usuario. */
+	spotifyLogin(): Promise<{ok: boolean; error?: string}>;
+	spotifyStatus(): Promise<SpotifyStatus>;
+	spotifyPlaylists(): Promise<{ok: boolean; error?: string; playlists: SpotifyPlaylist[]}>;
+	spotifyTracks(playlistId: string): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}>;
+	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
@@ -120,8 +128,32 @@ export interface TrackResult {
 	url: string;
 }
 
-/** Lo que devuelve el preview de un link. */
-export interface LinkPreviewData {
+/** Una playlist del usuario de Spotify (sólo los datos: el audio después sale de YouTube). */
+export interface SpotifyPlaylist {
+	id: string;
+	name: string;
+	owner: string;
+	/** Cuántas canciones tiene. */
+	tracks: number;
+	image: string;
+	url: string;
+}
+
+/** Una canción de una playlist de Spotify. */
+export interface SpotifyTrack {
+	title: string;
+	artists: string;
+	/** Segundos. 0 si no se sabe. */
+	duration: number;
+}
+
+export interface SpotifyStatus {
+	connected: boolean;
+	name?: string;
+	image?: string;
+}
+
+/** Lo que devuelve el preview de un link. */export interface LinkPreviewData {
 	url: string;
 	title: string;
 	description: string;

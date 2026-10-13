@@ -7,7 +7,7 @@
 //
 // Nadie edita nada: cada uno abre la app, pone su nombre y ya se ve con los demás.
 
-const {app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, net, protocol, session, shell, Notification, nativeImage, Tray} = require('electron');
+const {app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, net, protocol, safeStorage, session, shell, Notification, nativeImage, Tray} = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const dgram = require('node:dgram');
@@ -574,6 +574,18 @@ ipcMain.handle('pelacord:ytdlp-version', async () => {
 	return result.ok ? result.output : null;
 });
 
+/** Convierte una entrada de yt-dlp en un resultado de búsqueda (mismo formato en todos lados). */
+function ytEntryToResult(entry) {
+	return {
+		id: String(entry?.id || ''),
+		title: String(entry?.title || ''),
+		duration: Number(entry?.duration) || 0,
+		thumbnail: String(entry?.thumbnails?.[entry.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${entry?.id}/mqdefault.jpg`),
+		author: String(entry?.uploader || entry?.channel || ''),
+		url: String(entry?.url || `https://www.youtube.com/watch?v=${entry?.id}`),
+	};
+}
+
 /**
  * Busca en YouTube y devuelve la lista (título, duración, miniatura, autor).
  * Es la búsqueda del reproductor: lo que el usuario escribe o el tema de una playlist de Spotify.
@@ -600,18 +612,51 @@ ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
 	try {
 		const parsed = JSON.parse(result.output);
 		const entries = parsed.entries || [];
-		return entries.map((entry) => ({
-			id: String(entry.id || ''),
-			title: String(entry.title || ''),
-			duration: Number(entry.duration) || 0,
-			thumbnail: String(entry.thumbnails?.[entry.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${entry.id}/mqdefault.jpg`),
-			author: String(entry.uploader || entry.channel || ''),
-			url: String(entry.url || `https://www.youtube.com/watch?v=${entry.id}`),
-		}));
+		return entries.map(ytEntryToResult);
 	} catch (error) {
 		console.warn('[pelacord] búsqueda de YouTube ilegible:', String(error));
 		return [];
 	}
+});
+
+/**
+ * Resuelve VARIAS búsquedas de una sola vez (una corrida de yt-dlp para todas).
+ *
+ * Se usa al agregar una playlist de Spotify entera: lanzar un proceso por canción tardaría
+ * minutos. Devuelve un resultado por consulta, EN EL MISMO ORDEN (null si esa no encontró nada).
+ */
+ipcMain.handle('pelacord:yt-search-batch', async (_event, queries) => {
+	const list = (Array.isArray(queries) ? queries : []).map((query) => String(query || '').trim()).filter(Boolean);
+	if (list.length === 0) return [];
+	const args = ['--dump-json', '--flat-playlist', '--no-warnings', '--ignore-errors', ...list.map((query) => `ytsearch1:${query}`)];
+	const result = await runYtDlp(args, 90000);
+	const lines = result.ok ? result.output.split('\n').filter((line) => line.trim().startsWith('{')) : [];
+	// Si alguna búsqueda no devolvió nada, las líneas se desalinean y quedaría una canción por otra:
+	// en ese caso se resuelve de a una (más lento, pero seguro).
+	if (lines.length === list.length) {
+		return lines.map((line) => {
+			try {
+				return ytEntryToResult(JSON.parse(line));
+			} catch {
+				return null;
+			}
+		});
+	}
+	const single = [];
+	for (const query of list) {
+		const one = await runYtDlp(['--dump-single-json', '--flat-playlist', '--no-warnings', `ytsearch1:${query}`], 30000);
+		if (!one.ok) {
+			single.push(null);
+			continue;
+		}
+		try {
+			const entry = JSON.parse(one.output)?.entries?.[0];
+			single.push(entry ? ytEntryToResult(entry) : null);
+		} catch {
+			single.push(null);
+		}
+	}
+	return single;
 });
 
 /**
@@ -640,6 +685,282 @@ async function updateYtDlp() {
 	const result = await runYtDlp(['--update-to', 'nightly'], 180000);
 	console.log('[pelacord] yt-dlp update:', result.ok ? result.output.split('\n').slice(-1)[0] : result.error);
 }
+
+// ---------- Spotify (iniciar sesión y traer TUS playlists) ----------
+//
+// Se usa el flujo "Authorization Code + PKCE": es el único que deja iniciar sesión a una persona
+// y ver SUS playlists (el flujo de credenciales de cliente no sabe de quién son las cosas).
+// PKCE no necesita el secreto del cliente; el secreto de abajo es para el OTRO flujo (buscar
+// playlists públicas sin iniciar sesión), que todavía no se usa.
+//
+// OJO: la Redirect URI tiene que estar registrada IGUAL (letra por letra) en el panel de Spotify.
+
+const SPOTIFY_CLIENT_ID = '79a44472751948cdba2b111fa2fd8b4b';
+// Viaja dentro de la app: es un grupo de amigos y el usuario decidió no rotarlo.
+const SPOTIFY_CLIENT_SECRET = 'cc2179f8def94ecdbf101610b22c2ff1';
+const SPOTIFY_REDIRECT = 'http://127.0.0.1:8899/callback';
+const SPOTIFY_SCOPES = 'playlist-read-private playlist-read-collaborative user-read-private user-read-email';
+
+function spotifyStorePath() {
+	return path.join(app.getPath('userData'), 'spotify.json');
+}
+
+/** Lee la sesión guardada (el refresh token va cifrado con lo que dé Windows, si se puede). */
+function readSpotifyStore() {
+	try {
+		const data = JSON.parse(fs.readFileSync(spotifyStorePath(), 'utf8'));
+		if (data && data.encrypted) {
+			if (!safeStorage.isEncryptionAvailable()) return null;
+			return JSON.parse(safeStorage.decryptString(Buffer.from(data.encrypted, 'base64')));
+		}
+		return data && data.refreshToken ? data : null;
+	} catch {
+		return null;
+	}
+}
+
+function writeSpotifyStore(value) {
+	try {
+		const payload = safeStorage.isEncryptionAvailable()
+			? {encrypted: safeStorage.encryptString(JSON.stringify(value)).toString('base64')}
+			: value;
+		fs.writeFileSync(spotifyStorePath(), JSON.stringify(payload), 'utf8');
+	} catch (error) {
+		console.warn('[pelacord] no se pudo guardar la sesión de Spotify:', String(error));
+	}
+}
+
+function clearSpotifyStore() {
+	try {
+		fs.unlinkSync(spotifyStorePath());
+	} catch {
+		// no estaba: nada que borrar
+	}
+}
+
+/** Access token vigente. Se refresca solo cuando está por vencer (duran una hora). */
+let spotifyAccess = null;
+async function spotifyToken() {
+	const store = readSpotifyStore();
+	if (!store?.refreshToken) return null;
+	if (spotifyAccess && spotifyAccess.expiresAt > Date.now() + 30000) return spotifyAccess.token;
+	const res = await fetch('https://accounts.spotify.com/api/token', {
+		method: 'POST',
+		headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+		body: new URLSearchParams({grant_type: 'refresh_token', refresh_token: store.refreshToken, client_id: SPOTIFY_CLIENT_ID}),
+	});
+	if (!res.ok) {
+		// Si el refresh token ya no sirve, se olvida la sesión (así la interfaz vuelve a pedir login).
+		if (res.status === 400) {
+			console.warn('[pelacord] la sesión de Spotify ya no sirve: se pide iniciar sesión de nuevo');
+			clearSpotifyStore();
+			spotifyAccess = null;
+		}
+		return null;
+	}
+	const data = await res.json();
+	if (!data.access_token) return null;
+	spotifyAccess = {token: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000};
+	// Spotify a veces entrega un refresh token nuevo: se guarda para no perderlo.
+	if (data.refresh_token) writeSpotifyStore({...store, refreshToken: data.refresh_token});
+	return spotifyAccess.token;
+}
+
+/** Mensaje legible para los códigos de error de Spotify. */
+function spotifyErrorMessage(status) {
+	if (status === 401) return 'La sesión de Spotify venció: volvé a iniciar sesión.';
+	if (status === 403) return 'Spotify no deja leer esa playlist (las de otras personas o las automáticas, como "Descubrimiento semanal").';
+	if (status === 404) return 'Esa playlist ya no existe.';
+	if (status === 429) return 'Spotify está limitando los pedidos: probá de nuevo en un rato.';
+	return `Spotify respondió ${status}.`;
+}
+
+function base64Url(buffer) {
+	return Buffer.from(buffer).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** El par de PKCE: un secreto que se manda hasheado y se guarda para el canje. */
+function pkcePair() {
+	const verifier = base64Url(crypto.randomBytes(48));
+	return {verifier, challenge: base64Url(crypto.createHash('sha256').update(verifier).digest())};
+}
+
+/**
+ * Inicia sesión: abre el navegador en la pantalla de Spotify, escucha la vuelta en
+ * 127.0.0.1:8899 y canjea el código por los tokens. Devuelve cuando terminó (o falló).
+ */
+ipcMain.handle('pelacord:spotify-login', async () => {
+	const {verifier, challenge} = pkcePair();
+	const state = base64Url(crypto.randomBytes(12));
+	const authUrl = `https://accounts.spotify.com/authorize?${new URLSearchParams({
+		client_id: SPOTIFY_CLIENT_ID,
+		response_type: 'code',
+		redirect_uri: SPOTIFY_REDIRECT,
+		code_challenge_method: 'S256',
+		code_challenge: challenge,
+		state,
+		scope: SPOTIFY_SCOPES,
+	})}`;
+
+	return new Promise((resolve) => {
+		let settled = false;
+		let timer = null;
+		const finish = (result) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			try {
+				server.close();
+			} catch {
+				// ya estaba cerrado
+			}
+			resolve(result);
+		};
+
+		const server = http.createServer(async (req, res) => {
+			const url = new URL(req.url, SPOTIFY_REDIRECT);
+			if (url.pathname !== '/callback') {
+				res.writeHead(404);
+				res.end();
+				return;
+			}
+			const page = (title, detail) =>
+				`<!doctype html><meta charset="utf-8"><title>${title}</title>` +
+				`<body style="font-family:Segoe UI,system-ui,sans-serif;background:#121212;color:#fff;display:flex;` +
+				`align-items:center;justify-content:center;height:100vh;margin:0"><div style="text-align:center">` +
+				`<h1 style="color:#1ed760;margin:0 0 8px">${title}</h1><p style="color:#b3b3b3;margin:0">${detail}</p></div>`;
+			const code = url.searchParams.get('code');
+			const denied = url.searchParams.get('error');
+			if (denied || !code || url.searchParams.get('state') !== state) {
+				res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+				res.end(page('No se pudo iniciar sesión', 'Podés cerrar esta pestaña y volver a Pelacord.'));
+				finish({ok: false, error: denied ? 'Cancelaste el inicio de sesión en Spotify.' : 'La respuesta de Spotify no era la esperada.'});
+				return;
+			}
+			res.writeHead(200, {'Content-Type': 'text/html; charset=utf-8'});
+			res.end(page('¡Listo!', 'Ya podés volver a Pelacord: tus playlists están ahí.'));
+			const tokenRes = await fetch('https://accounts.spotify.com/api/token', {
+				method: 'POST',
+				headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+				body: new URLSearchParams({
+					grant_type: 'authorization_code',
+					code,
+					redirect_uri: SPOTIFY_REDIRECT,
+					client_id: SPOTIFY_CLIENT_ID,
+					code_verifier: verifier,
+				}),
+			});
+			const data = await tokenRes.json().catch(() => ({}));
+			if (!tokenRes.ok || !data.refresh_token) {
+				const detail = String(data.error_description || data.error || `HTTP ${tokenRes.status}`);
+				finish({
+					ok: false,
+					error: /redirect/i.test(detail)
+						? `Spotify rechazó la redirección. En tu panel de Spotify (Redirect URIs) agregá exactamente: ${SPOTIFY_REDIRECT}`
+						: detail,
+				});
+				return;
+			}
+			spotifyAccess = {token: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000};
+			writeSpotifyStore({refreshToken: data.refresh_token});
+			finish({ok: true});
+		});
+
+		server.on('error', (error) => {
+			finish({
+				ok: false,
+				error:
+					error.code === 'EADDRINUSE'
+						? 'El puerto 8899 está ocupado (¿hay otra app usándolo?). Cerrá lo que lo esté usando y probá de nuevo.'
+						: `No se pudo escuchar la vuelta de Spotify: ${error.message}`,
+			});
+		});
+		server.listen(8899, '127.0.0.1', () => {
+			void shell.openExternal(authUrl).catch((error) => finish({ok: false, error: `No se pudo abrir el navegador: ${error.message}`}));
+		});
+		timer = setTimeout(() => finish({ok: false, error: 'Pasaron 3 minutos sin respuesta de Spotify.'}), 180000);
+	});
+});
+
+/** ¿Hay sesión? Devuelve también el nombre para saludar. */
+ipcMain.handle('pelacord:spotify-status', async () => {
+	const store = readSpotifyStore();
+	if (!store?.refreshToken) return {connected: false};
+	const token = await spotifyToken();
+	if (!token) return {connected: false};
+	const res = await fetch('https://api.spotify.com/v1/me', {headers: {Authorization: `Bearer ${token}`}});
+	if (!res.ok) return {connected: true, name: store.name ?? ''};
+	const me = await res.json().catch(() => ({}));
+	const name = me.display_name || me.id || '';
+	if (name && name !== store.name) writeSpotifyStore({...store, name});
+	return {connected: true, name, image: me.images?.[0]?.url ?? ''};
+});
+
+/** Todas las playlists del usuario (con paginado: Spotify devuelve de a 50). */
+ipcMain.handle('pelacord:spotify-playlists', async () => {
+	const token = await spotifyToken();
+	if (!token) return {ok: false, error: 'No hay sesión de Spotify.'};
+	const playlists = [];
+	let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
+	for (let page = 0; page < 20 && url; page++) {
+		const res = await fetch(url, {headers: {Authorization: `Bearer ${token}`}});
+		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status), playlists};
+		const data = await res.json().catch(() => ({}));
+		for (const item of data.items ?? []) {
+			if (!item) continue;
+			playlists.push({
+				id: String(item.id || ''),
+				name: String(item.name || 'Playlist'),
+				owner: String(item.owner?.display_name || item.owner?.id || ''),
+				tracks: Number(item.tracks?.total) || 0,
+				image: String(item.images?.[0]?.url || ''),
+				url: String(item.external_urls?.spotify || ''),
+			});
+		}
+		url = data.next || '';
+	}
+	return {ok: true, playlists};
+});
+
+/** Las canciones de una playlist (nombre, artistas, duración). */
+ipcMain.handle('pelacord:spotify-tracks', async (_event, playlistId) => {
+	const token = await spotifyToken();
+	if (!token) return {ok: false, error: 'No hay sesión de Spotify.'};
+	const id = String(playlistId || '').trim();
+	if (!id) return {ok: false, error: 'Falta la playlist.'};
+	// Spotify renombró /tracks a /items (y el campo "track" a "item"): se prueban los dos.
+	let useItems = true;
+	let url = `https://api.spotify.com/v1/playlists/${encodeURIComponent(id)}/items?limit=100`;
+	const tracks = [];
+	for (let page = 0; page < 30 && url; page++) {
+		const res = await fetch(url, {headers: {Authorization: `Bearer ${token}`}});
+		if (res.status === 404 && useItems) {
+			useItems = false;
+			url = `https://api.spotify.com/v1/playlists/${encodeURIComponent(id)}/tracks?limit=100`;
+			continue;
+		}
+		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status), tracks};
+		const data = await res.json().catch(() => ({}));
+		for (const item of data.items ?? []) {
+			const track = item?.item ?? item?.track;
+			if (!track?.name) continue;
+			tracks.push({
+				title: String(track.name),
+				artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(', '),
+				duration: Math.round((Number(track.duration_ms) || 0) / 1000),
+			});
+		}
+		url = data.next || '';
+	}
+	return {ok: true, tracks};
+});
+
+/** Cerrar sesión: se olvida el token guardado. */
+ipcMain.handle('pelacord:spotify-logout', () => {
+	clearSpotifyStore();
+	spotifyAccess = null;
+	return true;
+});
 
 // ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------
 

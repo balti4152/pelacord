@@ -1,7 +1,9 @@
 import {useEffect, useState} from 'react';
 import {ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, VolumeX, X} from 'lucide-react';
+import {SiSpotify} from 'react-icons/si';
 import {type TrackResult, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
+import {SpotifyView} from '@/components/SpotifyView';
 import {useStore} from '@/state/store';
 
 /** Convierte un resultado de búsqueda en un tema de la cola. */
@@ -38,7 +40,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const [searchTerm, setSearchTerm] = useState('');
 	const [results, setResults] = useState<TrackResult[]>([]);
 	const [loading, setLoading] = useState(false);
-	const [tab, setTab] = useState<'search' | 'queue'>('search');
+	const [tab, setTab] = useState<'search' | 'queue' | 'spotify'>('search');
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
 	/** Para controlar la Jam hay que estar en un canal de voz: si no, no hay dónde sonar. */
@@ -95,6 +97,12 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 					<button type="button" className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}>
 						<ListMusic size={15} /> Cola
 						{musicState.queue.length > 0 ? <span className="music-badge">{musicState.queue.length}</span> : null}
+					</button>
+					<button
+						type="button"
+						className={`spotify-tab${tab === 'spotify' ? ' is-active' : ''}`}
+						onClick={() => setTab('spotify')}>
+						<SiSpotify size={15} /> Spotify
 					</button>
 				</nav>
 				<button type="button" className="music-close" onClick={onClose} title="Cerrar">
@@ -163,7 +171,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							))}
 						</ul>
 					</>
-				) : (
+				) : tab === 'queue' ? (
 					<>
 						{current ? (
 							<div className="music-now">
@@ -200,6 +208,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							))}
 						</ul>
 					</>
+				) : (
+					<SpotifyView />
 				)}
 			</div>
 

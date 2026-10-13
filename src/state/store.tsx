@@ -495,6 +495,8 @@ interface StoreContextValue {
 	/** Pone un tema en la Jam (null = cortar). Cualquiera puede, es estilo Jam. */
 	musicPlay: (track: MusicTrack | null, startAtMs?: number) => void;
 	musicEnqueue: (track: MusicTrack) => void;
+	/** Agrega una lista entera (una playlist de Spotify, por ejemplo). */
+	musicEnqueueMany: (tracks: MusicTrack[]) => void;
 	musicRemove: (index: number) => void;
 	musicMove: (from: number, to: number) => void;
 	musicSkip: () => void;
@@ -1276,11 +1278,20 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	jamChannelRef.current = jamChannelId;
 	/** Última Jam vista de MI canal (para operar sin depender del render). */
 	const musicStateRef = useRef<MusicState>(EMPTY_MUSIC_STATE);
-	musicStateRef.current = musicState;
+	// El ref sigue a la Jam del canal: al cambiar de canal apunta a la de ESE canal, y cuando el
+	// estado se confirma queda igual a lo aplicado. No se asigna en el render a propósito (ver
+	// setMusicState): si se asignara ahí, un render en vuelo podría pisar una orden recién aplicada.
+	useEffect(() => {
+		musicStateRef.current = (jamChannelId ? musicByChannel[jamChannelId] : undefined) ?? EMPTY_MUSIC_STATE;
+	}, [jamChannelId, musicByChannel]);
 	/** Cambia la Jam del canal actual. */
 	const setMusicState = useCallback((next: MusicState) => {
 		const channelId = jamChannelRef.current;
 		if (!channelId) return;
+		// Se actualiza el ref EN EL MOMENTO: si llegan dos órdenes seguidas (antes de que React
+		// vuelva a renderizar), la segunda tiene que ver el resultado de la primera. Si no, se
+		// calcula sobre el estado viejo y la PISA — se perdían las canciones de las tandas previas.
+		musicStateRef.current = next;
 		setMusicByChannel((prev) => ({...prev, [channelId]: next}));
 	}, []);
 	/** Id del track que estoy mandando (para saber si tengo que cambiar de tema). */
@@ -1351,6 +1362,14 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	);
 	const musicEnqueue = useCallback(
 		(track: MusicTrack) => sendMusicCommand({kind: 'enqueue', track}),
+		[sendMusicCommand],
+	);
+	/** Agrega una lista entera (por ejemplo, una playlist de Spotify) de una sola vez. */
+	const musicEnqueueMany = useCallback(
+		(tracks: MusicTrack[]) => {
+			if (tracks.length === 0) return;
+			sendMusicCommand({kind: 'enqueueMany', tracks});
+		},
 		[sendMusicCommand],
 	);
 	const musicRemove = useCallback((index: number) => sendMusicCommand({kind: 'remove', index}), [sendMusicCommand]);
@@ -1529,6 +1548,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicActive,
 			musicPlay,
 			musicEnqueue,
+			musicEnqueueMany,
 			musicRemove,
 			musicMove,
 			musicSkip,
@@ -1553,6 +1573,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicActive,
 			musicPlay,
 			musicEnqueue,
+			musicEnqueueMany,
 			musicRemove,
 			musicMove,
 			musicSkip,

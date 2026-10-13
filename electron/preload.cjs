@@ -51,6 +51,13 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	/** Música: versión de yt-dlp, búsqueda y URL de audio para streamear. */
 	getYtDlpVersion: () => ipcRenderer.invoke('pelacord:ytdlp-version'),
 	searchYouTube: (query, limit) => ipcRenderer.invoke('pelacord:yt-search', query, limit),
+	searchYouTubeBatch: (queries) => ipcRenderer.invoke('pelacord:yt-search-batch', queries),
+	/** Spotify: iniciar sesión, playlists y canciones. */
+	spotifyLogin: () => ipcRenderer.invoke('pelacord:spotify-login'),
+	spotifyStatus: () => ipcRenderer.invoke('pelacord:spotify-status'),
+	spotifyPlaylists: () => ipcRenderer.invoke('pelacord:spotify-playlists'),
+	spotifyTracks: (playlistId) => ipcRenderer.invoke('pelacord:spotify-tracks', playlistId),
+	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
 	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),

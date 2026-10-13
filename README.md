@@ -110,6 +110,12 @@ On Windows, allow the app through the firewall for private networks.
 - **Who is in a call (presence):** deliberately **NOT** on Firebase. It runs **peer-to-peer over
   ZeroTier** through the desktop transport (`electron/main.cjs` + `src/lib/desktop.ts`), so it
   never consumes the free quota. In the browser (no desktop shell) it is local-only.
+- **Music (the Jam):** the shared playback state travels over the **mesh**, never Firebase (realtime
+  state on Firestore burned the quota and broke playback when the cloud was down). The audio comes
+  from **yt-dlp** (YouTube), bundled with the app and self-updating. **Spotify is used as a catalog**:
+  you log in with `Authorization Code + PKCE` (`electron/main.cjs`, loopback redirect), Pelacord
+  lists your playlists and, when you hit play, resolves each song on YouTube and queues it — Spotify
+  never provides the audio here (its API does not expose it).
 
 ## Roadmap
 
