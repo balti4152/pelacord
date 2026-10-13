@@ -497,11 +497,12 @@ ipcMain.handle('pelacord:ytdlp-version', async () => {
 });
 
 /**
- * Se actualiza solo: YouTube cambia seguido y un yt-dlp viejo deja de funcionar.
- * Se corre al arrancar (y cada 12 h) sin molestar: si falla, se sigue con la versión que hay.
+ * Se actualiza solo, en el canal NIGHTLY (sale build casi todos los días): YouTube cambia
+ * seguido y así siempre tenemos lo último. Se corre al arrancar y cada 6 h, sin molestar:
+ * si falla, se sigue con la versión que hay.
  */
 async function updateYtDlp() {
-	const result = await runYtDlp(['-U'], 120000);
+	const result = await runYtDlp(['--update-to', 'nightly'], 180000);
 	console.log('[pelacord] yt-dlp update:', result.ok ? result.output.split('\n').slice(-1)[0] : result.error);
 }
 
@@ -1266,10 +1267,10 @@ if (!gotLock) {
 	});
 
 	app.whenReady().then(() => {
-		// yt-dlp se actualiza solo al arrancar y cada 12 h: YouTube cambia seguido y un binario
-		// viejo deja de funcionar. Es best-effort: nunca bloquea ni molesta al usuario.
+		// yt-dlp se actualiza solo (canal nightly) al arrancar y cada 6 h: YouTube cambia seguido
+		// y un binario viejo deja de funcionar. Es best-effort: nunca bloquea ni molesta.
 		void updateYtDlp();
-		setInterval(() => void updateYtDlp(), 12 * 60 * 60 * 1000);
+		setInterval(() => void updateYtDlp(), 6 * 60 * 60 * 1000);
 		session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {			try {
 				const sources = await desktopCapturer.getSources({types: ['screen', 'window']});
 				const chosen = (selectedSourceId && sources.find((source) => source.id === selectedSourceId)) || sources[0];
