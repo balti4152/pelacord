@@ -40,6 +40,10 @@
       {
         "from": "build/icons",
         "to": "icons"
+      },
+      {
+        "from": "resources/yt-dlp.exe",
+        "to": "yt-dlp.exe"
       }
     ],
     "publish": [

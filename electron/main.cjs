@@ -15,6 +15,7 @@ const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const {spawn} = require('node:child_process');
 const {pathToFileURL} = require('node:url');
 const {WebSocketServer, WebSocket} = require('ws');
 const {startUpdateLoop} = require('./update-loop.cjs');
@@ -443,6 +444,66 @@ ipcMain.on('pelacord:command', (_event, message) => {
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);
+
+// ---------- yt-dlp (bajar el audio de un link, para el reproductor de música) ----------
+
+/** Ruta del binario: empaquetado vive en resources, en desarrollo en la carpeta del proyecto. */
+function ytDlpPath() {
+	const packaged = process.resourcesPath ? path.join(process.resourcesPath, 'yt-dlp.exe') : null;
+	if (packaged && fs.existsSync(packaged)) return packaged;
+	const dev = path.join(__dirname, '..', 'resources', 'yt-dlp.exe');
+	return fs.existsSync(dev) ? dev : null;
+}
+
+/** Corre yt-dlp y devuelve la salida. */
+function runYtDlp(args, timeoutMs = 60000) {
+	return new Promise((resolve) => {
+		const bin = ytDlpPath();
+		if (!bin) {
+			resolve({ok: false, error: 'yt-dlp no está disponible'});
+			return;
+		}
+		const child = spawn(bin, args, {windowsHide: true});
+		let out = '';
+		let err = '';
+		const timer = setTimeout(() => {
+			try {
+				child.kill();
+			} catch {
+				// se ignora
+			}
+			resolve({ok: false, error: 'tardó demasiado'});
+		}, timeoutMs);
+		child.stdout.on('data', (chunk) => {
+			out += chunk.toString();
+		});
+		child.stderr.on('data', (chunk) => {
+			err += chunk.toString();
+		});
+		child.on('error', (error) => {
+			clearTimeout(timer);
+			resolve({ok: false, error: String(error)});
+		});
+		child.on('close', (code) => {
+			clearTimeout(timer);
+			resolve(code === 0 ? {ok: true, output: out.trim()} : {ok: false, error: err.trim() || `salió con ${code}`});
+		});
+	});
+}
+
+ipcMain.handle('pelacord:ytdlp-version', async () => {
+	const result = await runYtDlp(['--version'], 20000);
+	return result.ok ? result.output : null;
+});
+
+/**
+ * Se actualiza solo: YouTube cambia seguido y un yt-dlp viejo deja de funcionar.
+ * Se corre al arrancar (y cada 12 h) sin molestar: si falla, se sigue con la versión que hay.
+ */
+async function updateYtDlp() {
+	const result = await runYtDlp(['-U'], 120000);
+	console.log('[pelacord] yt-dlp update:', result.ok ? result.output.split('\n').slice(-1)[0] : result.error);
+}
 
 // ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------
 
@@ -1205,6 +1266,10 @@ if (!gotLock) {
 	});
 
 	app.whenReady().then(() => {
+		// yt-dlp se actualiza solo al arrancar y cada 12 h: YouTube cambia seguido y un binario
+		// viejo deja de funcionar. Es best-effort: nunca bloquea ni molesta al usuario.
+		void updateYtDlp();
+		setInterval(() => void updateYtDlp(), 12 * 60 * 60 * 1000);
 		session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {			try {
 				const sources = await desktopCapturer.getSources({types: ['screen', 'window']});
 				const chosen = (selectedSourceId && sources.find((source) => source.id === selectedSourceId)) || sources[0];
