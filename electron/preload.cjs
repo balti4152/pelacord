@@ -52,6 +52,7 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 		return () => ipcRenderer.removeListener('pelacord:hotkey', handler);
 	},
 	setBadge: (payload) => ipcRenderer.send('pelacord:badge', payload),
+	showWindow: () => ipcRenderer.send('pelacord:show-window'),
 	setTitleBar: (payload) => ipcRenderer.send('pelacord:set-titlebar', payload),
 	onNotificationClick: (callback) => {
 		const handler = (_event, message) => callback(message);

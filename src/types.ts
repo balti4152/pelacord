@@ -167,6 +167,11 @@ export interface VoiceState {
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
+	/**
+	 * Estado del micrófono que había justo antes de ensordecerte, para restaurarlo al
+	 * reactivar el audio: si estabas muteado, seguís muteado; si no, volvés con micrófono.
+	 */
+	mutedBeforeDeafen: boolean;
 	video: boolean;
 	sharing: boolean;
 	/** Whether the full-screen call stage is showing. Tapping a text channel closes it. */

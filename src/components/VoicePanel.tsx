@@ -75,14 +75,14 @@ export function VoicePanel({onOpenVoice}: {onOpenVoice: () => void}): JSX.Elemen
 				<button
 					type="button"
 					className={`voice-mini${voice.muted ? ' is-danger' : ''}`}
-					title={voice.muted ? 'Activar micrófono' : 'Silenciar'}
+					title={voice.muted ? (voice.deafened ? 'Activar micrófono y audio' : 'Activar micrófono') : 'Silenciar'}
 					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'muted'})}>
 					<Icon name={voice.muted ? 'micOff' : 'mic'} size={18} />
 				</button>
 				<button
 					type="button"
 					className={`voice-mini${voice.deafened ? ' is-danger' : ''}`}
-					title={voice.deafened ? 'Activar audio' : 'Ensordecer'}
+					title={voice.deafened ? 'Activar audio' : 'Ensordecer y silenciar el micrófono'}
 					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'deafened'})}>
 					<Icon name={voice.deafened ? 'headphonesOff' : 'headphones'} size={18} />
 				</button>

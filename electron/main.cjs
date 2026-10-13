@@ -748,6 +748,10 @@ function registerHotkeys(bindings) {
 
 ipcMain.handle('pelacord:set-hotkeys', (_event, bindings) => registerHotkeys(bindings));
 
+/** Trae la ventana al frente. El selector de pantalla lo necesita cuando el atajo se apretó
+ * con otro programa en primer plano: si no, el modal abriría detrás y parecería que no pasa nada. */
+ipcMain.on('pelacord:show-window', () => showWindow());
+
 /** Colores de la barra de título, para que siga el tema elegido. */
 ipcMain.on('pelacord:set-titlebar', (_event, payload) => {
 	if (!mainWindow || mainWindow.isDestroyed()) return;

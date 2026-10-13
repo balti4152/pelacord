@@ -150,7 +150,7 @@ function seedState(): AppState {
 			notifications: true,
 			hotkeys: {...DEFAULT_HOTKEYS},
 		},
-		voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
+		voice: {channelId: null, muted: false, deafened: false, mutedBeforeDeafen: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
 		voiceMembers: remote ? {} : demoVoiceMembers,
 		unread: {},
 		mutedChannels: [],
@@ -271,7 +271,7 @@ function reducer(state: AppState, action: Action): AppState {
 			for (const [channelId, list] of Object.entries(state.voiceMembers)) {
 				voiceMembers[channelId] = list.filter((p) => p.id !== state.me.id);
 			}
-			return {...state, voiceMembers, voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null}};
+			return {...state, voiceMembers, voice: {channelId: null, muted: false, deafened: false, mutedBeforeDeafen: false, video: false, sharing: false, stageOpen: false, joinedAt: null}};
 		}
 		case 'minimizeVoice':
 			return {...state, voice: {...state.voice, stageOpen: false}};
@@ -280,7 +280,32 @@ function reducer(state: AppState, action: Action): AppState {
 		case 'toggleVoiceFlag': {
 			if (action.flag === 'deafened') {
 				const deafened = !state.voice.deafened;
-				return {...state, voice: {...state.voice, deafened, muted: deafened || state.voice.muted}};
+				// Ensordecerte también silencia el micrófono (si no, hablarías sin escuchar).
+				// Al reactivar el audio se recupera el estado de micrófono que tenías antes:
+				// si estabas muteado seguís muteado, y si no, volvés con micrófono abierto.
+				return {
+					...state,
+					voice: {
+						...state.voice,
+						deafened,
+						muted: deafened ? true : state.voice.mutedBeforeDeafen,
+						mutedBeforeDeafen: deafened ? state.voice.muted : state.voice.mutedBeforeDeafen,
+					},
+				};
+			}
+			if (action.flag === 'muted') {
+				const muted = !state.voice.muted;
+				// Si estabas ensordecido y activás el micrófono, también se reactiva el audio:
+				// quedarte sordo con el micrófono abierto era el bug (hablás y no escuchás).
+				return {
+					...state,
+					voice: {
+						...state.voice,
+						muted,
+						deafened: muted ? state.voice.deafened : false,
+						mutedBeforeDeafen: muted ? state.voice.mutedBeforeDeafen : false,
+					},
+				};
 			}
 			return {...state, voice: {...state.voice, [action.flag]: !state.voice[action.flag]}};
 		}
@@ -298,7 +323,7 @@ function loadState(): AppState {
 		if (!parsed || !parsed.channels || !parsed.settings) return seedState();
 		if (!Array.isArray(parsed.members) || parsed.members.length === 0) parsed.members = [parsed.me];
 		// Una app recién abierta no está en ninguna llamada.
-		parsed.voice = {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null};
+		parsed.voice = {channelId: null, muted: false, deafened: false, mutedBeforeDeafen: false, video: false, sharing: false, stageOpen: false, joinedAt: null};
 		parsed.voiceMembers = {};
 		if (typeof parsed.settings.inputDeviceId !== 'string') parsed.settings.inputDeviceId = 'default';
 		if (typeof parsed.settings.outputDeviceId !== 'string') parsed.settings.outputDeviceId = 'default';

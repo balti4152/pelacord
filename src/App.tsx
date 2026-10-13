@@ -145,6 +145,10 @@ export function App(): JSX.Element {
 		prevRemote.current = remoteInChannel;
 	}, [remoteInChannel, state.voice.channelId]);
 
+	/** ¿Estoy compartiendo pantalla? Se guarda en un ref para que los atajos lo lean siempre al día. */
+	const sharingRef = useRef(state.voice.sharing);
+	sharingRef.current = state.voice.sharing;
+
 	/** Comparte la ventana que el usuario tenía enfocada, sin abrir el selector. */
 	async function shareFocusedWindow(): Promise<void> {
 		const transport = getDesktopTransport();
@@ -156,7 +160,7 @@ export function App(): JSX.Element {
 			if (!target) return;
 			transport.selectSource(target.id);
 			voiceMesh.setScreenOptions({width: 1920, height: 1080, frameRate: 60, audio: false});
-			if (!state.voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+			dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
 		} catch {
 			// sin fuentes disponibles: no pasa nada
 		}
@@ -170,13 +174,20 @@ export function App(): JSX.Element {
 			if (action === 'mute') dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
 			else if (action === 'deafen') dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
 			else if (action === 'shareScreen') {
-				if (state.voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-				else openSharePicker();
+				// Es un interruptor: si ya estás compartiendo, el mismo atajo corta la transmisión.
+				if (sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+				else {
+					// El selector tiene que verse: se trae la ventana al frente.
+					transport.showWindow();
+					openSharePicker();
+				}
 			} else if (action === 'shareFocused') {
-				void shareFocusedWindow();
+				if (sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+				else void shareFocusedWindow();
 			}
 		});
-	}, [state.voice.sharing]);
+		// Se registran una sola vez: el estado se lee del ref, no del render.
+	}, []);
 
 	if (!hasChosenName()) return <Onboarding />;
 

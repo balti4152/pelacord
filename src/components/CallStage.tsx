@@ -356,7 +356,7 @@ export function CallStage(): JSX.Element | null {
 				<button
 					type="button"
 					className={`call-control${voice.muted ? ' is-active' : ''}`}
-					title={voice.muted ? 'Activar micrófono' : 'Silenciar'}
+					title={voice.muted ? (voice.deafened ? 'Activar micrófono y audio' : 'Activar micrófono') : 'Silenciar'}
 					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'muted'})}>
 					<Icon name={voice.muted ? 'micOff' : 'mic'} size={22} />
 				</button>
@@ -380,7 +380,7 @@ export function CallStage(): JSX.Element | null {
 				<button
 					type="button"
 					className={`call-control${voice.deafened ? ' is-active' : ''}`}
-					title={voice.deafened ? 'Activar audio' : 'Ensordecer'}
+					title={voice.deafened ? 'Activar audio' : 'Ensordecer y silenciar el micrófono'}
 					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'deafened'})}>
 					<Icon name={voice.deafened ? 'headphonesOff' : 'headphones'} size={22} />
 				</button>
