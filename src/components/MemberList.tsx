@@ -52,52 +52,57 @@ export function MemberList(): JSX.Element {
 
 	return (
 		<aside className="members" data-flx="member-list">
-			{groups.map((group) =>
-				group.members.length === 0 ? null : (
-					<div key={group.label}>
-						<div className="members-group-header">
-							{group.label} - {group.members.length}
-						</div>
-						{group.members.map((member) => (
-							<div
-								key={member.id}
-								className={`member${member.presence === 'offline' ? ' is-offline' : ''}`}
-								role="button"
-								tabIndex={0}
-								onClick={() => setProfile(toUser(member))}
-								onContextMenu={(event) => {
-									event.preventDefault();
-									setMenu({user: toUser(member), x: event.clientX, y: event.clientY});
-								}}>
-								<Avatar member={member} size={32} showStatus statusBorderColor="var(--background-secondary)" />
-								<div className="member-info">
-									<div className="member-name" style={member.isBot ? {color: 'var(--brand-primary-light)'} : undefined}>
-										{member.name}
-										{member.isBot ? (
-											<span
-												style={{
-													marginLeft: '0.375rem',
-													padding: '0 0.25rem',
-													borderRadius: '3px',
-													backgroundColor: 'var(--brand-primary)',
-													color: 'var(--text-on-brand-primary)',
-													fontSize: '0.625rem',
-													fontWeight: 600,
-													verticalAlign: 'middle',
-												}}>
-												BOT
-											</span>
-										) : null}
-									</div>
-									{member.status ? <div className="member-sub">{member.status}</div> : null}
-								</div>
+			{/* Franja de arriba: la dejan libre los botones de la ventana (minimizar/maximizar/cerrar),
+			    que Windows dibuja encima del contenido. También sirve para arrastrar la ventana. */}
+			<div className="members-titlebar" aria-hidden="true" />
+			<div className="members-scroll">
+				{groups.map((group) =>
+					group.members.length === 0 ? null : (
+						<div key={group.label}>
+							<div className="members-group-header">
+								{group.label} - {group.members.length}
 							</div>
-						))}
-					</div>
-				),
-			)}
-			<div style={{padding: '1rem 0.5rem 0', color: 'var(--text-tertiary)', fontSize: '0.75rem'}}>
-				<Icon name="members" size={14} />
+							{group.members.map((member) => (
+								<div
+									key={member.id}
+									className={`member${member.presence === 'offline' ? ' is-offline' : ''}`}
+									role="button"
+									tabIndex={0}
+									onClick={() => setProfile(toUser(member))}
+									onContextMenu={(event) => {
+										event.preventDefault();
+										setMenu({user: toUser(member), x: event.clientX, y: event.clientY});
+									}}>
+									<Avatar member={member} size={32} showStatus statusBorderColor="var(--background-secondary)" />
+									<div className="member-info">
+										<div className="member-name" style={member.isBot ? {color: 'var(--brand-primary-light)'} : undefined}>
+											{member.name}
+											{member.isBot ? (
+												<span
+													style={{
+														marginLeft: '0.375rem',
+														padding: '0 0.25rem',
+														borderRadius: '3px',
+														backgroundColor: 'var(--brand-primary)',
+														color: 'var(--text-on-brand-primary)',
+														fontSize: '0.625rem',
+														fontWeight: 600,
+														verticalAlign: 'middle',
+													}}>
+													BOT
+												</span>
+											) : null}
+										</div>
+										{member.status ? <div className="member-sub">{member.status}</div> : null}
+									</div>
+								</div>
+							))}
+						</div>
+					),
+				)}
+				<div style={{padding: '1rem 0.5rem 0', color: 'var(--text-tertiary)', fontSize: '0.75rem'}}>
+					<Icon name="members" size={14} />
+				</div>
 			</div>
 
 			{menu ? (

@@ -325,6 +325,11 @@
 	gap: 0.5rem;
 	height: 3rem;
 	padding: 0 1rem;
+	/* Espacio para los botones de la ventana (minimizar/maximizar/cerrar), que Windows dibuja
+	   ENCIMA del contenido arriba a la derecha. El ancho lo calcula el renderer según la escala
+	   de pantalla (--window-controls-width). Tiene que ir en ESTA regla: si se pone en otra más
+	   arriba, este `padding` la pisa. */
+	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 	background-color: var(--background-channel-header);
 	box-shadow: var(--shadow-sm);
 	flex-shrink: 0;
@@ -1008,9 +1013,25 @@
 	display: flex;
 	flex-direction: column;
 	background-color: var(--background-secondary);
-	overflow-y: auto;
-	padding: 0 0.5rem 1rem;
+	padding: 0 0.5rem;
 	min-height: 0;
+}
+
+/* Franja libre arriba: ahí Windows dibuja minimizar/maximizar/cerrar. Sin esto, el encabezado
+   del primer grupo ("En línea") y el primer miembro quedaban debajo de esos botones. */
+.members-titlebar {
+	height: 2.5rem;
+	flex-shrink: 0;
+	-webkit-app-region: drag;
+}
+
+/* El scroll va en este contenedor, no en `.members`: si no, la franja de arriba se iría con el
+   scroll y el contenido volvería a meterse debajo de los botones de la ventana. */
+.members-scroll {
+	flex: 1;
+	min-height: 0;
+	overflow-y: auto;
+	padding-bottom: 1rem;
 }
 
 .members-group-header {
@@ -2137,13 +2158,8 @@
 	-webkit-app-region: drag;
 }
 
-/* Lugar para los botones de la ventana (arriba a la derecha).
-   El ancho lo calcula el renderer según la escala de Windows (--window-controls-width): a 125%
-   o 150% los botones son más anchos y, si no se reserva de más, tapan los de la app. */
-.chat-header,
-.call-stage-header {
-	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
-}
+/* Nota: la reserva de espacio para los botones de la ventana está en la regla de cada cabecera
+   (.chat-header y .call-stage-header), porque un `padding` puesto acá lo pisaba el de abajo. */
 
 /* Información de la versión (Ajustes) */
 .version-info {
@@ -3137,6 +3153,9 @@ body.no-cosmetic-anim .avatar-effect::after {
 	justify-content: space-between;
 	height: 3rem;
 	padding: 0 1rem;
+	/* Misma reserva que el header del chat: si no, los botones de pantalla completa y compañía
+	   quedan debajo de los de Windows. */
+	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 	flex-shrink: 0;
 }
 
