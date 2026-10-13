@@ -740,11 +740,22 @@ function startFileServer() {
 		res.writeHead(200, {'Content-Length': stat.size});
 		fs.createReadStream(file.path).pipe(res);
 	});
-	server.listen(0, '0.0.0.0', () => {
+	// Puerto FIJO para el servidor de archivos: si fuera efímero (listen(0)), cambiaría en cada
+	// arranque y TODAS las URLs ya compartidas (avatares, banners, adjuntos) quedarían muertas con
+	// "ERR_CONNECTION_REFUSED". Si el puerto está ocupado, se cae a uno libre.
+	const onListening = () => {
 		fileServerPort = server.address().port;
 		console.log(`[pelacord] servidor de archivos en tcp/${fileServerPort}`);
+	};
+	server.once('error', (error) => {
+		if (error.code === 'EADDRINUSE') {
+			console.warn('[pelacord] el puerto de archivos estaba ocupado: se usa uno libre');
+			server.listen(0, '0.0.0.0', onListening);
+			return;
+		}
+		console.error('[pelacord] file server error', error.message);
 	});
-	server.on('error', (error) => console.error('[pelacord] file server error', error.message));
+	server.listen(7789, '0.0.0.0', onListening);
 }
 
 ipcMain.handle('pelacord:file-endpoint', () => ({host: localAddress(), port: fileServerPort}));
