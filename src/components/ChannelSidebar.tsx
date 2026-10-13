@@ -4,7 +4,8 @@ import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
 import {VoicePanel} from '@/components/VoicePanel';
 import {TEXT_CATEGORY, VOICE_CATEGORY, useStore} from '@/state/store';
-import type {Channel} from '@/types';
+import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
+import type {Channel, VoiceParticipant} from '@/types';
 
 function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element {
 	const {state} = useStore();
@@ -43,10 +44,32 @@ function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element 
 
 /** The connected people listed under a voice channel: small avatar + name, like Discord. */
 function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | null {
-	const {state} = useStore();
+	const {state, sendPeerCommand} = useStore();
 	const speakingIds = useSpeakingIds();
+	const [menu, setMenu] = useState<{participant: VoiceParticipant; x: number; y: number} | null>(null);
+	const [profile, setProfile] = useState<UserLike | null>(null);
 	const participants = state.voiceMembers[channelId] ?? [];
 	if (participants.length === 0) return null;
+
+	/** Lo mínimo para el menú y el perfil, a partir de lo que sabemos del participante. */
+	function toUser(participant: VoiceParticipant): UserLike {
+		return {
+			id: participant.id,
+			name: participant.name,
+			tag: '0001',
+			color: participant.color,
+			avatarUrl: participant.avatarUrl,
+			avatarCrop: participant.avatarCrop,
+			decoration: participant.decoration,
+			decorationColor: participant.decorationColor,
+			customDeco: participant.customDeco,
+			decoImage: participant.decoImage,
+			decoSize: participant.decoSize,
+			particleOriginal: participant.original,
+			presence: 'online',
+		};
+	}
+
 	return (
 		<div className="voice-members">
 			{participants.map((participant) => {
@@ -61,6 +84,10 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 						onDragStart={(event) => {
 							event.dataTransfer.setData('text/plain', participant.id);
 							event.dataTransfer.effectAllowed = 'move';
+						}}
+						onContextMenu={(event) => {
+							event.preventDefault();
+							setMenu({participant, x: event.clientX, y: event.clientY});
 						}}>
 						<ColorAvatar
 							name={participant.name}
@@ -82,6 +109,21 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 					</div>
 				);
 			})}
+			{menu ? (
+				<UserContextMenu
+					user={toUser(menu.participant)}
+					x={menu.x}
+					y={menu.y}
+					canVolume
+					voice={{muted: menu.participant.muted, deafened: menu.participant.deafened}}
+					onClose={() => setMenu(null)}
+					onViewProfile={() => setProfile(toUser(menu.participant))}
+					onMute={() => sendPeerCommand(menu.participant.id, {kind: 'mute', on: !menu.participant.muted})}
+					onDeafen={() => sendPeerCommand(menu.participant.id, {kind: 'deafen', on: !menu.participant.deafened})}
+					onDisconnect={() => sendPeerCommand(menu.participant.id, {kind: 'disconnect'})}
+				/>
+			) : null}
+			{profile ? <ProfilePopover user={profile} canVolume onClose={() => setProfile(null)} /> : null}
 		</div>
 	);
 }

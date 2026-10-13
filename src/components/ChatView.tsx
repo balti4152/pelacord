@@ -91,8 +91,25 @@ function highlightTerm(content: string, term: string): ReactNode {
  * Audio: se reproduce en línea, sin descargarlo antes. El servidor P2P del dueño
  * responde a los pedidos por rango, así que la barra de progreso y "adelantar" funcionan.
  */
-/** "1:05" a partir de segundos. */
-function formatClock(seconds: number): string {
+/**
+ * ¿El mensaje es sólo emojis (menos de 3)? Entonces se muestran grandes, como en WhatsApp.
+ * Con 3 o más vuelven al tamaño normal.
+ */
+function isJumboEmojis(text: string): boolean {
+	const trimmed = text.trim();
+	if (!trimmed || /[0-9A-Za-z]/.test(trimmed)) return false;
+	const segments = Array.from(new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(trimmed));
+	if (segments.length === 0 || segments.length >= 3) return false;
+	return segments.every(
+		(part) =>
+			/\p{Extended_Pictographic}/u.test(part.segment) ||
+			// Banderas: son dos "regional indicators" y no cuentan como pictográficos.
+			/[\u{1F1E6}-\u{1F1FF}]/u.test(part.segment) ||
+			/^\s+$/.test(part.segment),
+	);
+}
+
+/** "1:05" a partir de segundos. */function formatClock(seconds: number): string {
 	if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
 	const total = Math.floor(seconds);
 	const minutes = Math.floor(total / 60);
@@ -685,7 +702,7 @@ function MessageRow({
 						</div>
 					</div>
 				) : visibleContent ? (
-					<div className="message-content">
+					<div className={`message-content${isJumboEmojis(visibleContent) ? ' is-jumbo' : ''}`}>
 						{searchTerm
 							? highlightTerm(visibleContent, searchTerm)
 							: splitMentions(visibleContent, mentionNames).map((part, index) =>

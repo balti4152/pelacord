@@ -51,6 +51,10 @@ export function UserContextMenu({
 	canVolume,
 	onClose,
 	onViewProfile,
+	voice,
+	onMute,
+	onDeafen,
+	onDisconnect,
 }: {
 	user: UserLike;
 	x: number;
@@ -58,6 +62,11 @@ export function UserContextMenu({
 	canVolume: boolean;
 	onClose: () => void;
 	onViewProfile: () => void;
+	/** Estado del participante en la llamada (para mostrar "Silenciar" o "Activar micrófono"). */
+	voice?: {muted: boolean; deafened: boolean};
+	onMute?: () => void;
+	onDeafen?: () => void;
+	onDisconnect?: () => void;
 }): JSX.Element {
 	const volume = usePeerVolume(user.id);
 	const position = clampPosition(x, y, 15 * 16, 13 * 16);
@@ -83,6 +92,42 @@ export function UserContextMenu({
 					<Icon name="user" size={16} />
 					<span>Ver perfil</span>
 				</button>
+				{onMute ? (
+					<button
+						type="button"
+						className="call-menu-item"
+						onClick={() => {
+							onMute();
+							onClose();
+						}}>
+						<Icon name={voice?.muted ? 'micOff' : 'mic'} size={16} />
+						<span>{voice?.muted ? 'Activar micrófono' : 'Silenciar'}</span>
+					</button>
+				) : null}
+				{onDeafen ? (
+					<button
+						type="button"
+						className="call-menu-item"
+						onClick={() => {
+							onDeafen();
+							onClose();
+						}}>
+						<Icon name={voice?.deafened ? 'headphonesOff' : 'headphones'} size={16} />
+						<span>{voice?.deafened ? 'Activar audio' : 'Ensordecer'}</span>
+					</button>
+				) : null}
+				{onDisconnect ? (
+					<button
+						type="button"
+						className="call-menu-item is-danger"
+						onClick={() => {
+							onDisconnect();
+							onClose();
+						}}>
+						<Icon name="phoneOff" size={16} />
+						<span>Desconectar de la llamada</span>
+					</button>
+				) : null}
 				{canVolume ? (
 					<label className="call-menu-volume">
 						<Icon name="speaker" size={16} />

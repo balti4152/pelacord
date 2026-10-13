@@ -231,8 +231,15 @@ function handleMessage(socket, raw) {
 		}
 		if (message.to && peers.has(message.to)) {
 			const target = peers.get(message.to);
-			if (target.readyState === WebSocket.OPEN) target.send(JSON.stringify(message));
+			if (target.readyState === WebSocket.OPEN) {
+				target.send(JSON.stringify(message));
+				return;
+			}
 		}
+		// Si no lo tengo identificado (o el socket no está abierto), se manda a todos: el que
+		// sea el destinatario lo aplica y el resto lo ignora. Sólo lo reenvía el que lo originó,
+		// para que no se arme un bucle de retransmisiones.
+		if (message.from === myPeerId) broadcast(message, socket);
 	}
 }
 

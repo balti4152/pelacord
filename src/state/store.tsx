@@ -447,6 +447,8 @@ interface StoreContextValue {
 	removeChannel: (channelId: string) => void;
 	/** Mueve a alguien (o a vos) a otro canal de voz. */
 	moveMember: (peerId: string, channelId: string) => void;
+	/** Silenciar / ensordecer / desconectar a alguien (o a vos). */
+	sendPeerCommand: (peerId: string, payload: {kind: 'mute' | 'deafen' | 'disconnect'; on?: boolean}) => void;
 	/** Atajos globales que Windows rechazó, para avisar en Ajustes. */
 	hotkeyFailures: Array<{action: string; accelerator: string}>;
 }
@@ -739,10 +741,24 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		const transport = getDesktopTransport();
 		if (!transport) return;
 		return transport.onCommand(({payload}) => {
-			const command = payload as {kind?: string; channelId?: string} | null;
-			if (command?.kind === 'move' && command.channelId) {
+			const command = payload as {kind?: string; channelId?: string; on?: boolean} | null;
+			if (!command?.kind) return;
+			// Mover de canal: se entra sin preguntar (arrastrar a alguien lo mueve de verdad).
+			if (command.kind === 'move' && command.channelId) {
 				dispatch({type: 'joinVoice', channelId: command.channelId});
+				return;
 			}
+			// Micrófono y audio: los aplica el que los recibe (no se puede tocar el micrófono de
+			// otra máquina desde afuera). Se usa el mismo interruptor de siempre.
+			if (command.kind === 'mute' && voiceRef.current.muted !== Boolean(command.on)) {
+				dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
+				return;
+			}
+			if (command.kind === 'deafen' && voiceRef.current.deafened !== Boolean(command.on)) {
+				dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
+				return;
+			}
+			if (command.kind === 'disconnect') dispatch({type: 'leaveVoice'});
 		});
 	}, []);
 
@@ -1014,6 +1030,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		getDesktopTransport()?.sendCommand(peerId, {kind: 'move', channelId});
 	}, []);
 
+	/** Comandos a otro peer: silenciar, ensordecer, desconectar. Los aplica el que los recibe. */
+	const sendPeerCommand = useCallback(
+		(peerId: string, payload: {kind: 'mute' | 'deafen' | 'disconnect'; on?: boolean}) => {
+			if (peerId === meRef.current.id) {
+				// A uno mismo se le aplica local, sin dar la vuelta por la malla.
+				if (payload.kind === 'mute') dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
+				else if (payload.kind === 'deafen') dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
+				else dispatch({type: 'leaveVoice'});
+				return;
+			}
+			getDesktopTransport()?.sendCommand(peerId, payload);
+		},
+		[],
+	);
+
 	const value = useMemo<StoreContextValue>(
 		() => ({
 			state,
@@ -1027,9 +1058,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			addChannel,
 			removeChannel,
 			moveMember,
+			sendPeerCommand,
 			hotkeyFailures,
 		}),
-		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, moveMember, hotkeyFailures],
+		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, moveMember, sendPeerCommand, hotkeyFailures],
 	);
 
 	return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

@@ -4027,6 +4027,12 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: var(--status-dnd);
 }
 
+/* Mensaje de sólo emojis (menos de 3): se ven grandes, como en WhatsApp. */
+.message-content.is-jumbo {
+	font-size: 2.75rem;
+	line-height: 1.15;
+}
+
 .call-menu-item.is-danger:hover {
 	background-color: var(--status-dnd);
 	color: #fff;
