@@ -135,6 +135,8 @@ export interface SpotifyPlaylist {
 	owner: string;
 	/** Cuántas canciones tiene. */
 	tracks: number;
+	/** Si Spotify deja leer sus canciones (las de otras personas: sólo llega la metadata). */
+	readable: boolean;
 	image: string;
 	url: string;
 }
@@ -145,6 +147,8 @@ export interface SpotifyTrack {
 	artists: string;
 	/** Segundos. 0 si no se sabe. */
 	duration: number;
+	/** Portada del álbum. */
+	image: string;
 }
 
 export interface SpotifyStatus {
@@ -153,6 +157,10 @@ export interface SpotifyStatus {
 	image?: string;
 	/** La dirección de vuelta que tiene que estar registrada en el panel de Spotify. */
 	redirectUri?: string;
+	/** Cuando la cuenta no está habilitada para la app (u otro problema al pedir el perfil). */
+	error?: string;
+	/** true = la cuenta no está habilitada como usuario de la app: no tiene sentido pedir playlists. */
+	blocked?: boolean;
 }
 
 /** Lo que devuelve el preview de un link. */export interface LinkPreviewData {

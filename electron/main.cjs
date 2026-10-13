@@ -766,13 +766,32 @@ async function spotifyToken() {
 	return spotifyAccess.token;
 }
 
+/** Lee el detalle del error que manda Spotify (a veces explica exactamente qué pasa). */
+async function spotifyDetail(res) {
+	try {
+		const data = await res.json();
+		const message = data?.error?.message;
+		if (typeof message === 'string') return message;
+		if (typeof data?.error_description === 'string') return data.error_description;
+		if (typeof data?.error === 'string') return data.error;
+		return '';
+	} catch {
+		return '';
+	}
+}
+
 /** Mensaje legible para los códigos de error de Spotify. */
-function spotifyErrorMessage(status) {
+function spotifyErrorMessage(status, detail = '') {
+	// 403 por NO estar habilitado como usuario de la app (modo Development). Es el caso típico de
+	// "mi amigo se logueó y no le aparece nada": el login anda, pero la API le responde 403 a todo.
+	if (status === 403 && /not registered|may not be registered/i.test(detail)) {
+		return 'Tu cuenta todavía no está habilitada para esta app. El dueño de la app tiene que agregarte en el panel de Spotify (Settings → Users Management → Add new user, con tu nombre real y tu email de Spotify) y después volvés a iniciar sesión.';
+	}
 	if (status === 401) return 'La sesión de Spotify venció: volvé a iniciar sesión.';
-	if (status === 403) return 'Spotify no deja leer esa playlist (las de otras personas o las automáticas, como "Descubrimiento semanal").';
+	if (status === 403) return 'Spotify ya no deja que las apps lean las canciones de playlists que no son tuyas (ni siquiera las públicas). El único caso que sí permite es si el dueño te agrega como COLABORADOR.';
 	if (status === 404) return 'Esa playlist ya no existe.';
 	if (status === 429) return 'Spotify está limitando los pedidos: probá de nuevo en un rato.';
-	return `Spotify respondió ${status}.`;
+	return detail ? `Spotify respondió ${status}: ${detail}` : `Spotify respondió ${status}.`;
 }
 
 function base64Url(buffer) {
@@ -889,7 +908,12 @@ ipcMain.handle('pelacord:spotify-status', async () => {
 	const token = await spotifyToken();
 	if (!token) return {connected: false, redirectUri: SPOTIFY_REDIRECT};
 	const res = await fetch('https://api.spotify.com/v1/me', {headers: {Authorization: `Bearer ${token}`}});
-	if (!res.ok) return {connected: true, name: store.name ?? '', redirectUri: SPOTIFY_REDIRECT};
+	if (!res.ok) {
+		// Ojo: acá es donde se ve si la cuenta está habilitada. Un 403 significa que el dueño de la
+		// app no la agregó como usuario: el login anda, pero no puede pedir nada.
+		const error = spotifyErrorMessage(res.status, await spotifyDetail(res));
+		return {connected: true, name: store.name ?? '', redirectUri: SPOTIFY_REDIRECT, error, blocked: res.status === 403};
+	}
 	const me = await res.json().catch(() => ({}));
 	const name = me.display_name || me.id || '';
 	if (name && name !== store.name) writeSpotifyStore({...store, name});
@@ -904,15 +928,20 @@ ipcMain.handle('pelacord:spotify-playlists', async () => {
 	let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
 	for (let page = 0; page < 20 && url; page++) {
 		const res = await fetch(url, {headers: {Authorization: `Bearer ${token}`}});
-		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status), playlists};
+		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status, await spotifyDetail(res)), playlists};
 		const data = await res.json().catch(() => ({}));
 		for (const item of data.items ?? []) {
 			if (!item) continue;
+			// OJO: Spotify renombró "tracks" a "items" (febrero 2026). Y para las playlists que NO son
+			// tuyas ya no manda el contenido: viene solo la metadata y `items` no está. Por eso se
+			// marca `readable`: la interfaz dice la verdad en vez de mostrar "0 canciones".
+			const info = item.items ?? item.tracks;
 			playlists.push({
 				id: String(item.id || ''),
 				name: String(item.name || 'Playlist'),
 				owner: String(item.owner?.display_name || item.owner?.id || ''),
-				tracks: Number(item.tracks?.total) || 0,
+				tracks: Number(info?.total) || 0,
+				readable: Boolean(item.items),
 				image: String(item.images?.[0]?.url || ''),
 				url: String(item.external_urls?.spotify || ''),
 			});
@@ -939,15 +968,19 @@ ipcMain.handle('pelacord:spotify-tracks', async (_event, playlistId) => {
 			url = `https://api.spotify.com/v1/playlists/${encodeURIComponent(id)}/tracks?limit=100`;
 			continue;
 		}
-		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status), tracks};
+		if (!res.ok) return {ok: false, error: spotifyErrorMessage(res.status, await spotifyDetail(res)), tracks};
 		const data = await res.json().catch(() => ({}));
 		for (const item of data.items ?? []) {
 			const track = item?.item ?? item?.track;
 			if (!track?.name) continue;
+			// La portada del álbum (la más chica alcanza para una fila de lista).
+			const images = track.album?.images ?? [];
+			const image = String(images[images.length - 1]?.url || images[0]?.url || '');
 			tracks.push({
 				title: String(track.name),
 				artists: (track.artists ?? []).map((artist) => artist.name).filter(Boolean).join(', '),
 				duration: Math.round((Number(track.duration_ms) || 0) / 1000),
+				image,
 			});
 		}
 		url = data.next || '';

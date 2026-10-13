@@ -1,7 +1,7 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Copy, Loader2, LogOut, Play, RefreshCw, TriangleAlert, X} from 'lucide-react';
+import {ArrowLeft, Copy, Loader2, LogOut, Play, Plus, RefreshCw, TriangleAlert, X} from 'lucide-react';
 import {SiSpotify} from 'react-icons/si';
-import {type SpotifyPlaylist, type SpotifyStatus, getDesktopTransport} from '@/lib/desktop';
+import {type SpotifyPlaylist, type SpotifyStatus, type SpotifyTrack, type TrackResult, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
 import {useStore} from '@/state/store';
 
@@ -43,26 +43,39 @@ function copyText(value: string): boolean {
 	}
 }
 
+/** "3:45" */
+function formatDuration(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return '';
+	const total = Math.floor(seconds);
+	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
 /**
- * Spotify: iniciar sesión y traer tus playlists.
+ * Spotify: iniciar sesión, ver tus playlists y encolarlas.
  *
  * Ojo con una cosa que no es obvia: Spotify no presta el audio. Lo que se trae es la LISTA
- * (nombre, artistas, duración) y después cada canción se busca en YouTube, que es de donde sale
- * el sonido de la Jam. Por eso "play" tarda un poco: está resolviendo las canciones.
+ * (nombre, artistas, duración, portada) y después cada canción se busca en YouTube, que es de
+ * donde sale el sonido de la Jam. Por eso "play" tarda un poco: está resolviendo las canciones.
  */
 export function SpotifyView(): JSX.Element {
 	const {state, musicState, musicPlay, musicEnqueueMany} = useStore();
 	const [status, setStatus] = useState<SpotifyStatus | null>(null);
 	const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
+	const [open, setOpen] = useState<SpotifyPlaylist | null>(null);
+	const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
+	const [tracksLoading, setTracksLoading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [connecting, setConnecting] = useState(false);
-	const [importing, setImporting] = useState('');
+	/** Qué se está resolviendo ahora (id de playlist o "track:<título>"): vacío = nada. */
+	const [busy, setBusy] = useState('');
 	const [progress, setProgress] = useState({done: 0, total: 0});
 	const [error, setError] = useState('');
 	const [notice, setNotice] = useState('');
 	/** Para cortar una importación larga (se frena al terminar la tanda en curso). */
 	const cancelled = useRef(false);
 	const inVoice = Boolean(state.voice.channelId);
+	/** Sólo se muestra el paso del panel de Spotify cuando Spotify rechaza la dirección. */
+	const needsRedirect = /redirecc|redirect/i.test(error);
 
 	const load = useCallback(async (): Promise<void> => {
 		const transport = getDesktopTransport();
@@ -80,12 +93,15 @@ export function SpotifyView(): JSX.Element {
 				setPlaylists([]);
 				return;
 			}
-			const result = await transport.spotifyPlaylists();
-			if (!result.ok) {
-				setError(result.error ?? 'No se pudieron traer las playlists.');
+			// La cuenta se logueó bien pero no está habilitada: no tiene sentido pedir playlists.
+			if (me.blocked) {
+				setPlaylists([]);
+				setError(me.error ?? 'Tu cuenta no está habilitada para esta app.');
 				return;
 			}
-			setPlaylists(result.playlists);
+			const result = await transport.spotifyPlaylists();
+			setPlaylists(result.playlists ?? []);
+			if (!result.ok) setError(result.error ?? 'No se pudieron traer las playlists.');
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : 'No se pudieron traer las playlists.');
 		} finally {
@@ -131,87 +147,160 @@ export function SpotifyView(): JSX.Element {
 		await transport.spotifyLogout();
 		setStatus({connected: false});
 		setPlaylists([]);
+		setOpen(null);
+		setTracks([]);
 		setNotice('');
 		setError('');
 	}
 
-	async function importPlaylist(playlist: SpotifyPlaylist): Promise<void> {
+	/** Abre una playlist y trae sus canciones (con la portada de cada álbum). */
+	async function openPlaylist(playlist: SpotifyPlaylist): Promise<void> {
 		const transport = getDesktopTransport();
-		if (!transport || importing) return;
-		if (!inVoice) {
-			setError('Unite a un canal de voz para agregar canciones a la cola.');
-			return;
-		}
-		cancelled.current = false;
+		if (!transport) return;
+		setOpen(playlist);
+		setTracks([]);
 		setError('');
 		setNotice('');
-		setImporting(playlist.id);
-		setProgress({done: 0, total: playlist.tracks || 0});
+		setTracksLoading(true);
 		try {
 			const result = await transport.spotifyTracks(playlist.id);
-			if (!result.ok) {
-				setError(result.error ?? 'No se pudo leer la playlist.');
-				return;
-			}
-			if (result.tracks.length === 0) {
-				setError('Esa playlist no tiene canciones.');
-				return;
-			}
-			const total = result.tracks.length;
-			setProgress({done: 0, total});
-			let added = 0;
+			setTracks(result.tracks ?? []);
+			if (!result.ok) setError(result.error ?? 'No se pudieron leer las canciones de esa playlist.');
+		} catch (failure) {
+			setError(failure instanceof Error ? failure.message : 'No se pudieron leer las canciones.');
+		} finally {
+			setTracksLoading(false);
+		}
+	}
+
+	/**
+	 * Resuelve canciones de Spotify en YouTube (de ahí sale el audio) y arma los temas de la Jam.
+	 * Se hace en tandas: una sola corrida por tanda y la cola se va llenando mientras tanto.
+	 */
+	const resolve = useCallback(
+		async (list: SpotifyTrack[], onProgress: (done: number, total: number) => void): Promise<{batch: MusicTrack[]; missing: number}> => {
+			const transport = getDesktopTransport();
+			const batch: MusicTrack[] = [];
 			let missing = 0;
-			// Si no hay nada sonando, la primera de la playlist arranca: si no, la cola se llena pero
-			// no habría forma de hacerla sonar (la pestaña Cola no tiene botón de play).
-			let pendingStart = !musicState.track;
-			for (let index = 0; index < total; index += RESOLVE_CHUNK) {
+			if (!transport) return {batch, missing: list.length};
+			for (let index = 0; index < list.length; index += RESOLVE_CHUNK) {
 				if (cancelled.current) break;
-				const chunk = result.tracks.slice(index, index + RESOLVE_CHUNK);
-				// De YouTube sale el audio: se busca cada canción por "artista título".
+				const chunk = list.slice(index, index + RESOLVE_CHUNK);
 				const hits = await transport.searchYouTubeBatch(chunk.map((track) => `${track.artists} ${track.title}`.trim()));
-				const batch: MusicTrack[] = [];
 				chunk.forEach((track, offset) => {
-					const hit = hits[offset];
+					const hit: TrackResult | null = hits[offset] ?? null;
 					if (!hit) {
 						missing += 1;
 						return;
 					}
 					batch.push({
 						id: hit.id,
-						// El nombre y el artista salen de Spotify (más limpios que el título de YouTube).
+						// El nombre, el artista y la portada salen de Spotify (más limpios que los de YouTube).
 						title: track.title || hit.title,
 						duration: track.duration || hit.duration,
-						thumbnail: hit.thumbnail,
+						thumbnail: track.image || hit.thumbnail,
 						author: track.artists || hit.author,
 						url: hit.url,
 						addedBy: state.me.name,
 					});
 				});
-				if (batch.length > 0) {
-					if (pendingStart) {
-						const [first, ...rest] = batch;
-						pendingStart = false;
-						musicPlay(first);
-						if (rest.length > 0) musicEnqueueMany(rest);
-						added += batch.length;
-					} else {
-						musicEnqueueMany(batch);
-						added += batch.length;
-					}
-				}
-				setProgress({done: Math.min(index + chunk.length, total), total});
+				onProgress(Math.min(index + chunk.length, list.length), list.length);
 			}
+			return {batch, missing};
+		},
+		[state.me.name],
+	);
+
+	/** Agrega una lista de canciones a la cola (el que llama ya se ocupó de estar libre y en llamada). */
+	async function importTracks(list: SpotifyTrack[], label: string): Promise<void> {
+		if (list.length === 0) {
+			setError('No hay canciones para agregar.');
+			return;
+		}
+		cancelled.current = false;
+		setError('');
+		setNotice('');
+		setBusy(label);
+		setProgress({done: 0, total: list.length});
+		try {
+			const {batch, missing} = await resolve(list, (done, total) => setProgress({done, total}));
 			if (cancelled.current) return;
-			setNotice(
-				missing > 0
-					? `Se agregaron ${added} de ${total} canciones (${missing} no estaban en YouTube).`
-					: `Se agregaron las ${added} canciones${musicState.track ? ' a la cola' : ' y arrancó la primera'}.`,
-			);
+			if (batch.length > 0) {
+				if (musicState.track) {
+					musicEnqueueMany(batch);
+				} else {
+					// Si no había nada sonando, arranca la primera: la pestaña Cola no tiene botón de
+					// play, así que si no, la cola quedaría llena y sin forma de hacerla sonar.
+					const [first, ...rest] = batch;
+					musicPlay(first);
+					if (rest.length > 0) musicEnqueueMany(rest);
+				}
+			}
+			if (batch.length === 0) setError('No encontré esas canciones en YouTube.');
+			else if (missing > 0) setNotice(`Se agregaron ${batch.length} de ${list.length} canciones (${missing} no estaban en YouTube).`);
+			else setNotice(`Se agregaron las ${batch.length} canciones${musicState.track ? ' a la cola' : ' y arrancó la primera'}.`);
 		} catch (failure) {
-			setError(failure instanceof Error ? failure.message : 'No se pudo agregar la playlist.');
+			setError(failure instanceof Error ? failure.message : 'No se pudieron agregar las canciones.');
 		} finally {
-			setImporting('');
+			setBusy('');
 			setProgress({done: 0, total: 0});
+		}
+	}
+
+	/** Trae las canciones de una playlist y las agrega TODAS a la cola (sin abrirla). */
+	async function addAllFromPlaylist(playlist: SpotifyPlaylist): Promise<void> {
+		if (busy) return;
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		if (!inVoice) {
+			setError('Unite a un canal de voz para agregar canciones a la cola.');
+			return;
+		}
+		setError('');
+		setNotice('');
+		setBusy(playlist.id);
+		setProgress({done: 0, total: playlist.tracks || 0});
+		try {
+			const result = await transport.spotifyTracks(playlist.id);
+			if (!result.ok) {
+				setError(result.error ?? 'No se pudieron leer las canciones de esa playlist.');
+				return;
+			}
+			await importTracks(result.tracks, playlist.id);
+		} catch (failure) {
+			setError(failure instanceof Error ? failure.message : 'No se pudieron leer las canciones.');
+		} finally {
+			setBusy('');
+			setProgress({done: 0, total: 0});
+		}
+	}
+
+	/** Reproduce una canción ahora, o la agrega a la cola. */
+	async function one(track: SpotifyTrack, mode: 'play' | 'add'): Promise<void> {
+		if (busy) return;
+		if (!inVoice) {
+			setError('Unite a un canal de voz para escuchar la música.');
+			return;
+		}
+		const label = `track:${track.title}`;
+		setError('');
+		setNotice('');
+		setBusy(label);
+		try {
+			const {batch} = await resolve([track], () => {});
+			if (batch.length === 0) {
+				setError(`No encontré "${track.title}" en YouTube.`);
+				return;
+			}
+			if (mode === 'play') musicPlay(batch[0]);
+			else {
+				musicEnqueueMany([batch[0]]);
+				setNotice(`"${track.title}" se agregó a la cola.`);
+			}
+		} catch (failure) {
+			setError(failure instanceof Error ? failure.message : 'No se pudo resolver esa canción.');
+		} finally {
+			setBusy('');
 		}
 	}
 
@@ -242,51 +331,74 @@ export function SpotifyView(): JSX.Element {
 					{connecting ? (
 						<p className="settings-hint">Se abrió tu navegador: autorizá a Pelacord y volvé a esta ventana.</p>
 					) : null}
-					<div className="spotify-uri">
-						<p className="settings-hint">
-							Antes de conectar, en tu panel de Spotify (<strong>Settings → Redirect URIs</strong>) tiene que estar
-							registrada esta dirección, <strong>exacta</strong> (Spotify ya no acepta <code>localhost</code>: va la IP):
-						</p>
-						<div className="spotify-uri-row">
-							<code>{status?.redirectUri ?? ''}</code>
-							<button
-								type="button"
-								className="spotify-ghost"
-								title="Copiar"
-								onClick={() => {
-									const uri = status?.redirectUri ?? '';
-									setNotice(
-										copyText(uri)
-											? 'Dirección copiada: pegala en Redirect URIs y guardá.'
-											: `Copiala a mano (no se pudo usar el portapapeles): ${uri}`,
-									);
-								}}>
-								<Copy size={15} />
-							</button>
+					{/* El paso del panel sólo se muestra si Spotify rechazó la dirección (ya está registrada). */}
+					{needsRedirect && status?.redirectUri ? (
+						<div className="spotify-uri">
+							<p className="settings-hint">
+								En tu panel de Spotify (<strong>Settings → Redirect URIs</strong>) tiene que estar registrada
+								esta dirección, <strong>exacta</strong> (Spotify ya no acepta <code>localhost</code>: va la IP):
+							</p>
+							<div className="spotify-uri-row">
+								<code>{status.redirectUri}</code>
+								<button
+									type="button"
+									className="spotify-ghost"
+									title="Copiar"
+									onClick={() => {
+										setNotice(
+											copyText(status.redirectUri ?? '')
+												? 'Dirección copiada: pegala en Redirect URIs y guardá.'
+												: `Copiala a mano (no se pudo usar el portapapeles): ${status.redirectUri}`,
+										);
+									}}>
+									<Copy size={15} />
+								</button>
+							</div>
 						</div>
-					</div>
+					) : null}
 				</div>
-			) : (
-				<>
-					<div className="spotify-profile">
-						<SiSpotify size={26} color={SPOTIFY_GREEN} />
-						{status.image ? <img src={status.image} alt="" /> : null}
-						<span className="spotify-profile-name">{status.name || 'Tu cuenta'}</span>
-						<button type="button" className="spotify-ghost" onClick={() => void load()} title="Actualizar playlists">
-							<RefreshCw size={15} />
+			) : open ? (
+				<div className="spotify-detail">
+					<div className="spotify-detail-head">
+						<button
+							type="button"
+							className="spotify-ghost"
+							title="Volver"
+							onClick={() => {
+								setOpen(null);
+								setTracks([]);
+								setError('');
+							}}>
+							<ArrowLeft size={16} />
 						</button>
-						<button type="button" className="spotify-ghost" onClick={() => void disconnect()} title="Cerrar sesión">
-							<LogOut size={15} />
+						{open.image ? <img src={open.image} alt="" /> : <span className="spotify-cover" />}
+						<span className="spotify-detail-info">
+							<span className="spotify-detail-name" title={open.name}>
+								{open.name}
+							</span>
+							<span className="spotify-row-sub">
+								{open.owner ? `${open.owner} · ` : ''}
+								{open.readable ? `${open.tracks} ${open.tracks === 1 ? 'canción' : 'canciones'}` : 'sólo las tuyas se pueden leer'}
+							</span>
+						</span>
+						<button
+							type="button"
+							className="spotify-play"
+							title={inVoice ? 'Agregar todas a la cola' : 'Unite a un canal de voz primero'}
+							disabled={Boolean(busy) || !inVoice || tracks.length === 0}
+							onClick={() => {
+								if (!busy && inVoice) void importTracks(tracks, open.id);
+							}}>
+							{busy === open.id ? <Loader2 size={16} className="music-spin" /> : <Play size={16} />}
 						</button>
 					</div>
 
-					{!inVoice ? (
+					{tracksLoading ? (
 						<p className="settings-hint">
-							Unite a un canal de voz para agregar canciones a la cola.
+							<Loader2 size={16} className="music-spin" /> Trayendo las canciones…
 						</p>
 					) : null}
-
-					{importing ? (
+					{busy === open.id ? (
 						<div className="spotify-progress">
 							<span>
 								Agregando canciones… {progress.done}/{progress.total}
@@ -303,12 +415,65 @@ export function SpotifyView(): JSX.Element {
 						</div>
 					) : null}
 
-					{playlists.length === 0 ? (
-						<p className="settings-hint">No tenés playlists en esta cuenta.</p>
-					) : (
+					<ul className="spotify-list">
+						{tracks.map((track, index) => (
+							<li key={`${track.title}-${index}`} className="spotify-row">
+								<span className="music-row-index">{index + 1}</span>
+								{track.image ? <img src={track.image} alt="" loading="lazy" /> : <span className="spotify-cover" />}
+								<span className="spotify-row-info">
+									<span className="spotify-row-title" title={track.title}>
+										{track.title}
+									</span>
+									<span className="spotify-row-sub">
+										{track.artists}
+										{formatDuration(track.duration) ? ` · ${formatDuration(track.duration)}` : ''}
+									</span>
+								</span>
+								<button
+									type="button"
+									className="spotify-ghost"
+									title="Agregar a la cola"
+									disabled={Boolean(busy) || !inVoice}
+									onClick={() => void one(track, 'add')}>
+									<Plus size={15} />
+								</button>
+								<button
+									type="button"
+									className="spotify-play"
+									title={inVoice ? 'Reproducir ahora para todos' : 'Unite a un canal de voz primero'}
+									disabled={Boolean(busy) || !inVoice}
+									onClick={() => void one(track, 'play')}>
+									{busy === `track:${track.title}` ? <Loader2 size={15} className="music-spin" /> : <Play size={15} />}
+								</button>
+							</li>
+						))}
+					</ul>
+				</div>
+			) : (
+				<>
+					<div className="spotify-profile">
+						<SiSpotify size={26} color={SPOTIFY_GREEN} />
+						{status.image ? <img src={status.image} alt="" /> : null}
+						<span className="spotify-profile-name">{status.name || 'Tu cuenta'}</span>
+						<button type="button" className="spotify-ghost" onClick={() => void load()} title="Actualizar playlists">
+							<RefreshCw size={15} />
+						</button>
+						<button type="button" className="spotify-ghost" onClick={() => void disconnect()} title="Cerrar sesión">
+							<LogOut size={15} />
+						</button>
+					</div>
+
+					{!inVoice ? <p className="settings-hint">Unite a un canal de voz para agregar canciones a la cola.</p> : null}
+
+					{playlists.length === 0 && !error ? <p className="settings-hint">No tenés playlists en esta cuenta.</p> : null}
+					{playlists.length > 0 ? (
 						<ul className="spotify-list">
 							{playlists.map((playlist) => (
-								<li key={playlist.id} className="spotify-row">
+								<li
+									key={playlist.id}
+									className="spotify-row is-clickable"
+									title="Ver las canciones"
+									onClick={() => void openPlaylist(playlist)}>
 									{playlist.image ? <img src={playlist.image} alt="" loading="lazy" /> : <span className="spotify-cover" />}
 									<span className="spotify-row-info">
 										<span className="spotify-row-title" title={playlist.name}>
@@ -316,21 +481,27 @@ export function SpotifyView(): JSX.Element {
 										</span>
 										<span className="spotify-row-sub">
 											{playlist.owner ? `${playlist.owner} · ` : ''}
-											{playlist.tracks} {playlist.tracks === 1 ? 'canción' : 'canciones'}
+											{playlist.readable
+												? `${playlist.tracks} ${playlist.tracks === 1 ? 'canción' : 'canciones'}`
+												: 'sólo las tuyas se pueden leer'}
 										</span>
 									</span>
 									<button
 										type="button"
 										className="spotify-play"
 										title={inVoice ? 'Agregar todas a la cola' : 'Unite a un canal de voz primero'}
-										disabled={Boolean(importing) || !inVoice}
-										onClick={() => void importPlaylist(playlist)}>
-										{importing === playlist.id ? <Loader2 size={16} className="music-spin" /> : <Play size={16} />}
+										disabled={Boolean(busy) || !inVoice}
+										onClick={(event) => {
+											// El clic de la fila abre la playlist: este botón agrega todo a la cola.
+											event.stopPropagation();
+											void addAllFromPlaylist(playlist);
+										}}>
+										<Play size={16} />
 									</button>
 								</li>
 							))}
 						</ul>
-					)}
+					) : null}
 				</>
 			)}
 
