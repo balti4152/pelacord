@@ -1284,9 +1284,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => {
 			cancelled = true;
 		};
-		// musicParticipantsKey resume quiénes están en el canal (para reelegir host si entra o sale alguien).
+		// OJO con las dependencias: acá va `iAmHost`, NO la lista de participantes. Si dependiera de
+		// la lista, cada vez que alguien entra o sale se re-ejecutaría y CANCELARÍA el arranque (que
+		// tarda 1-3 s en pedir el audio) → la música nunca arrancaba.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [musicState, jamChannelId, state.me.id, musicSkip, musicParticipantsKey, iAmHost]);
+	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, state.me.id, iAmHost]);
 
 	// Si me voy de un canal en el que NO quedaba nadie más, se limpia la Jam DE ESE canal.
 	// (Se limpia el canal que dejo, no el que abro: por eso antes, al volver, se borraba todo.)
