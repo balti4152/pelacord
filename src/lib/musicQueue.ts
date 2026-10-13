@@ -124,6 +124,19 @@ export function isHostAlive(state: MusicState, now = Date.now()): boolean {
 	return now - state.hostSeenAt < HOST_TIMEOUT_MS;
 }
 
+/**
+ * Elige quién manda el audio, de forma DETERMINÍSTICA.
+ *
+ * Todos calculan lo mismo a partir de la lista de gente en el canal (el id más chico), así que
+ * nunca puede haber dos hosts al mismo tiempo. Antes la elección era "el primero que escribe en
+ * la base", y si dos miraban al mismo tiempo los dos se ponían de host: se escuchaban dos
+ * canciones encimadas y la pausa de uno no afectaba al otro.
+ */
+export function electHost(participantIds: string[]): string | null {
+	if (participantIds.length === 0) return null;
+	return [...participantIds].sort()[0] ?? null;
+}
+
 /** Agrega un tema al final de la cola. */
 export function appendToQueue(state: MusicState, track: MusicTrack): MusicTrack[] {
 	return [...state.queue, track];

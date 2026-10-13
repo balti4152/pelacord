@@ -8,7 +8,7 @@ import {
 	type MusicTrack,
 	appendToQueue,
 	currentPositionMs,
-	isHostAlive,
+	electHost,
 	moveInQueue,
 	removeFromQueue,
 	subscribeMusicStates,
@@ -1167,17 +1167,28 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		dispatch({type: 'updateSettings', patch: {musicVolume: value}});
 	}, []);
 
+	/** Los que están en mi canal de voz (para la elección de host). */
+	const musicParticipants = useMemo(() => {
+		if (!jamChannelId) return [];
+		const ids = (state.voiceMembers[jamChannelId] ?? []).map((p) => p.id);
+		if (state.me.id && !ids.includes(state.me.id)) ids.push(state.me.id);
+		return ids;
+	}, [state.voiceMembers, jamChannelId, state.me.id]);
+	const musicParticipantsKey = musicParticipants.join(',');
+
 	/**
 	 * El motor de la Jam. Corre en todos, pero sólo uno manda el audio:
-	 * - Si no hay host (o el host dejó de avisar), el primero que está en el canal lo toma.
-	 * - El host reproduce, manda el audio por la malla, respeta pausa y avisa que sigue vivo.
+	 * - El host es el mismo para todos (el id más chico del canal): nunca hay dos.
+	 * - El host reproduce, manda el audio por la malla y respeta la pausa.
 	 * - El que entra después se engancha en el segundo en que va: no reinicia nada para los demás.
 	 */
 	useEffect(() => {
 		const channelId = jamChannelId;
 		const track = musicState.track;
-		const hostAlive = isHostAlive(musicState);
-		const iAmHost = musicState.hostId === state.me.id;
+		// Quién manda el audio: el id más chico de los que están en el canal. Todos calculan lo
+		// mismo, así que nunca hay dos hosts (que era el bug de las dos canciones encimadas).
+		const elected = electHost(musicParticipants);
+		const iAmHost = elected === state.me.id;
 
 		// Sin tema, o no estoy en el canal: me aseguro de no estar mandando nada.
 		if (!track || !channelId) {
@@ -1187,12 +1198,12 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				void voiceMesh.setMusicStream(null);
 				voiceMesh.announceMusicStream(null);
 			}
-			if (iAmHost && channelId) void updateMusicState(channelId, {hostId: null, hostSeenAt: 0});
+			if (musicState.hostId === state.me.id) void updateMusicState(channelId ?? '', {hostId: null, hostSeenAt: 0});
 			return;
 		}
 
-		// Alguien más está mandando: si era yo, corto.
-		if (hostAlive && !iAmHost) {
+		// No me toca a mí: si era yo el que mandaba, corto.
+		if (!iAmHost) {
 			if (myMusicTrackId.current) {
 				myMusicTrackId.current = null;
 				stopMusicStream();
@@ -1250,16 +1261,16 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => {
 			cancelled = true;
 		};
-	}, [musicState, jamChannelId, state.me.id, musicSkip]);
+		// musicParticipantsKey resume quiénes están en el canal (para reelegir host si entra o sale alguien).
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [musicState, jamChannelId, state.me.id, musicSkip, musicParticipantsKey]);
 
-	// El host avisa que sigue vivo (cada 15 s: si se va, otro toma el control).
+	// El host deja anotado quién manda (para mostrarlo y como respaldo si la lista cambia).
 	useEffect(() => {
-		if (!jamChannelId || musicState.hostId !== state.me.id || !musicState.track) return;
-		const timer = setInterval(() => {
-			void updateMusicState(jamChannelId, {hostId: state.me.id, hostSeenAt: Date.now()});
-		}, 15000);
-		return () => clearInterval(timer);
-	}, [jamChannelId, musicState.hostId, musicState.track, state.me.id]);
+		if (!jamChannelId || !musicState.track) return;
+		if (musicState.hostId === electHost(musicParticipants)) return;
+		void updateMusicState(jamChannelId, {hostId: electHost(musicParticipants), hostSeenAt: Date.now()});
+	}, [jamChannelId, musicState.track, musicState.hostId, musicParticipantsKey]);
 
 	// Volumen guardado de la música: se aplica al grupo (los demás) y también al host, que
 	// escucha desde su propio reproductor.
