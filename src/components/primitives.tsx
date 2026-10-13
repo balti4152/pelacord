@@ -164,6 +164,7 @@ const ICONS: Record<string, ReactNode> = {
 		</>
 	),
 	play: <polygon points="6 4 20 12 6 20 6 4" />,
+	star: <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />,
 	pause: (
 		<>
 			<rect x="6" y="4" width="4" height="16" />

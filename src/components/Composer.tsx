@@ -4,7 +4,7 @@ import {GifPicker} from '@/components/GifPicker';
 import {Icon} from '@/components/primitives';
 import {subscribeAttach} from '@/lib/attach';
 import {getDesktopTransport} from '@/lib/desktop';
-import {type GifResult} from '@/lib/giphy';
+import {type GifResult} from '@/lib/klipy';
 import {uid, useStore} from '@/state/store';
 import type {Attachment} from '@/types';
 

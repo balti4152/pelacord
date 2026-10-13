@@ -1000,6 +1000,7 @@
 }
 
 .gif-item {
+	position: relative;
 	display: block;
 	width: 100%;
 	height: 100%;
@@ -1009,6 +1010,79 @@
 	overflow: hidden;
 	background-color: var(--background-tertiary);
 	cursor: pointer;
+}
+
+/* Estrella de favoritos: aparece al pasar el mouse por el GIF. */
+.gif-fav {
+	position: absolute;
+	top: 0.375rem;
+	right: 0.375rem;
+	display: grid;
+	place-items: center;
+	width: 1.5rem;
+	height: 1.5rem;
+	border-radius: var(--radius-full);
+	background-color: rgba(0, 0, 0, 0.55);
+	color: #fff;
+	opacity: 0;
+	transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+
+.gif-item:hover .gif-fav,
+.gif-fav:focus-visible {
+	opacity: 1;
+}
+
+.gif-fav:hover {
+	background-color: var(--brand-primary);
+}
+
+.gif-fav.is-fav {
+	opacity: 1;
+	background-color: var(--brand-primary);
+	color: var(--text-on-brand-primary);
+}
+
+.gif-fav.is-fav svg {
+	fill: currentColor;
+}
+
+/* Primer cuadro del grid: Favoritos. */
+.gif-favorites-cell {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.25rem;
+	border: 1px dashed var(--border-color);
+	background-color: var(--background-secondary);
+	color: var(--text-tertiary);
+	font-size: 0.75rem;
+	font-weight: 600;
+}
+
+.gif-favorites-cell:hover,
+.gif-favorites-cell.is-active {
+	border-color: var(--brand-primary);
+	color: var(--text-primary);
+}
+
+.gif-favorites-cell.is-active {
+	background-color: var(--background-modifier-selected);
+}
+
+.gif-favorites-count {
+	position: absolute;
+	top: 0.375rem;
+	right: 0.375rem;
+	min-width: 1.125rem;
+	padding: 0 0.25rem;
+	border-radius: var(--radius-full);
+	background-color: var(--brand-primary);
+	color: var(--text-on-brand-primary);
+	font-size: 0.625rem;
+	line-height: 1.125rem;
+	text-align: center;
 }
 
 .gif-item:hover {
