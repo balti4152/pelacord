@@ -47,6 +47,9 @@ interface DesktopTransport {
 	hello(identity: {id: string; name: string}): void;
 	publishPresence(payload: PeerPresence): void;
 	sendSignal(to: string, payload: unknown): void;
+	/** Comando para un peer puntual (por ejemplo: moverlo a otro canal de voz). */
+	sendCommand(to: string, payload: unknown): void;
+	onCommand(callback: (message: PeerMessage<unknown>) => void): () => void;
 	onPresence(callback: (message: PeerMessage<PeerPresence>) => void): () => void;
 	onSignal(callback: (message: PeerMessage<unknown>) => void): () => void;
 	onPeerLeft(callback: (message: {id: string}) => void): () => void;

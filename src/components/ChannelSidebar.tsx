@@ -53,7 +53,15 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 				const isMe = participant.id === state.me.id;
 				const speaking = speakingIds.includes(participant.id);
 				return (
-					<div className={`voice-member${speaking ? ' is-speaking' : ''}`} key={participant.id}>
+					<div
+						className={`voice-member${speaking ? ' is-speaking' : ''}`}
+						key={participant.id}
+						draggable
+						title="Arrastralo a otro canal de voz para moverlo"
+						onDragStart={(event) => {
+							event.dataTransfer.setData('text/plain', participant.id);
+							event.dataTransfer.effectAllowed = 'move';
+						}}>
 						<ColorAvatar
 							name={participant.name}
 							color={participant.color}
@@ -136,7 +144,9 @@ export function ChannelSidebar({
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 }): JSX.Element {
-	const {state, dispatch, addChannel, removeChannel} = useStore();
+	const {state, dispatch, addChannel, removeChannel, moveMember} = useStore();
+	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
+	const [dropTarget, setDropTarget] = useState<string | null>(null);
 	/** Categoría en la que se está creando un canal (null = no hay diálogo abierto). */
 	const [creating, setCreating] = useState<Channel['type'] | null>(null);
 	const [newName, setNewName] = useState('');
@@ -218,8 +228,27 @@ export function ChannelSidebar({
 									<div key={channel.id}>
 										<button
 											type="button"
-											className={`channel${isActive || isConnected ? ' is-active' : ''}${state.unread[channel.id] ? ' is-unread' : ''}`}
+											className={`channel${isActive || isConnected ? ' is-active' : ''}${state.unread[channel.id] ? ' is-unread' : ''}${dropTarget === channel.id ? ' is-drop-target' : ''}`}
 											onClick={() => openChannel(channel)}
+											onDragOver={
+												channel.type === 'voice'
+													? (event) => {
+															event.preventDefault();
+															setDropTarget(channel.id);
+														}
+													: undefined
+											}
+											onDragLeave={channel.type === 'voice' ? () => setDropTarget(null) : undefined}
+											onDrop={
+												channel.type === 'voice'
+													? (event) => {
+															event.preventDefault();
+															setDropTarget(null);
+															const peerId = event.dataTransfer.getData('text/plain');
+															if (peerId) moveMember(peerId, channel.id);
+														}
+													: undefined
+											}
 											onContextMenu={(event) => {
 												event.preventDefault();
 												setMenu({channelId: channel.id, name: channel.name, x: event.clientX, y: event.clientY});

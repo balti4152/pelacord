@@ -220,6 +220,19 @@ function handleMessage(socket, raw) {
 			return;
 		}
 		broadcast(message, socket);
+		return;
+	}
+
+	// Comandos para otro peer (mover de canal de voz, y lo que venga después).
+	if (message.type === 'command') {
+		if (message.to === myPeerId) {
+			sendToRenderer('pelacord:command', {from: message.from, payload: message.payload});
+			return;
+		}
+		if (message.to && peers.has(message.to)) {
+			const target = peers.get(message.to);
+			if (target.readyState === WebSocket.OPEN) target.send(JSON.stringify(message));
+		}
 	}
 }
 
@@ -415,6 +428,12 @@ ipcMain.on('pelacord:presence', (_event, payload) => {
 ipcMain.on('pelacord:signal', (_event, message) => {
 	if (!myPeerId || !message) return;
 	broadcast({type: 'signal', from: myPeerId, to: message.to, payload: message.payload});
+});
+
+/** Manda un comando a un peer puntual (por ejemplo: moverlo a otro canal de voz). */
+ipcMain.on('pelacord:command', (_event, message) => {
+	if (!myPeerId || !message || !message.to) return;
+	broadcast({type: 'command', from: myPeerId, to: message.to, payload: message.payload});
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);

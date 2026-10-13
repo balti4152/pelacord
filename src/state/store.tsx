@@ -445,6 +445,8 @@ interface StoreContextValue {
 	addChannel: (type: ChannelType, name: string) => void;
 	/** Borra un canal y lo saca de la lista compartida. */
 	removeChannel: (channelId: string) => void;
+	/** Mueve a alguien (o a vos) a otro canal de voz. */
+	moveMember: (peerId: string, channelId: string) => void;
 	/** Atajos globales que Windows rechazó, para avisar en Ajustes. */
 	hotkeyFailures: Array<{action: string; accelerator: string}>;
 }
@@ -731,6 +733,19 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		});
 	}, [applyPresence]);
 
+	// Comandos que mandan otros peers. Hoy: moverme a otro canal de voz (arrastrar un usuario en
+	// la barra lateral). El que lo pide no mueve a nadie a la fuerza: el que lo recibe obedece.
+	useEffect(() => {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		return transport.onCommand(({payload}) => {
+			const command = payload as {kind?: string; channelId?: string} | null;
+			if (command?.kind === 'move' && command.channelId) {
+				dispatch({type: 'joinVoice', channelId: command.channelId});
+			}
+		});
+	}, []);
+
 	// Red de seguridad: si no se recibe presencia de alguien en 30 s, se lo considera ido.
 	useEffect(() => {
 		const transport = getDesktopTransport();
@@ -987,6 +1002,18 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		}
 	}, []);
 
+	/**
+	 * Mueve a alguien a otro canal de voz (se usa al arrastrarlo en la barra lateral).
+	 * Si soy yo, entro directo; si es otro, se le manda el comando y él decide entrar.
+	 */
+	const moveMember = useCallback((peerId: string, channelId: string) => {
+		if (peerId === meRef.current.id) {
+			dispatch({type: 'joinVoice', channelId});
+			return;
+		}
+		getDesktopTransport()?.sendCommand(peerId, {kind: 'move', channelId});
+	}, []);
+
 	const value = useMemo<StoreContextValue>(
 		() => ({
 			state,
@@ -999,9 +1026,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			setCssVariable,
 			addChannel,
 			removeChannel,
+			moveMember,
 			hotkeyFailures,
 		}),
-		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, hotkeyFailures],
+		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, moveMember, hotkeyFailures],
 	);
 
 	return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

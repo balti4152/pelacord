@@ -171,6 +171,18 @@
 	color: var(--text-tertiary);
 	font-size: 0.8125rem;
 	font-weight: 500;
+	/* Se puede arrastrar a otro canal de voz. */
+	cursor: grab;
+}
+
+.voice-member:active {
+	cursor: grabbing;
+}
+
+/* Canal de voz sobre el que estás soltando a alguien. */
+.channel.is-drop-target {
+	background-color: var(--background-modifier-selected);
+	box-shadow: inset 0 0 0 2px var(--brand-primary);
 }
 
 .voice-member:hover {
@@ -630,6 +642,40 @@
 	color: var(--text-chat-muted);
 	white-space: pre-wrap;
 	word-break: break-word;
+}
+
+/* ---------- Links directos a imagen / video / audio ---------- */
+
+.media-links {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	margin-top: 0.375rem;
+}
+
+.media-link-image {
+	display: inline-block;
+	max-width: 26rem;
+	border-radius: var(--radius-lg);
+	overflow: hidden;
+	border: 1px solid var(--border-color);
+	line-height: 0;
+}
+
+.media-link-image img {
+	display: block;
+	width: 100%;
+	max-height: 22rem;
+	object-fit: contain;
+	background-color: var(--background-tertiary);
+}
+
+.media-link-video {
+	width: min(28rem, 100%);
+	max-height: 22rem;
+	border-radius: var(--radius-lg);
+	border: 1px solid var(--border-color);
+	background-color: #000;
 }
 
 /* ---------- Tarjeta de audio (reproductor propio) ---------- */

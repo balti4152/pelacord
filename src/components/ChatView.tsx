@@ -3,6 +3,7 @@ import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
 import {resolveMember, splitMentions, useStore} from '@/state/store';
+import {findMediaLinks} from '@/lib/mediaLinks';
 import type {AppState, Attachment, Message} from '@/types';
 
 const FALLBACK_COLOR = 'hsl(0, 0%, 40%)';
@@ -99,20 +100,10 @@ function formatClock(seconds: number): string {
 }
 
 /**
- * Reproductor de audio propio, estilo Discord.
- *
- * Nada del `<audio controls>` de Chrome: ese control gris con el menú de tres puntos era lo que
- * se veía horrible al lado del texto. Acá hay play/pausa, barra para saltar y tiempos.
+ * Tarjeta de audio con reproductor propio (nada del `<audio controls>` de Chrome).
+ * Se usa para los adjuntos de audio y también para los links directos a un audio.
  */
-function AudioAttachment({
-	attachment,
-	url,
-	onFailed,
-}: {
-	attachment: Attachment;
-	url: string;
-	onFailed: () => void;
-}): JSX.Element {
+function AudioCard({src, name, onError}: {src: string; name: string; onError?: () => void}): JSX.Element {
 	const audioRef = useRef<HTMLAudioElement>(null);
 	const [playing, setPlaying] = useState(false);
 	const [current, setCurrent] = useState(0);
@@ -141,9 +132,9 @@ function AudioAttachment({
 		<div className="audio-card">
 			<audio
 				ref={audioRef}
-				src={url}
+				src={src}
 				preload="metadata"
-				onError={onFailed}
+				onError={onError}
 				onPlay={() => setPlaying(true)}
 				onPause={() => setPlaying(false)}
 				onEnded={() => {
@@ -157,8 +148,8 @@ function AudioAttachment({
 				<Icon name={playing ? 'pause' : 'play'} size={18} />
 			</button>
 			<div className="audio-card-body">
-				<span className="audio-card-name" title={attachment.name}>
-					{attachment.name}
+				<span className="audio-card-name" title={name}>
+					{name}
 				</span>
 				<div className="audio-card-track" onClick={seek} role="presentation">
 					<div className="audio-card-progress" style={{width: `${percent}%`}} />
@@ -167,6 +158,42 @@ function AudioAttachment({
 					{formatClock(current)} / {formatClock(duration)}
 				</span>
 			</div>
+		</div>
+	);
+}
+
+function AudioAttachment({
+	attachment,
+	url,
+	onFailed,
+}: {
+	attachment: Attachment;
+	url: string;
+	onFailed: () => void;
+}): JSX.Element {
+	return <AudioCard src={url} name={attachment.name} onError={onFailed} />;
+}
+
+/**
+ * Links del texto que apuntan directo a una imagen, un video o un audio: se muestran como media
+ * en vez de dejar sólo el link.
+ */
+function MediaLinks({content}: {content: string}): JSX.Element | null {
+	const links = findMediaLinks(content);
+	if (links.length === 0) return null;
+	return (
+		<div className="media-links">
+			{links.map((link) =>
+				link.kind === 'image' ? (
+					<a key={link.url} href={link.url} target="_blank" rel="noreferrer" className="media-link-image">
+						<img src={link.url} alt={link.name} loading="lazy" />
+					</a>
+				) : link.kind === 'video' ? (
+					<video key={link.url} className="media-link-video" src={link.url} controls preload="metadata" />
+				) : (
+					<AudioCard key={link.url} src={link.url} name={link.name} />
+				),
+			)}
 		</div>
 	);
 }
@@ -670,6 +697,7 @@ function MessageRow({
 								)}
 					</div>
 				) : null}
+				{message.content ? <MediaLinks content={message.content} /> : null}
 				{message.attachments.length > 0 ? (
 					<div className="attachments">
 						{message.attachments.map((attachment) => (
