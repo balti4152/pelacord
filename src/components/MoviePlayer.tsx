@@ -367,7 +367,7 @@ export function MoviePlayer(): JSX.Element | null {
 				<button
 					type="button"
 					className={`movie-icon-button${subsOpen ? ' is-active' : ''}`}
-					title={subsOpen ? 'Listo, ya elegí los subtítulos' : 'Subtítulos'}
+					title={subsOpen ? 'Listo, ya elegí' : 'Subtítulos, calidad y servidor (controles del reproductor)'}
 					onClick={toggleSubtitles}>
 					<Captions size={18} />
 				</button>
@@ -375,8 +375,8 @@ export function MoviePlayer(): JSX.Element | null {
 
 			{subsOpen ? (
 				<p className="movie-hint">
-					Elegí los subtítulos en la barra del reproductor (abajo). Cuando termines, apretá el botón de
-					subtítulos otra vez.
+					Elegí <strong>subtítulos, calidad o servidor</strong> en la barra del reproductor (abajo). Cuando
+					termines, apretá este botón otra vez.
 				</p>
 			) : null}
 		</div>,
