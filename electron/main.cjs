@@ -362,7 +362,32 @@ function createWindow() {
 			contextIsolation: true,
 			nodeIntegration: false,
 			autoplayPolicy: 'no-user-gesture-required',
+			// El reproductor de películas usa <webview>: es la única forma de controlar el video de
+			// otro origen (leer su tiempo, mandarle play/pausa/seek) y de taparle los clics.
+			webviewTag: true,
 		},
+	});
+	/**
+	 * Reglas para el <webview> del reproductor de películas.
+	 *
+	 * Los embeds de películas abren publicidad al hacer clic y a veces al arrancar. Acá se cierra
+	 * esa puerta: sin ventanas nuevas, sin navegar afuera, sin Node, y con nuestro puente cargado
+	 * (que además deja el video sin clics).
+	 */
+	mainWindow.webContents.on('will-attach-webview', (event, webPreferences, params) => {
+		delete webPreferences.preloadURL;
+		webPreferences.nodeIntegration = false;
+		webPreferences.contextIsolation = true;
+		webPreferences.preload = path.join(__dirname, 'movie-preload.cjs');
+		if (!/^https:\/\/([a-z0-9-]+\.)?cinesrc\.st\//i.test(String(params.src || ''))) event.preventDefault();
+	});
+	// Nada de ventanas emergentes desde el reproductor (ni desde nadie que no sea la app).
+	app.on('web-contents-created', (_event, contents) => {
+		if (contents.getType() !== 'webview') return;
+		contents.setWindowOpenHandler(() => ({action: 'deny'}));
+		contents.on('will-navigate', (event, url) => {
+			if (!/^https:\/\/([a-z0-9-]+\.)?cinesrc\.st\//i.test(url)) event.preventDefault();
+		});
 	});
 	mainWindow.webContents.setWindowOpenHandler(({url}) => {
 		void shell.openExternal(url);

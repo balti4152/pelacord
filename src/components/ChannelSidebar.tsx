@@ -380,10 +380,10 @@ export function ChannelSidebar({
 					</span>
 				) : null}
 			</button>
-			{/* Películas: el catálogo del grupo, estilo Netflix. */}
+			{/* Pelaflix: el catálogo del grupo, estilo Netflix. */}
 			<button type="button" className="movies-button" onClick={onOpenMovies}>
 				<Film size={18} />
-				<span>Películas</span>
+				<span>Pelaflix</span>
 			</button>
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />

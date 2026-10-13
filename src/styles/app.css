@@ -4808,8 +4808,8 @@ body.no-cosmetic-anim .avatar-effect::after {
 	min-width: 0;
 	min-height: 0;
 	/* Negro de Netflix: más profundo que el resto de la app. */
-	background-color: #08080a;
-	color: #ffffff;
+	background-color: var(--background-primary);
+	color: var(--text-primary);
 }
 
 .movies-header {
@@ -4819,7 +4819,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	height: 3.5rem;
 	padding: 0 1rem;
 	flex-shrink: 0;
-	background-color: #08080a;
+	background-color: var(--background-primary);
 	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -4828,8 +4828,16 @@ body.no-cosmetic-anim .avatar-effect::after {
 	font-size: 1.125rem;
 	font-weight: 900;
 	letter-spacing: 0.14em;
-	/* El rojo de Netflix. */
-	color: #e50914;
+	/* Con el color de marca del tema: así Pelaflix sigue el tema como el resto de la app. */
+	color: var(--brand-primary);
+}
+
+/* Espacio para los botones de la ventana (minimizar/maximizar/cerrar), que Windows dibuja ENCIMA
+   del contenido arriba a la derecha. Va acá (y no junto a las otras cabeceras) porque el `padding`
+   de la regla de arriba es un atajo: si se pusiera antes, lo pisaría. */
+.app-shell.is-members-hidden .movies-header,
+.movie-overlay:not(:fullscreen) .movie-top {
+	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 }
 
 .movies-search {
@@ -4841,9 +4849,9 @@ body.no-cosmetic-anim .avatar-effect::after {
 	margin-left: auto;
 	padding: 0 0.75rem;
 	border-radius: var(--radius-md);
-	border: 1px solid rgba(255, 255, 255, 0.14);
-	background-color: rgba(255, 255, 255, 0.06);
-	color: rgba(255, 255, 255, 0.6);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-tertiary);
+	color: var(--text-tertiary);
 }
 
 .movies-search .input {
@@ -4861,12 +4869,12 @@ body.no-cosmetic-anim .avatar-effect::after {
 	width: 2rem;
 	height: 2rem;
 	border-radius: var(--radius-md);
-	color: rgba(255, 255, 255, 0.7);
+	color: var(--text-secondary);
 	flex-shrink: 0;
 }
 
 .movies-close:hover {
-	background-color: rgba(255, 255, 255, 0.1);
+	background-color: var(--background-modifier-hover);
 	color: #ffffff;
 }
 
@@ -4883,19 +4891,19 @@ body.no-cosmetic-anim .avatar-effect::after {
 	gap: 0.375rem;
 	padding: 0.5rem 1rem;
 	font-size: 0.8125rem;
-	color: rgba(255, 255, 255, 0.6);
+	color: var(--text-tertiary);
 }
 
 .movies-error {
 	padding: 0.5rem 1rem;
 	font-size: 0.8125rem;
-	color: #ff6b6b;
+	color: var(--status-danger);
 }
 
 .movies-credit {
 	padding: 1rem;
 	font-size: 0.6875rem;
-	color: rgba(255, 255, 255, 0.35);
+	color: var(--text-tertiary);
 }
 
 /* Portada grande de arriba. */
@@ -4914,7 +4922,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	inset: 0;
 	background:
 		linear-gradient(90deg, rgba(8, 8, 10, 0.95) 0%, rgba(8, 8, 10, 0.7) 45%, rgba(8, 8, 10, 0.25) 100%),
-		linear-gradient(0deg, #08080a 0%, rgba(8, 8, 10, 0) 45%);
+		linear-gradient(0deg, var(--background-primary) 0%, transparent 45%);
 }
 
 .movies-hero-info {
@@ -4930,18 +4938,30 @@ body.no-cosmetic-anim .avatar-effect::after {
 	font-weight: 900;
 }
 
-.movies-hero-meta,
+.movies-meta,
 .movies-modal-genres {
 	margin: 0.375rem 0 0;
 	font-size: 0.8125rem;
-	color: rgba(255, 255, 255, 0.75);
+	color: var(--text-secondary);
+}
+
+.movies-meta {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+}
+
+.movies-meta-rating {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.2rem;
 }
 
 .movies-hero-overview {
 	margin: 0.5rem 0 0;
 	font-size: 0.875rem;
 	line-height: 1.5;
-	color: rgba(255, 255, 255, 0.85);
+	color: var(--text-secondary);
 }
 
 .movies-hero-actions {
@@ -4956,13 +4976,13 @@ body.no-cosmetic-anim .avatar-effect::after {
 	gap: 0.5rem;
 	padding: 0.5rem 1.25rem;
 	border-radius: var(--radius-md);
-	background-color: #e50914;
+	background-color: var(--brand-primary);
 	color: #ffffff;
 	font-weight: 700;
 }
 
 .movies-play:hover:not(:disabled) {
-	background-color: #f6121d;
+	background-color: var(--brand-primary-hover, var(--brand-primary));
 }
 
 .movies-play:disabled {
@@ -4976,7 +4996,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	gap: 0.5rem;
 	padding: 0.5rem 1.25rem;
 	border-radius: var(--radius-md);
-	background-color: rgba(255, 255, 255, 0.16);
+	background-color: var(--background-modifier-selected);
 	color: #ffffff;
 	font-weight: 700;
 }
@@ -5049,7 +5069,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	aspect-ratio: 2 / 3;
 	object-fit: cover;
 	border-radius: var(--radius-md);
-	background-color: rgba(255, 255, 255, 0.06);
+	background-color: var(--background-tertiary);
 }
 
 .movies-card-info {
@@ -5071,7 +5091,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	align-items: center;
 	gap: 0.25rem;
 	font-size: 0.6875rem;
-	color: rgba(255, 255, 255, 0.55);
+	color: var(--text-tertiary);
 }
 
 /* Detalle de una película. */
@@ -5092,8 +5112,8 @@ body.no-cosmetic-anim .avatar-effect::after {
 	max-height: 85vh;
 	overflow-y: auto;
 	border-radius: var(--radius-lg);
-	background-color: #101014;
-	border: 1px solid rgba(255, 255, 255, 0.1);
+	background-color: var(--background-secondary);
+	border: 1px solid var(--border-color);
 }
 
 .movies-modal-art {
@@ -5137,7 +5157,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	margin: 0;
 	font-size: 0.875rem;
 	line-height: 1.55;
-	color: rgba(255, 255, 255, 0.85);
+	color: var(--text-secondary);
 }
 
 .movies-modal-body .movies-play {
@@ -5149,7 +5169,153 @@ body.no-cosmetic-anim .avatar-effect::after {
 	padding: 0;
 }
 
-/* Botón del catálogo en la barra lateral. */
+/* ---------- Reproductor de películas ---------- */
+
+.movie-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 80;
+	display: flex;
+	flex-direction: column;
+	background-color: #000000;
+}
+
+.movie-top {
+	display: flex;
+	align-items: center;
+	gap: 0.625rem;
+	height: 2.75rem;
+	padding: 0 0.875rem;
+	flex-shrink: 0;
+	background-color: var(--background-primary);
+	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.movie-top-title {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-weight: 700;
+	color: #ffffff;
+}
+
+.movie-top-year {
+	font-size: 0.8125rem;
+	color: var(--text-tertiary);
+}
+
+.movie-top .movie-icon-button {
+	margin-left: auto;
+}
+
+.movie-stage {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	background-color: #000000;
+}
+
+.movie-webview {
+	width: 100%;
+	height: 100%;
+	border: 0;
+}
+
+/*
+ * Capa que recibe TODOS los clics. El video de adentro no recibe ninguno (el puente le apaga los
+ * clics), así que no hay forma de que se abra publicidad haciendo clic en la película.
+ */
+.movie-click-shield {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: none;
+	background: rgba(0, 0, 0, 0.35);
+	color: #ffffff;
+	cursor: pointer;
+}
+
+.movie-click-shield:hover {
+	background: rgba(0, 0, 0, 0.25);
+}
+
+.movie-error {
+	position: absolute;
+	bottom: 4.5rem;
+	left: 0;
+	right: 0;
+	margin: 0;
+	padding: 0.5rem 1rem;
+	text-align: center;
+	font-size: 0.8125rem;
+	color: var(--status-danger);
+}
+
+.movie-controls {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	height: 3.25rem;
+	padding: 0 0.875rem;
+	flex-shrink: 0;
+	background-color: var(--background-primary);
+	border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.movie-icon-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 2rem;
+	height: 2rem;
+	border-radius: var(--radius-md);
+	color: var(--text-secondary);
+	flex-shrink: 0;
+}
+
+.movie-icon-button:hover:not(:disabled) {
+	background-color: rgba(255, 255, 255, 0.12);
+	color: #ffffff;
+}
+
+.movie-icon-button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.movie-time {
+	min-width: 3.25rem;
+	text-align: center;
+	font-size: 0.75rem;
+	font-variant-numeric: tabular-nums;
+	color: var(--text-secondary);
+}
+
+.movie-seek {
+	flex: 1;
+	accent-color: var(--brand-primary);
+}
+
+.movie-volume {
+	width: 5.5rem;
+	accent-color: var(--brand-primary);
+}
+
+.movie-hint {
+	position: absolute;
+	bottom: 4.5rem;
+	left: 0;
+	right: 0;
+	margin: 0;
+	padding: 0.5rem 1rem;
+	text-align: center;
+	font-size: 0.75rem;
+	color: var(--text-tertiary);
+}
+
+/* Botón de Pelaflix en la barra lateral: mismo estilo que el de Música (y sigue el tema). */
 .movies-button {
 	display: flex;
 	align-items: center;
@@ -5158,16 +5324,16 @@ body.no-cosmetic-anim .avatar-effect::after {
 	margin: 0 0.625rem 0.625rem;
 	padding: 0.5rem 0.625rem;
 	border-radius: var(--radius-md);
-	background-color: rgba(229, 9, 20, 0.16);
-	color: #ff5a5f;
+	background-color: var(--background-secondary-alt);
+	color: var(--text-secondary);
 	font-size: 0.875rem;
-	font-weight: 700;
+	font-weight: 600;
 	text-align: left;
 }
 
 .movies-button:hover {
-	background-color: rgba(229, 9, 20, 0.28);
-	color: #ffffff;
+	background-color: var(--background-modifier-hover);
+	color: var(--text-primary);
 }
 
 .music-view {
@@ -5469,7 +5635,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	text-align: left;
 	/* Cada tarjeta con su color: la vista le pasa --card-hue. */
 	background: linear-gradient(160deg, hsl(var(--card-hue), 55%, 32%), hsl(calc(var(--card-hue) + 40), 45%, 18%));
-	border: 1px solid rgba(255, 255, 255, 0.08);
+	border: 1px solid var(--border-color);
 	transition: transform var(--transition-fast), filter var(--transition-fast);
 }
 
@@ -5514,7 +5680,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	text-overflow: ellipsis;
 	white-space: nowrap;
 	font-size: 0.75rem;
-	color: rgba(255, 255, 255, 0.7);
+	color: var(--text-secondary);
 }
 
 /* Vaciar la cola. */

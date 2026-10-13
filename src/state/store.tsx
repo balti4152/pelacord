@@ -581,7 +581,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		dispatch({type: 'bumpUnread', channelId: channel.id});
 		if (!notificationsRef.current || !audible) return;
 		const attachment = message.attachments?.[0];
-		const body = message.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
+		const body = message.content?.trim() || (attachment ? `Archivo adjunto: ${attachment.name}` : 'Nuevo mensaje');
 		// La foto de quien escribe: la del peer si está online, o la que quedó guardada en el perfil
 		// cacheado. Se convierte a PNG acá (ver avatarIconDataUrl) porque el proceso principal no lee GIF.
 		const peer = peersRef.current[message.authorId];

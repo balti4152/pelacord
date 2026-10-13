@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {Info, Loader2, Play, Search, Star, X} from 'lucide-react';
 import {type TmdbMovie, type TmdbRow, getDesktopTransport} from '@/lib/desktop';
+import {MoviePlayer} from '@/components/MoviePlayer';
 
 /** 128 → "2 h 8 min" */
 function formatRuntime(minutes: number): string {
@@ -25,6 +26,8 @@ export function MoviesView({onClose}: {onClose: () => void}): JSX.Element {
 	const [results, setResults] = useState<TmdbMovie[] | null>(null);
 	const [searching, setSearching] = useState(false);
 	const [selected, setSelected] = useState<TmdbMovie | null>(null);
+	/** La que se está viendo: abre el reproductor. */
+	const [playing, setPlaying] = useState<TmdbMovie | null>(null);
 	const searchRef = useRef(0);
 
 	// El catálogo se pide una sola vez (el proceso principal no lo cachea: son 5 pedidos a TMDB).
@@ -76,6 +79,20 @@ export function MoviesView({onClose}: {onClose: () => void}): JSX.Element {
 		return () => clearTimeout(timer);
 	}, [query]);
 
+	/** Año · nota · duración. Sin emojis: la nota lleva el icono de lucide. */
+	const meta = (movie: TmdbMovie) => (
+		<p className="movies-meta">
+			<span>{movie.year}</span>
+			{movie.rating > 0 ? (
+				<span className="movies-meta-rating">
+					<Star size={12} />
+					{movie.rating.toFixed(1)}
+				</span>
+			) : null}
+			{movie.runtime > 0 ? <span>{formatRuntime(movie.runtime)}</span> : null}
+		</p>
+	);
+
 	const card = (movie: TmdbMovie) => (
 		<button key={movie.id} type="button" className="movies-card" title={movie.title} onClick={() => setSelected(movie)}>
 			{movie.poster ? <img src={movie.poster} alt="" loading="lazy" /> : <span className="movies-card-empty" />}
@@ -97,7 +114,7 @@ export function MoviesView({onClose}: {onClose: () => void}): JSX.Element {
 	return (
 		<div className="movies-view">
 			<header className="movies-header">
-				<span className="movies-brand">PELÍCULAS</span>
+				<span className="movies-brand">PELAFLIX</span>
 				<label className="movies-search">
 					<Search size={15} />
 					<input
@@ -134,14 +151,10 @@ export function MoviesView({onClose}: {onClose: () => void}): JSX.Element {
 							<section className="movies-hero" style={hero.backdrop ? {backgroundImage: `url("${hero.backdrop}")`} : undefined}>
 								<div className="movies-hero-info">
 									<h1>{hero.title}</h1>
-									<p className="movies-hero-meta">
-										{hero.year}
-										{hero.rating > 0 ? ` · ⭐ ${hero.rating.toFixed(1)}` : ''}
-										{hero.runtime > 0 ? ` · ${formatRuntime(hero.runtime)}` : ''}
-									</p>
+									{meta(hero)}
 									<p className="movies-hero-overview">{hero.overview.slice(0, 260)}</p>
 									<div className="movies-hero-actions">
-										<button type="button" className="movies-play" onClick={() => setSelected(hero)}>
+										<button type="button" className="movies-play" onClick={() => setPlaying(hero)}>
 											<Play size={18} /> Ver
 										</button>
 										<button type="button" className="movies-more" onClick={() => setSelected(hero)}>
@@ -175,21 +188,18 @@ export function MoviesView({onClose}: {onClose: () => void}): JSX.Element {
 						</button>
 						<div className="movies-modal-body">
 							<h2>{selected.title}</h2>
-							<p className="movies-hero-meta">
-								{selected.year}
-								{selected.rating > 0 ? ` · ⭐ ${selected.rating.toFixed(1)}` : ''}
-								{selected.runtime > 0 ? ` · ${formatRuntime(selected.runtime)}` : ''}
-							</p>
+							{meta(selected)}
 							{selected.genres.length > 0 ? <p className="movies-modal-genres">{selected.genres.join(' · ')}</p> : null}
 							<p className="movies-modal-overview">{selected.overview || 'Sin sinopsis.'}</p>
-							<button type="button" className="movies-play" disabled title="Viene en el próximo paso">
-								<Play size={18} /> Ver con el grupo
+							<button type="button" className="movies-play" onClick={() => setPlaying(selected)}>
+								<Play size={18} /> Ver
 							</button>
-							<p className="movies-hint">El reproductor sincronizado va en el siguiente paso: la API ya está verificada.</p>
 						</div>
 					</div>
 				</div>
 			) : null}
+
+			{playing ? <MoviePlayer movie={playing} onClose={() => setPlaying(null)} /> : null}
 		</div>
 	);
 }
