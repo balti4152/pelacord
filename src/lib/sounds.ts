@@ -8,6 +8,7 @@ import streamStop from '@/assets/sounds/stream-stop.mp3';
 import undeafen from '@/assets/sounds/undeafen.mp3';
 import unmute from '@/assets/sounds/unmute.mp3';
 import userMoved from '@/assets/sounds/user-moved.mp3';
+import userLeft from '@/assets/sounds/user-left.wav';
 
 export type SoundName =
 	| 'join'
@@ -18,6 +19,7 @@ export type SoundName =
 	| 'undeafen'
 	| 'message'
 	| 'userJoined'
+	| 'userLeft'
 	| 'streamStart'
 	| 'streamStop';
 
@@ -30,6 +32,7 @@ const SOURCES: Record<SoundName, string> = {
 	undeafen,
 	message,
 	userJoined: userMoved,
+	userLeft,
 	streamStart,
 	streamStop,
 };

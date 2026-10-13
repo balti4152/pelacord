@@ -137,13 +137,19 @@ export function App(): JSX.Element {
 		prevVoice.current = {channelId: voice.channelId, muted: voice.muted, deafened: voice.deafened, sharing: voice.sharing};
 	}, [state.voice.channelId, state.voice.muted, state.voice.deafened, state.voice.sharing]);
 
-	// Sonido cuando otra persona entra al mismo canal de voz.
+	// Sonido cuando alguien entra o sale del mismo canal de voz.
 	const remoteInChannel = state.voice.channelId
 		? (state.voiceMembers[state.voice.channelId] ?? []).filter((p) => p.id !== state.me.id).length
 		: 0;
 	const prevRemote = useRef(remoteInChannel);
 	useEffect(() => {
-		if (state.voice.channelId && remoteInChannel > prevRemote.current) playSound('userJoined');
+		const previous = prevRemote.current;
+		// Sólo cuenta lo que pasa DENTRO de la llamada: si entro o salgo yo, el sonido es el de
+		// 'join'/'leave'. Si alguien se desconecta, el de 'userLeft' (y lo escuchan los demás).
+		if (state.voice.channelId) {
+			if (remoteInChannel > previous) playSound('userJoined');
+			else if (remoteInChannel < previous) playSound('userLeft');
+		}
 		prevRemote.current = remoteInChannel;
 	}, [remoteInChannel, state.voice.channelId]);
 
