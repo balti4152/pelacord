@@ -151,8 +151,15 @@ function LinkEmbed({url}: {url: string}): JSX.Element | null {
 				/>
 				<div className="embed-body">
 					<span className="embed-site">YouTube</span>
-					{preview?.title ? <span className="embed-title">{preview.title}</span> : null}
+					{preview?.title ? (
+						<a className="embed-title" href={url} target="_blank" rel="noreferrer">
+							{preview.title}
+						</a>
+					) : null}
 					{preview?.description ? <span className="embed-description">{preview.description}</span> : null}
+					<a className="embed-url" href={url} target="_blank" rel="noreferrer">
+						{url}
+					</a>
 				</div>
 			</div>
 		);
@@ -165,11 +172,38 @@ function LinkEmbed({url}: {url: string}): JSX.Element | null {
 			{preview.image ? <img className="embed-image" src={preview.image} alt="" loading="lazy" /> : null}
 			<div className="embed-body">
 				{preview.siteName ? <span className="embed-site">{preview.siteName}</span> : null}
-				{preview.title ? <span className="embed-title">{preview.title}</span> : null}
+				<a className="embed-title" href={url} target="_blank" rel="noreferrer">
+					{preview.title || url}
+				</a>
 				{preview.description ? <span className="embed-description">{preview.description}</span> : null}
+				<a className="embed-url" href={url} target="_blank" rel="noreferrer">
+					{url}
+				</a>
 			</div>
 		</div>
 	);
+}
+
+/**
+ * Convierte los links del texto en hipervínculos (`<a>`) para poder clickearlos y abrirlos.
+ * En la app de escritorio se abren en el navegador del sistema (setWindowOpenHandler).
+ */
+function renderTextWithLinks(text: string, keyPrefix: string): ReactNode[] {
+	const parts: ReactNode[] = [];
+	const pattern = /https?:\/\/[^\s<>"')]+/gi;
+	let last = 0;
+	let match: RegExpExecArray | null;
+	while ((match = pattern.exec(text)) !== null) {
+		if (match.index > last) parts.push(text.slice(last, match.index));
+		parts.push(
+			<a key={`${keyPrefix}-${match.index}`} className="message-link" href={match[0]} target="_blank" rel="noreferrer">
+				{match[0]}
+			</a>,
+		);
+		last = match.index + match[0].length;
+	}
+	if (last < text.length) parts.push(text.slice(last));
+	return parts;
 }
 
 /** "1:05" a partir de segundos. */function formatClock(seconds: number): string {
@@ -775,7 +809,7 @@ function MessageRow({
 											{part.text}
 										</span>
 									) : (
-										<span key={index}>{part.text}</span>
+										<span key={index}>{renderTextWithLinks(part.text, String(index))}</span>
 									),
 								)}
 					</div>

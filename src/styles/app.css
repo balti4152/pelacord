@@ -691,6 +691,37 @@
 	font-size: 0.9375rem;
 	font-weight: 700;
 	color: var(--text-link);
+	text-decoration: none;
+}
+
+.embed-title:hover {
+	text-decoration: underline;
+}
+
+/* El link en sí, para poder abrirlo desde la tarjeta. */
+.embed-url {
+	font-size: 0.75rem;
+	color: var(--text-tertiary);
+	text-decoration: none;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.embed-url:hover {
+	color: var(--text-link);
+	text-decoration: underline;
+}
+
+/* Links dentro del texto del mensaje. */
+.message-link {
+	color: var(--text-link);
+	text-decoration: none;
+	word-break: break-all;
+}
+
+.message-link:hover {
+	text-decoration: underline;
 }
 
 .embed-description {
