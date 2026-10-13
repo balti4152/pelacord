@@ -61,6 +61,10 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	spotifyPublicTracks: (playlistId) => ipcRenderer.invoke('pelacord:spotify-public-playlist', playlistId),
 	/** Playlists destacadas para el buscador. */
 	spotifyDiscover: () => ipcRenderer.invoke('pelacord:spotify-discover'),
+	/** Películas: catálogo de TMDB (filas, búsqueda y detalle). */
+	tmdbRows: () => ipcRenderer.invoke('pelacord:tmdb-rows'),
+	tmdbSearch: (query) => ipcRenderer.invoke('pelacord:tmdb-search', query),
+	tmdbMovie: (id) => ipcRenderer.invoke('pelacord:tmdb-movie', id),
 	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),

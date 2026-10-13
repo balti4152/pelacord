@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {ListMusic, Music, VolumeX} from 'lucide-react';
+import {Film, ListMusic, Music, VolumeX} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
@@ -184,11 +184,14 @@ export function ChannelSidebar({
 	onOpenSettings,
 	onOpenVoice,
 	onOpenMusic,
+	onOpenMovies,
 	onChannelClick,
 }: {
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
+	/** Abre el catálogo de películas. */
+	onOpenMovies: () => void;
 	/** Al abrir cualquier canal: sirve para cerrar la vista de Música, como con la llamada. */
 	onChannelClick?: () => void;
 }): JSX.Element {
@@ -376,6 +379,11 @@ export function ChannelSidebar({
 						{extraListeners > 0 ? <span className="music-button-more">+{extraListeners}</span> : null}
 					</span>
 				) : null}
+			</button>
+			{/* Películas: el catálogo del grupo, estilo Netflix. */}
+			<button type="button" className="movies-button" onClick={onOpenMovies}>
+				<Film size={18} />
+				<span>Películas</span>
 			</button>
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />

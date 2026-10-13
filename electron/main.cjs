@@ -1130,6 +1130,128 @@ ipcMain.handle('pelacord:spotify-logout', () => {
 	return true;
 });
 
+// ---------- TMDB (catálogo de películas) ----------
+//
+// Sólo se usa para el CATÁLOGO (títulos, sinopsis, portadas, duración). El video lo pone el
+// reproductor. El token de lectura es de la cuenta del usuario y viaja en la app (es un dato
+// pensado para clientes, no un secreto).
+
+const TMDB_TOKEN =
+	'eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJmMzA2NTcxNzY3OGM5ZGYyMmM4MzJkNjA4YTNmNWQ0ZCIsIm5iZiI6MTc0MDU1MzAzNi4yNzYsInN1YiI6IjY3YmViYjRjMzljYjc4MjBkMGVmYTZhZCIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ.YywcjHmQXKeINIMDHIrukk8dtXTQbW_c04_Qg9vR3j8';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+/** Los datos en español: títulos y sinopsis se leen como corresponde. */
+const TMDB_LANGUAGE = 'es-AR';
+
+/** Una película o serie, con las imágenes ya resueltas y sólo lo que usa la interfaz. */
+function tmdbMovie(item, mediaType = 'movie') {
+	if (!item?.id) return null;
+	return {
+		id: Number(item.id),
+		// Ojo: las series usan "name" en vez de "title" y "first_air_date" en vez de "release_date".
+		mediaType: item.media_type === 'tv' || item.media_type === 'movie' ? String(item.media_type) : mediaType,
+		title: String(item.title || item.name || ''),
+		overview: String(item.overview || ''),
+		poster: item.poster_path ? `https://image.tmdb.org/t/p/w500${item.poster_path}` : '',
+		backdrop: item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : '',
+		year: String(item.release_date || item.first_air_date || '').slice(0, 4),
+		rating: Math.round((Number(item.vote_average) || 0) * 10) / 10,
+		/** Cuántos votos tiene: se usa para dejar afuera lo que no conoce nadie. */
+		votes: Number(item.vote_count) || 0,
+		popularity: Number(item.popularity) || 0,
+		runtime: Number(item.runtime) || Number(item.episode_run_time?.[0]) || 0,
+		genres: (item.genres ?? []).map((genre) => genre.name).filter(Boolean),
+	};
+}
+
+/**
+ * Las filas del catálogo.
+ *
+ * Para sumar SERIES más adelante alcanza con agregar entradas acá (`/tv/...` con mediaType 'tv'):
+ * todo el resto (detalle, imágenes y el reproductor) ya trabaja con el tipo de contenido.
+ */
+const TMDB_ROWS = [
+	{title: 'Tendencias de la semana', path: '/trending/movie/week', mediaType: 'movie', minVotes: 300},
+	{title: 'Populares', path: '/movie/popular', mediaType: 'movie', minVotes: 300},
+	{title: 'Mejor valoradas', path: '/movie/top_rated', mediaType: 'movie', minVotes: 300},
+	{title: 'En cartel', path: '/movie/now_playing', mediaType: 'movie', minVotes: 50},
+	// Lo que todavía no se estrenó no tiene votos: no se filtra.
+	{title: 'Próximamente', path: '/movie/upcoming', mediaType: 'movie', minVotes: 0},
+];
+
+/** Con esto se deja afuera lo que no conoce nadie (proyectos chicos, cosas raras). */
+const TMDB_MIN_POPULARITY = 15;
+/** En la búsqueda se es más permisivo: si buscás algo puntual, tiene que aparecer. */
+const TMDB_SEARCH_MIN_VOTES = 20;
+
+async function tmdb(path, params = {}) {
+	const url = new URL(`${TMDB_BASE}${path}`);
+	url.searchParams.set('language', TMDB_LANGUAGE);
+	for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+	try {
+		const res = await fetch(url, {headers: {Authorization: `Bearer ${TMDB_TOKEN}`, accept: 'application/json'}});
+		if (!res.ok) {
+			console.warn('[pelacord] TMDB respondió', res.status, path);
+			return null;
+		}
+		return await res.json();
+	} catch (error) {
+		console.warn('[pelacord] TMDB no respondió:', String(error));
+		return null;
+	}
+}
+
+/** Las filas del catálogo en un solo pedido, ya filtradas. */
+ipcMain.handle('pelacord:tmdb-rows', async () => {
+	const data = await Promise.all(TMDB_ROWS.map((row) => tmdb(row.path)));
+	const rows = TMDB_ROWS.map((row, index) => {
+		const movies = (data[index]?.results ?? [])
+			.map((item) => tmdbMovie(item, row.mediaType))
+			.filter((movie) => Boolean(movie))
+			// Se deja afuera lo que no conoce nadie: proyectos chicos, cosas raras.
+			.filter((movie) => movie.votes >= row.minVotes && movie.popularity >= TMDB_MIN_POPULARITY);
+		return {title: row.title, movies};
+	}).filter((row) => row.movies.length > 0);
+	const hero = rows[0]?.movies?.find((movie) => movie.backdrop) ?? rows[0]?.movies?.[0] ?? null;
+	return {ok: rows.length > 0, rows, hero};
+});
+
+/**
+ * Buscar películas por nombre.
+ *
+ * Se busca en los DOS idiomas y se junta: así da igual si escribís "el padrino" o "the godfather".
+ * El español va primero, así los títulos quedan en castellano cuando existen en los dos.
+ */
+ipcMain.handle('pelacord:tmdb-search', async (_event, query) => {
+	const clean = String(query || '').trim();
+	if (!clean) return {ok: true, movies: []};
+	const [spanish, english] = await Promise.all([
+		tmdb('/search/movie', {query: clean, page: 1, include_adult: false}),
+		tmdb('/search/movie', {query: clean, page: 1, include_adult: false, language: 'en-US'}),
+	]);
+	const found = new Map();
+	for (const data of [spanish, english]) {
+		for (const item of data?.results ?? []) {
+			const movie = tmdbMovie(item);
+			// En la búsqueda se es permisivo (si buscás algo puntual tiene que aparecer) pero se
+			// exige un mínimo de votos para colar basura.
+			if (!movie || movie.votes < TMDB_SEARCH_MIN_VOTES || found.has(movie.id)) continue;
+			found.set(movie.id, movie);
+		}
+	}
+	// Los más conocidos primero.
+	const movies = [...found.values()].sort((a, b) => b.popularity - a.popularity).slice(0, 40);
+	return {ok: true, movies};
+});
+
+/** El detalle de una película (o serie) con duración y géneros. */
+ipcMain.handle('pelacord:tmdb-movie', async (_event, id, mediaType = 'movie') => {
+	const movieId = Number(id) || 0;
+	if (!movieId) return {ok: false, movie: null};
+	const type = mediaType === 'tv' ? 'tv' : 'movie';
+	const data = await tmdb(`/${type}/${movieId}`);
+	return {ok: Boolean(data), movie: data ? tmdbMovie(data, type) : null};
+});
+
 // ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------
 
 const linkPreviews = new Map();

@@ -81,6 +81,10 @@ interface DesktopTransport {
 	spotifyPublicTracks(playlistId: string): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}>;
 	/** Playlists destacadas para el buscador (se arman con búsquedas reales). */
 	spotifyDiscover(): Promise<{ok: boolean; error?: string; playlists: SpotifyPlaylist[]}>;
+	/** Películas: catálogo de TMDB. */
+	tmdbRows(): Promise<{ok: boolean; rows: TmdbRow[]; hero: TmdbMovie | null}>;
+	tmdbSearch(query: string): Promise<{ok: boolean; movies: TmdbMovie[]}>;
+	tmdbMovie(id: number, mediaType?: 'movie' | 'tv'): Promise<{ok: boolean; movie: TmdbMovie | null}>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;
@@ -165,6 +169,30 @@ export interface SpotifyStatus {
 	error?: string;
 	/** true = la cuenta no está habilitada como usuario de la app: no tiene sentido pedir playlists. */
 	blocked?: boolean;
+}
+
+/** Una película o serie del catálogo de TMDB (las imágenes ya vienen resueltas). */
+export interface TmdbMovie {
+	id: number;
+	/** 'movie' o 'tv': sirve para el detalle y para el reproductor. */
+	mediaType: 'movie' | 'tv';
+	title: string;
+	overview: string;
+	poster: string;
+	backdrop: string;
+	year: string;
+	rating: number;
+	/** Cuántos votos tiene (se usa para dejar afuera lo que no conoce nadie). */
+	votes: number;
+	popularity: number;
+	runtime: number;
+	genres: string[];
+}
+
+/** Una fila del catálogo ("Tendencias", "Populares", …). */
+export interface TmdbRow {
+	title: string;
+	movies: TmdbMovie[];
 }
 
 /** Lo que devuelve el preview de un link. */export interface LinkPreviewData {
