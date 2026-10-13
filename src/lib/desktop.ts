@@ -71,7 +71,7 @@ interface DesktopTransport {
 	onDownloadProgress(callback: (message: {id: string; name: string; received?: number; total?: number; speed?: number; done?: boolean; cancelled?: boolean; resumable?: boolean; path?: string; error?: string}) => void): () => void;
 	getPathForFile(file: File): string;
 	/** Notificación nativa de Windows (toast). */
-	notify(payload: {title: string; body: string; channelId?: string; silent?: boolean; iconUrl?: string}): void;
+	notify(payload: {title: string; body: string; channelId?: string; silent?: boolean; iconUrl?: string; iconDataUrl?: string}): void;
 	/** Guarda una imagen de perfil de un peer en disco y devuelve la URL local (para verla offline). */
 	cacheAvatar(payload: {peerId: string; url: string; kind?: 'avatar' | 'banner' | 'deco' | 'particle'}): Promise<string | null>;
 	/** Arranque automático con Windows (abierto en la bandeja). */

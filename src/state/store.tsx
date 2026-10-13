@@ -3,7 +3,7 @@ import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/d
 import {isRemoteEnabled} from '@/lib/firebase';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
-import {setTaskbarBadge, showNotification, subscribeNotificationClick} from '@/lib/notifications';
+import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
 import {deleteMessage as deleteRemoteMessage, postMessage, putChannel, removeRemoteChannel, subscribeChannels, subscribeMessages, updateMessage} from '@/lib/remote';
 import {playSound} from '@/lib/sounds';
 import type {
@@ -826,16 +826,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 							const attachment = last.attachments?.[0];
 							const body = last.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
 							// La foto de quien escribe: la del peer si está online, o la que quedó
-							// guardada en el perfil cacheado. Así Windows no muestra el logo dos veces.
+							// guardada en el perfil cacheado. Se convierte a PNG acá (ver
+							// avatarIconDataUrl) porque el proceso principal no lee GIF.
 							const peer = peersRef.current[last.authorId];
 							const known = knownMembersRef.current[last.authorId];
-							showNotification({
-								title: mentioned
-									? `Te mencionaron en #${channel.name}`
-									: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
-								body: body.slice(0, 180),
-								channelId: channel.id,
-								iconUrl: peer?.avatarUrl ?? known?.cachedAvatar ?? known?.avatarUrl ?? undefined,
+							const photo = peer?.avatarUrl ?? known?.cachedAvatar ?? known?.avatarUrl ?? undefined;
+							void avatarIconDataUrl(photo).then((iconDataUrl) => {
+								showNotification({
+									title: mentioned
+										? `Te mencionaron en #${channel.name}`
+										: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
+									body: body.slice(0, 180),
+									channelId: channel.id,
+									iconUrl: photo,
+									iconDataUrl: iconDataUrl ?? undefined,
+								});
 							});
 						}
 					}

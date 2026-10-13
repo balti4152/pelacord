@@ -38,8 +38,47 @@ export function setTaskbarBadge(count: number): void {
 	});
 }
 
+/**
+ * Convierte la foto de perfil en un PNG chico (data URL) para el ícono de la notificación.
+ *
+ * Se hace acá y no en el proceso principal porque `nativeImage` sólo decodifica PNG/JPEG: si el
+ * avatar es un GIF, allá fallaba y Windows mostraba el ícono de Pelacord. Con un canvas sirve
+ * cualquier formato (de un GIF se toma el primer cuadro). El servidor P2P manda
+ * `Access-Control-Allow-Origin: *`, así que el canvas no queda "manchado".
+ */
+export async function avatarIconDataUrl(url?: string): Promise<string | null> {
+	if (!url) return null;
+	try {
+		const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+			const img = new Image();
+			img.crossOrigin = 'anonymous';
+			img.onload = () => resolve(img);
+			img.onerror = () => reject(new Error('no carga'));
+			img.src = url;
+		});
+		const size = 128;
+		const canvas = document.createElement('canvas');
+		canvas.width = size;
+		canvas.height = size;
+		const context = canvas.getContext('2d');
+		if (!context) return null;
+		// Recorte cuadrado centrado (los avatares son cuadrados, pero por las dudas).
+		const side = Math.max(1, Math.min(image.width, image.height));
+		context.drawImage(image, (image.width - side) / 2, (image.height - side) / 2, side, side, 0, 0, size, size);
+		return canvas.toDataURL('image/png');
+	} catch {
+		return null;
+	}
+}
+
 /** Muestra una notificación nativa de Windows. `iconUrl` es la foto de quien escribió. */
-export function showNotification(payload: {title: string; body: string; channelId?: string; iconUrl?: string}): void {
+export function showNotification(payload: {
+	title: string;
+	body: string;
+	channelId?: string;
+	iconUrl?: string;
+	iconDataUrl?: string;
+}): void {
 	getDesktopTransport()?.notify(payload);
 }
 
