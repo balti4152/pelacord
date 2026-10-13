@@ -49,6 +49,9 @@ interface DesktopTransport {
 	sendSignal(to: string, payload: unknown): void;
 	/** Comando para un peer puntual (por ejemplo: moverlo a otro canal de voz). */
 	sendCommand(to: string, payload: unknown): void;
+	/** La Jam: el host difunde el estado de la música por la malla. */
+	sendMusic(payload: unknown): void;
+	onMusic(callback: (message: PeerMessage<unknown>) => void): () => void;
 	onCommand(callback: (message: PeerMessage<unknown>) => void): () => void;
 	onPresence(callback: (message: PeerMessage<PeerPresence>) => void): () => void;
 	onSignal(callback: (message: PeerMessage<unknown>) => void): () => void;

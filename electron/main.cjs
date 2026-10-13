@@ -210,6 +210,15 @@ function handleMessage(socket, raw) {
 		return;
 	}
 
+	// Música de la Jam: viaja por la MALLA (broadcast), igual que la presencia. Nada de Firestore:
+	// es tiempo real y no puede gastar cuota ni depender de que internet funcione.
+	if (message.type === 'music') {
+		if (message.from === myPeerId) return;
+		sendToRenderer('pelacord:music', {from: message.from, payload: message.payload});
+		broadcast(message, socket);
+		return;
+	}
+
 	if (message.type === 'signal') {
 		if (message.to === myPeerId) {
 			sendToRenderer('pelacord:signal', {from: message.from, payload: message.payload});
@@ -441,6 +450,12 @@ ipcMain.on('pelacord:signal', (_event, message) => {	if (!myPeerId || !message) 
 ipcMain.on('pelacord:command', (_event, message) => {
 	if (!myPeerId || !message || !message.to) return;
 	broadcast({type: 'command', from: myPeerId, to: message.to, payload: message.payload});
+});
+
+/** Difunde el estado de la Jam a todos los de la malla. */
+ipcMain.on('pelacord:music', (_event, payload) => {
+	if (!myPeerId) return;
+	broadcast({type: 'music', from: myPeerId, payload});
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);

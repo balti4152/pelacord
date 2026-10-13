@@ -192,7 +192,7 @@ export function ChannelSidebar({
 	/** Al abrir cualquier canal: sirve para cerrar la vista de Música, como con la llamada. */
 	onChannelClick?: () => void;
 }): JSX.Element {
-	const {state, dispatch, addChannel, removeChannel, moveMember, musicByChannel, musicSetMuted} = useStore();
+	const {state, dispatch, addChannel, removeChannel, moveMember, musicActive, musicSetMuted} = useStore();
 	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
 	const [dropTarget, setDropTarget] = useState<string | null>(null);
 	const musicMuted = state.settings.musicMuted ?? false;
@@ -323,7 +323,7 @@ export function ChannelSidebar({
 												<Icon name={channel.type === 'text' ? 'hash' : 'speaker'} size={18} />
 											</span>
 											<span className="channel-name">{channel.name}</span>
-											{channel.type === 'voice' && musicByChannel[channel.id]?.track ? (
+											{channel.type === 'voice' && musicActive && state.voice.channelId === channel.id ? (
 												<span
 													className={`channel-music${musicMuted ? ' is-muted' : ''}`}
 													role="button"
@@ -355,7 +355,7 @@ export function ChannelSidebar({
 			<button type="button" className="music-button" onClick={onOpenMusic}>
 				<ListMusic size={18} />
 				<span>Música</span>
-				{shownListeners.length > 0 ? (
+				{musicActive && shownListeners.length > 0 ? (
 					<span className="music-button-avatars" title="Escuchando con vos">
 						{shownListeners.map((participant) => (
 							<ColorAvatar

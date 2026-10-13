@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	sendSignal: (to, payload) => ipcRenderer.send('pelacord:signal', {to, payload}),
 	/** Comando para un peer puntual (moverlo de canal de voz, etc.). */
 	sendCommand: (to, payload) => ipcRenderer.send('pelacord:command', {to, payload}),
+	sendMusic: (payload) => ipcRenderer.send('pelacord:music', payload),
+	onMusic: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:music', handler);
+		return () => ipcRenderer.removeListener('pelacord:music', handler);
+	},
 	onCommand: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:command', handler);
