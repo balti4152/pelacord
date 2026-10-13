@@ -4,12 +4,16 @@ export interface MeshRemote {
 	peerId: string;
 	audios: MediaStream[];
 	video: MediaStream | null;
+	/** Audio de la música de la Jam de ese peer (va aparte para poder tener volumen propio). */
+	music: MediaStream | null;
 }
 
 type SignalPayload = {
-	kind: 'offer' | 'answer' | 'candidate';
+	kind: 'offer' | 'answer' | 'candidate' | 'music';
 	sdp?: RTCSessionDescriptionInit;
 	candidate?: RTCIceCandidateInit;
+	/** Id del stream de música, para que el otro sepa cuál es (va aparte de la voz). */
+	streamId?: string | null;
 };
 
 /** El SDP tiene que ir como objeto plano: RTCSessionDescription no sobrevive al IPC de Electron. */
@@ -177,6 +181,48 @@ class VoiceMesh {
 		};
 	}
 
+	/** Stream de música de la Jam (lo manda el host). */
+	private music: MediaStream | null = null;
+	/** Ids de los tracks de música que mandamos: sirven para reconocer el sender en cada conexión. */
+	private musicTrackIds = new Set<string>();
+
+	/**
+	 * Manda (o corta) el audio de la música a todos los peers.
+	 * Se usa `replaceTrack` cuando ya existe el sender: así no hay renegociación ni corte de audio.
+	 */
+	async setMusicStream(stream: MediaStream | null): Promise<void> {
+		const nextTrack = stream?.getAudioTracks()[0] ?? null;
+		const previous = this.music?.getAudioTracks()[0] ?? null;
+		this.music = stream;
+		if (nextTrack) this.musicTrackIds.add(nextTrack.id);
+		for (const pc of this.pcs.values()) {
+			const sender = pc.getSenders().find((candidate) => candidate.track && this.musicTrackIds.has(candidate.track.id));
+			if (nextTrack) {
+				if (sender) {
+					await sender.replaceTrack(nextTrack).catch(() => {});
+				} else {
+					try {
+						pc.addTrack(nextTrack, stream as MediaStream);
+					} catch {
+						// si falla, la próxima negociación lo agrega
+					}
+				}
+			} else if (sender) {
+				await sender.replaceTrack(null).catch(() => {});
+			}
+		}
+		if (previous && previous !== nextTrack) {
+			this.musicTrackIds.delete(previous.id);
+			previous.stop();
+		}
+		this.emit();
+	}
+
+	/** El stream de música que está mandando este peer (null si no hay). */
+	getMusicStream(): MediaStream | null {
+		return this.music;
+	}
+
 	getInputDeviceId(): string {
 		return this.inputDeviceId;
 	}
@@ -264,12 +310,24 @@ class VoiceMesh {
 		getDesktopTransport()?.sendSignal(to, payload);
 	}
 
+	/** Id del stream de música que anunció cada peer (para saber cuál audio es la música). */
+	private remoteMusicIds = new Map<string, string>();
+
+	/**
+	 * Avisa a todos qué stream es la música de la Jam.
+	 * Sin esto, el otro lado no puede distinguir la música de la voz y no se le podría bajar el
+	 * volumen por separado.
+	 */
+	announceMusicStream(streamId: string | null): void {
+		for (const peerId of this.pcs.keys()) this.send(peerId, {kind: 'music', streamId});
+	}
+
 	private async pcFor(peerId: string): Promise<RTCPeerConnection> {
 		const existing = this.pcs.get(peerId);
 		if (existing) return existing;
 		const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
 		this.pcs.set(peerId, pc);
-		this.remotes.set(peerId, {peerId, audios: [], video: null});
+		this.remotes.set(peerId, {peerId, audios: [], video: null, music: null});
 		this.states.set(peerId, 'new');
 		this.diagnostics.set(peerId, {sent: 0, received: 0, ice: 'new'});
 
@@ -300,8 +358,19 @@ class VoiceMesh {
 			if (!remote) return;
 			const stream = event.streams[0] ?? new MediaStream([event.track]);
 			if (event.track.kind === 'audio') {
-				if (!remote.audios.includes(stream)) remote.audios.push(stream);
-				if (!this.analysers.has(peerId)) this.attachAnalyser(peerId, stream);
+				// ¿Es la música de la Jam de ese peer? Se reconoce por el id que anunció.
+				if (this.remoteMusicIds.get(peerId) === stream.id) {
+					remote.music = stream;
+					event.track.addEventListener('ended', () => {
+						if (remote.music === stream) {
+							remote.music = null;
+							this.emit();
+						}
+					});
+				} else if (!remote.audios.includes(stream)) {
+					remote.audios.push(stream);
+					if (!this.analysers.has(peerId)) this.attachAnalyser(peerId, stream);
+				}
 			} else {
 				remote.video = stream;
 				event.track.addEventListener('ended', () => {
@@ -375,6 +444,7 @@ class VoiceMesh {
 		};
 		addStream(this.local);
 		addStream(this.screen);
+		addStream(this.music);
 	}
 
 	private preferH264(transceiver: RTCRtpTransceiver): void {
@@ -433,6 +503,18 @@ class VoiceMesh {
 		const payload = message.payload as SignalPayload;
 		if (!payload || !payload.kind) return;
 		const from = message.from;
+
+		// Aviso de "este stream es la música": no es una señal de WebRTC, se guarda y listo.
+		// (Va antes de tocar la conexión: si no, crearía una conexión por un mensaje que no lo es.)
+		if (payload.kind === 'music') {
+			if (payload.streamId) this.remoteMusicIds.set(from, payload.streamId);
+			else this.remoteMusicIds.delete(from);
+			const remote = this.remotes.get(from);
+			if (remote && payload.streamId === null) remote.music = null;
+			this.emit();
+			return;
+		}
+
 		const pc = await this.pcFor(from);
 		const polite = this.myId > from;
 
