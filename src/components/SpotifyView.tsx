@@ -8,8 +8,78 @@ import {useStore} from '@/state/store';
 /** El verde característico de Spotify. */
 export const SPOTIFY_GREEN = '#1ed760';
 
-/** Cuántas canciones se resuelven por vez: en tandas, así la cola se va llenando sola. */
+/** Cuántas canciones se resuelven por vez después de la primera: en tandas, así la cola se llena sola. */
 const RESOLVE_CHUNK = 8;
+/** La PRIMERA tanda es de una sola: así la música arranca enseguida y no hay que esperar al resto. */
+const FIRST_CHUNK = 1;
+
+const SPOTIFY_TRACKS_CACHE_KEY = 'pelacord.spotify.tracks.v1';
+const SPOTIFY_LINKS_CACHE_KEY = 'pelacord.spotify.links.v1';
+
+/** Canciones ya leídas, por playlist. Quedan en disco: al volver a abrir están al toque. */
+type SpotifyTrackCache = Record<string, {tracks: SpotifyTrack[]; at: number}>;
+
+/**
+ * El resultado de YouTube ya resuelto para una canción de Spotify.
+ *
+ * Se guarda el LINK DEL VIDEO, no la URL directa del audio: esa viene firmada y vence en horas.
+ * El link del video no vence, y el audio se pide al momento de reproducir (que es como ya funciona).
+ */
+interface ResolvedLink {
+	id: string;
+	url: string;
+	thumbnail: string;
+	duration: number;
+	author: string;
+}
+type SpotifyLinkCache = Record<string, ResolvedLink>;
+
+/** Clave de una canción de Spotify: así se la reconoce aunque esté en dos playlists distintas. */
+function linkKey(track: SpotifyTrack): string {
+	return `${track.artists} ${track.title}`.trim().toLowerCase();
+}
+
+function loadLinkCache(): SpotifyLinkCache {
+	if (typeof localStorage === 'undefined') return {};
+	try {
+		const raw = localStorage.getItem(SPOTIFY_LINKS_CACHE_KEY);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw) as SpotifyLinkCache;
+		return parsed && typeof parsed === 'object' ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+function saveLinkCache(cache: SpotifyLinkCache): void {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.setItem(SPOTIFY_LINKS_CACHE_KEY, JSON.stringify(cache));
+	} catch {
+		// best effort
+	}
+}
+
+function loadTrackCache(): SpotifyTrackCache {
+	if (typeof localStorage === 'undefined') return {};
+	try {
+		const raw = localStorage.getItem(SPOTIFY_TRACKS_CACHE_KEY);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw) as SpotifyTrackCache;
+		return parsed && typeof parsed === 'object' ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+function saveTrackCache(cache: SpotifyTrackCache): void {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		localStorage.setItem(SPOTIFY_TRACKS_CACHE_KEY, JSON.stringify(cache));
+	} catch {
+		// best effort: si se llena, se sigue leyendo online.
+	}
+}
 
 /**
  * Copia al portapapeles y dice si lo logró.
@@ -57,7 +127,7 @@ function formatDuration(seconds: number): string {
  * (nombre, artistas, duración, portada) y después cada canción se busca en YouTube, que es de
  * donde sale el sonido de la Jam. Por eso "play" tarda un poco: está resolviendo las canciones.
  */
-export function SpotifyView(): JSX.Element {
+export function SpotifyView({onShowQueue}: {onShowQueue?: () => void}): JSX.Element {
 	const {state, musicState, musicPlay, musicEnqueueMany} = useStore();
 	const [status, setStatus] = useState<SpotifyStatus | null>(null);
 	const [playlists, setPlaylists] = useState<SpotifyPlaylist[]>([]);
@@ -73,9 +143,33 @@ export function SpotifyView(): JSX.Element {
 	const [notice, setNotice] = useState('');
 	/** Para cortar una importación larga (se frena al terminar la tanda en curso). */
 	const cancelled = useRef(false);
+	/** Lo ya leído de cada playlist (sobrevive al reinicio: ver loadTrackCache). */
+	const trackCacheRef = useRef<SpotifyTrackCache | null>(null);
+	if (!trackCacheRef.current) trackCacheRef.current = loadTrackCache();
+	/** El link de YouTube ya resuelto por canción: así no se vuelve a buscar nunca más. */
+	const linkCacheRef = useRef<SpotifyLinkCache | null>(null);
+	if (!linkCacheRef.current) linkCacheRef.current = loadLinkCache();
+	/** Cuántas canciones tiene cada playlist, de lo que ya se leyó. */
+	const [cachedCounts, setCachedCounts] = useState<Record<string, number>>(() => {
+		const cache = loadTrackCache();
+		const counts: Record<string, number> = {};
+		for (const [id, entry] of Object.entries(cache)) counts[id] = entry.tracks.length;
+		return counts;
+	});
 	const inVoice = Boolean(state.voice.channelId);
+	/** Cuántas canciones sabemos que tiene (de la API o de lo que ya se leyó). */
+	const countOf = (playlist: SpotifyPlaylist): number => cachedCounts[playlist.id] ?? (playlist.readable ? playlist.tracks : 0);
 	/** Sólo se muestra el paso del panel de Spotify cuando Spotify rechaza la dirección. */
 	const needsRedirect = /redirecc|redirect/i.test(error);
+
+	/** Guarda lo leído (en memoria y en disco) para no volver a pedirlo. */
+	const remember = useCallback((playlistId: string, list: SpotifyTrack[]) => {
+		const cache = trackCacheRef.current ?? {};
+		cache[playlistId] = {tracks: list, at: Date.now()};
+		trackCacheRef.current = cache;
+		saveTrackCache(cache);
+		setCachedCounts((counts) => ({...counts, [playlistId]: list.length}));
+	}, []);
 
 	const load = useCallback(async (): Promise<void> => {
 		const transport = getDesktopTransport();
@@ -113,13 +207,9 @@ export function SpotifyView(): JSX.Element {
 		void load();
 	}, [load]);
 
-	// Al cerrar la vista no se sigue bajando una playlist de 200 canciones.
-	useEffect(
-		() => () => {
-			cancelled.current = true;
-		},
-		[],
-	);
+	// OJO: la importación NO se cancela al cerrar o cambiar de vista. Si se cancelara, irte a la
+	// pestaña Cola para ver cómo se van agregando cortaría la carga (era justo lo que pasaba).
+	// Para cortarla está el botón "Cortar" del progreso.
 
 	async function connect(): Promise<void> {
 		const transport = getDesktopTransport();
@@ -154,15 +244,32 @@ export function SpotifyView(): JSX.Element {
 	}
 
 	/**
-	 * Trae las canciones de una playlist.
+	 * Trae las canciones de una playlist, por el camino que funcione.
 	 *
-	 * Las TUYAS van por la API de Spotify. Las de otra cuenta no: Spotify no las entrega por API ni
-	 * con el token de la aplicación (probado), así que se leen del embed público de la playlist.
+	 * Ojo: NO se puede decidir de antemano cuál va a andar. Spotify manda la cantidad de canciones
+	 * (`items`) también para playlists ajenas, pero después niega el contenido con 403. Así que se
+	 * prueba primero el camino que corresponde y, si Spotify lo niega, se prueba el otro.
+	 * Lo leído queda guardado (ver remember), así la próxima vez es instantáneo.
 	 */
-	async function readTracks(playlist: SpotifyPlaylist): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}> {
+	async function readTracks(playlist: SpotifyPlaylist): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]; fromCache?: boolean}> {
+		const cached = trackCacheRef.current?.[playlist.id];
+		if (cached && cached.tracks.length > 0) return {ok: true, tracks: cached.tracks, fromCache: true};
 		const transport = getDesktopTransport();
 		if (!transport) return {ok: false, error: 'Spotify sólo funciona en la app de escritorio.', tracks: []};
-		return playlist.readable ? transport.spotifyTracks(playlist.id) : transport.spotifyPublicTracks(playlist.id);
+		// El de la API sirve para las tuyas; el público, para las de otra cuenta.
+		const api = () => transport.spotifyTracks(playlist.id);
+		const publico = () => transport.spotifyPublicTracks(playlist.id);
+		const attempts = playlist.readable ? [api, publico] : [publico, api];
+		let lastError = '';
+		for (const attempt of attempts) {
+			const result = await attempt();
+			if (result.ok) {
+				if (result.tracks.length > 0) remember(playlist.id, result.tracks);
+				return result;
+			}
+			if (!lastError) lastError = result.error ?? '';
+		}
+		return {ok: false, error: lastError || 'No se pudieron leer las canciones de esa playlist.', tracks: []};
 	}
 
 	/** Abre una playlist y trae sus canciones (con la portada de cada álbum). */
@@ -183,45 +290,79 @@ export function SpotifyView(): JSX.Element {
 		}
 	}
 
-	/**
-	 * Resuelve canciones de Spotify en YouTube (de ahí sale el audio) y arma los temas de la Jam.
-	 * Se hace en tandas: una sola corrida por tanda y la cola se va llenando mientras tanto.
+	/** Resuelve UNA tanda de canciones de Spotify en YouTube (de ahí sale el audio).
+	 *
+	 * Primero mira lo ya resuelto: lo que está en el caché no se vuelve a buscar. Así la segunda
+	 * vez que se importa una playlist (o la misma canción en otra) es casi instantáneo.
 	 */
-	const resolve = useCallback(
-		async (list: SpotifyTrack[], onProgress: (done: number, total: number) => void): Promise<{batch: MusicTrack[]; missing: number}> => {
+	const resolveChunk = useCallback(
+		async (chunk: SpotifyTrack[]): Promise<{tracks: MusicTrack[]; missing: number}> => {
 			const transport = getDesktopTransport();
-			const batch: MusicTrack[] = [];
-			let missing = 0;
-			if (!transport) return {batch, missing: list.length};
-			for (let index = 0; index < list.length; index += RESOLVE_CHUNK) {
-				if (cancelled.current) break;
-				const chunk = list.slice(index, index + RESOLVE_CHUNK);
-				const hits = await transport.searchYouTubeBatch(chunk.map((track) => `${track.artists} ${track.title}`.trim()));
-				chunk.forEach((track, offset) => {
-					const hit: TrackResult | null = hits[offset] ?? null;
-					if (!hit) {
-						missing += 1;
-						return;
-					}
-					batch.push({
-						id: hit.id,
-						// El nombre, el artista y la portada salen de Spotify (más limpios que los de YouTube).
-						title: track.title || hit.title,
-						duration: track.duration || hit.duration,
-						thumbnail: track.image || hit.thumbnail,
-						author: track.artists || hit.author,
-						url: hit.url,
-						addedBy: state.me.name,
-					});
-				});
-				onProgress(Math.min(index + chunk.length, list.length), list.length);
+			const resolved: MusicTrack[] = [];
+			const cache = linkCacheRef.current ?? {};
+			const pending: SpotifyTrack[] = [];
+			// Lo que ya está resuelto, directo del caché; lo nuevo se junta para buscarlo de una.
+			const links: Record<string, ResolvedLink> = {};
+			for (const track of chunk) {
+				const known = cache[linkKey(track)];
+				if (known?.url) links[linkKey(track)] = known;
+				else pending.push(track);
 			}
-			return {batch, missing};
+			if (!transport) return {tracks: resolved, missing: chunk.length};
+			let hits: Array<TrackResult | null> = [];
+			if (pending.length > 0) {
+				hits = await transport.searchYouTubeBatch(pending.map((track) => `${track.artists} ${track.title}`.trim()));
+				// Se guardan los nuevos para no volver a buscarlos nunca más.
+				const fresh: SpotifyLinkCache = {};
+				pending.forEach((track, offset) => {
+					const hit = hits[offset] ?? null;
+					if (!hit) return;
+					const link: ResolvedLink = {
+						id: hit.id,
+						url: hit.url,
+						thumbnail: hit.thumbnail,
+						duration: hit.duration,
+						author: hit.author,
+					};
+					fresh[linkKey(track)] = link;
+					links[linkKey(track)] = link;
+				});
+				if (Object.keys(fresh).length > 0) {
+					const merged = {...cache, ...fresh};
+					linkCacheRef.current = merged;
+					saveLinkCache(merged);
+				}
+			}
+			// Se arma EN EL ORDEN de la playlist (el caché no tiene por qué respetarlo).
+			let missing = 0;
+			for (const track of chunk) {
+				const link = links[linkKey(track)];
+				if (!link) {
+					missing += 1;
+					continue;
+				}
+				resolved.push({
+					id: link.id,
+					// El nombre, el artista y la portada salen de Spotify (más limpios que los de YouTube).
+					title: track.title || link.id,
+					duration: track.duration || link.duration,
+					thumbnail: track.image || link.thumbnail,
+					author: track.artists || link.author,
+					url: link.url,
+					addedBy: state.me.name,
+				});
+			}
+			return {tracks: resolved, missing};
 		},
 		[state.me.name],
 	);
 
-	/** Agrega una lista de canciones a la cola (el que llama ya se ocupó de estar libre y en llamada). */
+	/**
+	 * Agrega una lista de canciones a la cola A MEDIDA que se resuelven.
+	 *
+	 * Clave: NO se espera a resolver todas para encolar. La primera sale sola (tanda de 1) para que
+	 * la música arranque enseguida, y el resto entra de a tandas mientras suena.
+	 */
 	async function importTracks(list: SpotifyTrack[], label: string): Promise<void> {
 		if (list.length === 0) {
 			setError('No hay canciones para agregar.');
@@ -232,23 +373,40 @@ export function SpotifyView(): JSX.Element {
 		setNotice('');
 		setBusy(label);
 		setProgress({done: 0, total: list.length});
+		let added = 0;
+		let missing = 0;
+		// Si ya había algo sonando, todo va a la cola; si no, la primera arranca sola.
+		let started = Boolean(musicState.track);
+		// OJO con el índice: se avanza por el tamaño de la tanda que REALMENTE se usó, no por el
+		// próximo. La primera es de 1 para que arranque enseguida; si se avanzara de a 8, se
+		// saltearían 7 canciones (nos pasó: la cola quedaba con la mitad).
+		let index = 0;
 		try {
-			const {batch, missing} = await resolve(list, (done, total) => setProgress({done, total}));
-			if (cancelled.current) return;
-			if (batch.length > 0) {
-				if (musicState.track) {
-					musicEnqueueMany(batch);
-				} else {
-					// Si no había nada sonando, arranca la primera: la pestaña Cola no tiene botón de
-					// play, así que si no, la cola quedaría llena y sin forma de hacerla sonar.
-					const [first, ...rest] = batch;
-					musicPlay(first);
-					if (rest.length > 0) musicEnqueueMany(rest);
+			while (index < list.length) {
+				if (cancelled.current) break;
+				const size = index === 0 ? FIRST_CHUNK : RESOLVE_CHUNK;
+				const chunk = list.slice(index, index + size);
+				index += chunk.length;
+				const resolved = await resolveChunk(chunk);
+				if (cancelled.current) break;
+				if (resolved.tracks.length > 0) {
+					if (started) {
+						musicEnqueueMany(resolved.tracks);
+					} else {
+						started = true;
+						const [first, ...rest] = resolved.tracks;
+						musicPlay(first);
+						if (rest.length > 0) musicEnqueueMany(rest);
+					}
+					added += resolved.tracks.length;
 				}
+				missing += resolved.missing;
+				setProgress({done: Math.min(index, list.length), total: list.length});
 			}
-			if (batch.length === 0) setError('No encontré esas canciones en YouTube.');
-			else if (missing > 0) setNotice(`Se agregaron ${batch.length} de ${list.length} canciones (${missing} no estaban en YouTube).`);
-			else setNotice(`Se agregaron las ${batch.length} canciones${musicState.track ? ' a la cola' : ' y arrancó la primera'}.`);
+			if (cancelled.current) return;
+			if (added === 0) setError('No encontré esas canciones en YouTube.');
+			else if (missing > 0) setNotice(`Se agregaron ${added} de ${list.length} canciones (${missing} no estaban en YouTube).`);
+			else setNotice(`Se agregaron las ${added} canciones.`);
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : 'No se pudieron agregar las canciones.');
 		} finally {
@@ -295,14 +453,14 @@ export function SpotifyView(): JSX.Element {
 		setNotice('');
 		setBusy(label);
 		try {
-			const {batch} = await resolve([track], () => {});
-			if (batch.length === 0) {
+			const resolved = await resolveChunk([track]);
+			if (resolved.tracks.length === 0) {
 				setError(`No encontré "${track.title}" en YouTube.`);
 				return;
 			}
-			if (mode === 'play') musicPlay(batch[0]);
+			if (mode === 'play') musicPlay(resolved.tracks[0]);
 			else {
-				musicEnqueueMany([batch[0]]);
+				musicEnqueueMany([resolved.tracks[0]]);
 				setNotice(`"${track.title}" se agregó a la cola.`);
 			}
 		} catch (failure) {
@@ -386,7 +544,13 @@ export function SpotifyView(): JSX.Element {
 							</span>
 							<span className="spotify-row-sub">
 								{open.owner ? `${open.owner} · ` : ''}
-								{open.readable ? `${open.tracks} ${open.tracks === 1 ? 'canción' : 'canciones'}` : `de ${open.owner || 'otra cuenta'}`}
+								{open.readable || cachedCounts[open.id] ? (
+									<>
+										{countOf(open)} {countOf(open) === 1 ? 'canción' : 'canciones'}
+									</>
+								) : (
+									`de ${open.owner || 'otra cuenta'}`
+								)}
 							</span>
 						</span>
 						<button
@@ -403,14 +567,14 @@ export function SpotifyView(): JSX.Element {
 
 					{tracksLoading ? (
 						<p className="settings-hint">
-							<Loader2 size={16} className="music-spin" />{' '}
-							{open.readable ? 'Trayendo las canciones…' : 'Leyendo la playlist pública de Spotify…'}
+							<Loader2 size={16} className="music-spin" /> Trayendo las canciones… (las de otra cuenta tardan
+							unos segundos)
 						</p>
 					) : null}
 					{busy === open.id ? (
 						<div className="spotify-progress">
 							<span>
-								Agregando canciones… {progress.done}/{progress.total}
+								Agregando a la cola… {progress.done}/{progress.total}
 							</span>
 							<button
 								type="button"
@@ -494,9 +658,13 @@ export function SpotifyView(): JSX.Element {
 										</span>
 										<span className="spotify-row-sub">
 											{playlist.owner ? `${playlist.owner} · ` : ''}
-											{playlist.readable
-												? `${playlist.tracks} ${playlist.tracks === 1 ? 'canción' : 'canciones'}`
-												: 'de otra cuenta · tocá para ver las canciones'}
+											{playlist.readable || cachedCounts[playlist.id] ? (
+												<>
+													{countOf(playlist)} {countOf(playlist) === 1 ? 'canción' : 'canciones'}
+												</>
+											) : (
+												'de otra cuenta · tocá para ver las canciones'
+											)}
 										</span>
 									</span>
 									<button
@@ -523,7 +691,16 @@ export function SpotifyView(): JSX.Element {
 					<TriangleAlert size={15} /> {error}
 				</p>
 			) : null}
-			{notice ? <p className="spotify-notice">{notice}</p> : null}
+			{notice ? (
+				<p className="spotify-notice">
+					{notice}
+					{onShowQueue ? (
+						<button type="button" className="spotify-link" onClick={onShowQueue}>
+							Ver la cola
+						</button>
+					) : null}
+				</p>
+			) : null}
 		</div>
 	);
 }

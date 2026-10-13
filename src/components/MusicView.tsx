@@ -1,5 +1,5 @@
-import {useEffect, useState} from 'react';
-import {ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, VolumeX, X} from 'lucide-react';
+import {type CSSProperties, useEffect, useRef, useState} from 'react';
+import {GripVertical, ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, VolumeX, X} from 'lucide-react';
 import {SiSpotify} from 'react-icons/si';
 import {type TrackResult, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
@@ -33,7 +33,7 @@ function formatDuration(seconds: number): string {
  * el estilo de Pelacord. Los íconos son de `lucide-react`.
  */
 export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
-	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
+	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicMove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
 		useStore();
 	const [query, setQuery] = useState('');
 	/** Lo que se busca de verdad: cambia con Enter o después de una pausa larga. */
@@ -41,6 +41,11 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const [results, setResults] = useState<TrackResult[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [tab, setTab] = useState<'search' | 'queue' | 'spotify'>('search');
+	/** Para reordenar la cola arrastrando: de dónde sale y sobre cuál está. */
+	const [dragIndex, setDragIndex] = useState<number | null>(null);
+	const [overIndex, setOverIndex] = useState<number | null>(null);
+	/** El origen del arrastre, en un ref: el estado de React puede no estar actualizado al soltar. */
+	const dragFromRef = useRef<number | null>(null);
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
 	/** Para controlar la Jam hay que estar en un canal de voz: si no, no hay dónde sonar. */
@@ -174,7 +179,13 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 				) : tab === 'queue' ? (
 					<>
 						{current ? (
-							<div className="music-now">
+							<div
+								className={`music-now${current.thumbnail ? ' has-image' : ''}`}
+								style={
+									current.thumbnail
+										? ({'--music-now-image': `url("${current.thumbnail}")`} as CSSProperties)
+										: undefined
+								}>
 								<span className="music-now-label">Suena ahora para todos</span>
 								<span className="music-now-title">{current.title}</span>
 								<span className="music-now-sub">
@@ -186,7 +197,42 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						)}
 						<ul className="music-list">
 							{musicState.queue.map((track, index) => (
-								<li key={`${track.id}-${index}`} className="music-row">
+								<li
+									key={`${track.id}-${index}`}
+									className={`music-row is-draggable${dragIndex === index ? ' is-dragging' : ''}${
+										overIndex === index && dragFromRef.current !== null && dragFromRef.current !== index
+											? ' is-drop-target'
+											: ''
+									}`}
+									title="Arrastrala para cambiarla de lugar"
+									draggable
+									onDragStart={(event) => {
+										dragFromRef.current = index;
+										setDragIndex(index);
+										event.dataTransfer.effectAllowed = 'move';
+										// Chromium necesita algo en el dataTransfer para que el arrastre arranque.
+										event.dataTransfer.setData('text/plain', String(index));
+									}}
+									onDragOver={(event) => {
+										if (dragFromRef.current === null) return;
+										event.preventDefault();
+										event.dataTransfer.dropEffect = 'move';
+										setOverIndex(index);
+									}}
+									onDragLeave={() => setOverIndex((value) => (value === index ? null : value))}
+									onDrop={(event) => {
+										event.preventDefault();
+										const from = dragFromRef.current;
+										if (from !== null && from !== index) void musicMove(from, index);
+										dragFromRef.current = null;
+										setDragIndex(null);
+										setOverIndex(null);
+									}}
+									onDragEnd={() => {
+										dragFromRef.current = null;
+										setDragIndex(null);
+										setOverIndex(null);
+									}}>
 									<span className="music-row-index">{index + 1}</span>
 									<img src={track.thumbnail} alt="" loading="lazy" />
 									<span className="music-row-info">
@@ -197,6 +243,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 											{track.author} · la puso {track.addedBy}
 										</span>
 									</span>
+									<GripVertical size={16} className="music-row-grip" />
 									<button
 										type="button"
 										className="music-row-action"
@@ -209,7 +256,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						</ul>
 					</>
 				) : (
-					<SpotifyView />
+					<SpotifyView onShowQueue={() => setTab('queue')} />
 				)}
 			</div>
 
