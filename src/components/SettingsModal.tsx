@@ -803,11 +803,11 @@ function UpdateSettings(): JSX.Element {
 							? 'Estás al día'
 							: status.state === 'error'
 								? `No se pudo actualizar: ${status.error ?? ''}`
-								: 'La app busca actualizaciones sola al abrir.';
+								: 'La app busca sola al iniciar y cada 1 minuto mientras está abierta.';
 	return (
 		<div className="input-row" style={{alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem'}}>
-			<button type="button" className="button secondary" onClick={checkUpdates}>
-				Buscar actualizaciones
+			<button type="button" className="button primary" onClick={checkUpdates} disabled={status.state === 'checking'}>
+				{status.state === 'checking' ? 'Buscando…' : 'Buscar actualizaciones'}
 			</button>
 			{status.state === 'downloaded' ? (
 				<button type="button" className="button primary" onClick={installUpdate}>

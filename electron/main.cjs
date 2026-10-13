@@ -749,11 +749,11 @@ const UPDATE_FEED_URL =
 	process.env.PELACORD_UPDATE_URL || 'https://github.com/balti4152/pelacord/releases/latest/download';
 
 /**
- * Cada cuánto se vuelve a chequear MIENTRAS la app está abierta, así una versión nueva
- * aparece sola sin tener que cerrar y volver a abrir. Si un chequeo falla, el intervalo
- * se duplica hasta 30 minutos para no golpear de más.
+ * Cada cuánto se vuelve a chequear MIENTRAS la app está abierta (1 minuto), así una versión
+ * nueva aparece sola sin tener que cerrar y volver a abrir. Si un chequeo falla, el intervalo
+ * se duplica hasta 30 minutos para no golpear de más. Además se chequea siempre al iniciar.
  */
-const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 30000);
+const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 60000);
 const UPDATE_MAX_INTERVAL_MS = 1800000;
 
 /** Deja un registro en userData para poder diagnosticar si algo falla. */
