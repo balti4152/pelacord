@@ -8,7 +8,6 @@ import streamStop from '@/assets/sounds/stream-stop.mp3';
 import undeafen from '@/assets/sounds/undeafen.mp3';
 import unmute from '@/assets/sounds/unmute.mp3';
 import userMoved from '@/assets/sounds/user-moved.mp3';
-import userLeft from '@/assets/sounds/user-left.wav';
 
 export type SoundName =
 	| 'join'
@@ -32,7 +31,9 @@ const SOURCES: Record<SoundName, string> = {
 	undeafen,
 	message,
 	userJoined: userMoved,
-	userLeft,
+	// Alguien se desconecta de la llamada: el mismo sonido de desconexión de Discord que ya usa
+	// la app cuando salís vos (leave.mp3, el "disconnect" de la carpeta Sounds).
+	userLeft: leave,
 	streamStart,
 	streamStop,
 };
