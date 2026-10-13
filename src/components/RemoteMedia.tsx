@@ -106,7 +106,7 @@ export function RemoteAudio(): JSX.Element {
 	const {state} = useStore();
 	const sinkId = state.settings.outputDeviceId;
 	// "Separado de la Jam": escucha su propia música y no la del grupo.
-	const detached = state.settings.musicDetached ?? false;
+	const detached = state.settings.musicMuted ?? false;
 	return (
 		<>
 			{remotes.flatMap((remote) => {

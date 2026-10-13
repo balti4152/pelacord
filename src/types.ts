@@ -162,7 +162,7 @@ export interface Settings {
 	/** Atajos globales: acción -> combinación de teclas. */
 	hotkeys: Record<string, string>;
 	/** Si está activo, no escucha la música de la Jam (para poner la suya). */
-	musicDetached?: boolean;
+	musicMuted?: boolean;
 	/** Volumen de la música de la Jam (0 a 1). */
 	musicVolume?: number;
 }

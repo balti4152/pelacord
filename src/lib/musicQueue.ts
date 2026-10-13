@@ -1,4 +1,4 @@
-import {doc, onSnapshot, setDoc} from 'firebase/firestore';
+import {collection, doc, onSnapshot, setDoc} from 'firebase/firestore';
 import {getDb} from '@/lib/firebase';
 
 /**
@@ -55,15 +55,25 @@ export const EMPTY_MUSIC_STATE: MusicState = {
 /** Cuánto puede estar callado el host antes de considerarlo ido (ms). */
 export const HOST_TIMEOUT_MS = 45000;
 
-function musicDoc() {
+function musicCollection() {
 	const db = getDb();
 	if (!db) return null;
-	return doc(db, 'music', 'state');
+	return collection(db, 'music');
 }
 
-/** Escucha la cola compartida. Devuelve la función para dejar de escuchar. */
-export function subscribeMusicState(onData: (state: MusicState) => void): () => void {
-	const ref = musicDoc();
+/** Cada canal de voz tiene SU propia Jam: el documento es uno por canal. */
+function musicDoc(channelId: string) {
+	const db = getDb();
+	if (!db) return null;
+	return doc(db, 'music', `channel-${channelId}`);
+}
+
+/**
+ * Escucha TODAS las Jams (una por canal de voz) de una sola vez.
+ * Así el sidebar puede mostrar qué canal tiene música sin abrir un listener por canal.
+ */
+export function subscribeMusicStates(onData: (byChannel: Record<string, MusicState>) => void): () => void {
+	const ref = musicCollection();
 	if (!ref) return () => {};
 	return onSnapshot(
 		ref,
@@ -71,30 +81,31 @@ export function subscribeMusicState(onData: (state: MusicState) => void): () => 
 			// Los datos que sólo están en la caché local no se usan: Firestore muestra cambios
 			// optimistas y, si el servidor los rechaza, volvería atrás y pisaría la cola.
 			if (snapshot.metadata.fromCache) return;
-			if (!snapshot.exists()) {
-				onData(EMPTY_MUSIC_STATE);
-				return;
+			const byChannel: Record<string, MusicState> = {};
+			for (const document of snapshot.docs) {
+				const channelId = document.id.startsWith('channel-') ? document.id.slice('channel-'.length) : document.id;
+				const value = document.data() as Partial<MusicState>;
+				byChannel[channelId] = {
+					track: (value.track as MusicTrack | null) ?? null,
+					startedAt: Number(value.startedAt) || 0,
+					pausedAt: value.pausedAt === null || value.pausedAt === undefined ? null : Number(value.pausedAt),
+					positionMs: Number(value.positionMs) || 0,
+					hostId: (value.hostId as string | null) ?? null,
+					hostSeenAt: Number(value.hostSeenAt) || 0,
+					queue: Array.isArray(value.queue) ? (value.queue as MusicTrack[]) : [],
+				};
 			}
-			const value = snapshot.data() as Partial<MusicState>;
-			onData({
-				track: (value.track as MusicTrack | null) ?? null,
-				startedAt: Number(value.startedAt) || 0,
-				pausedAt: value.pausedAt === null || value.pausedAt === undefined ? null : Number(value.pausedAt),
-				positionMs: Number(value.positionMs) || 0,
-				hostId: (value.hostId as string | null) ?? null,
-				hostSeenAt: Number(value.hostSeenAt) || 0,
-				queue: Array.isArray(value.queue) ? (value.queue as MusicTrack[]) : [],
-			});
+			onData(byChannel);
 		},
 		(error) => {
-			console.warn('[pelacord] no se pudo escuchar la música', error?.message ?? error);
+			console.warn('[pelacord] no se pudieron escuchar las músicas', error?.message ?? error);
 		},
 	);
 }
 
-/** Guarda cambios del estado de la música (merge: sólo lo que se manda). */
-export async function updateMusicState(patch: Partial<MusicState>): Promise<void> {
-	const ref = musicDoc();
+/** Guarda cambios de la Jam de un canal (merge: sólo lo que se manda). */
+export async function updateMusicState(channelId: string, patch: Partial<MusicState>): Promise<void> {
+	const ref = musicDoc(channelId);
 	if (!ref) return;
 	await setDoc(ref, patch, {merge: true});
 }

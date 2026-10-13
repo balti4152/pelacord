@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, X} from 'lucide-react';
+import {ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, VolumeX, X} from 'lucide-react';
 import {type TrackResult, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
 import {useStore} from '@/state/store';
@@ -31,33 +31,52 @@ function formatDuration(seconds: number): string {
  * el estilo de Pelacord. Los íconos son de `lucide-react`.
  */
 export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
-	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicSkip, musicTogglePause, musicSetDetached, musicSetVolume} =
+	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
 		useStore();
 	const [query, setQuery] = useState('');
+	/** Lo que se busca de verdad: cambia con Enter o después de una pausa larga. */
+	const [searchTerm, setSearchTerm] = useState('');
 	const [results, setResults] = useState<TrackResult[]>([]);
 	const [loading, setLoading] = useState(false);
 	const [tab, setTab] = useState<'search' | 'queue'>('search');
-	const detached = state.settings.musicDetached ?? false;
+	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
 
-	// Busca con un pequeño retraso, para no pedir en cada tecla.
+	// Pausa larga: si dejás de escribir, busca igual (sin lanzar uno por tecla).
 	useEffect(() => {
-		const clean = query.trim();
+		const timer = setTimeout(() => setSearchTerm(query), 900);
+		return () => clearTimeout(timer);
+	}, [query]);
+
+	// Busca sólo cuando corresponde: al apretar Enter o después de una pausa larga.
+	// (Buscar en cada tecla lanzaba un proceso de yt-dlp por vez y trababa todo.)
+	useEffect(() => {
+		const clean = searchTerm.trim();
 		if (!clean) {
 			setResults([]);
 			setLoading(false);
 			return;
 		}
+		let stale = false;
 		setLoading(true);
 		const timer = setTimeout(() => {
 			void getDesktopTransport()
-				?.searchYouTube(clean, 15)
-				.then((list) => setResults(list ?? []))
-				.catch(() => setResults([]))
-				.finally(() => setLoading(false));
-		}, 450);
-		return () => clearTimeout(timer);
-	}, [query]);
+				?.searchYouTube(clean, 12)
+				.then((list) => {
+					if (!stale) setResults(list ?? []);
+				})
+				.catch(() => {
+					if (!stale) setResults([]);
+				})
+				.finally(() => {
+					if (!stale) setLoading(false);
+				});
+		}, 250);
+		return () => {
+			stale = true;
+			clearTimeout(timer);
+		};
+	}, [searchTerm]);
 
 	const current = musicState.track;
 
@@ -88,10 +107,13 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							<Search size={16} />
 							<input
 								className="input"
-								placeholder="Buscar una canción, artista o tema…"
+								placeholder="Buscar una canción, artista o tema… (Enter)"
 								value={query}
 								autoFocus
 								onChange={(event) => setQuery(event.target.value)}
+								onKeyDown={(event) => {
+									if (event.key === 'Enter') setSearchTerm(event.currentTarget.value);
+								}}
 							/>
 							{loading ? <Loader2 size={16} className="music-spin" /> : null}
 						</div>
@@ -206,19 +228,18 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 				<div className="music-bar-volume">
 					<button
 						type="button"
-						className={`music-detach${detached ? ' is-active' : ''}`}
-						title={detached ? 'Volver a la Jam' : 'Separarme de la Jam (escuchar mi música)'}
-						onClick={() => musicSetDetached(!detached)}>
-						{detached ? 'Volver a la Jam' : 'Separarme de la Jam'}
+						className={`music-mute${muted ? ' is-active' : ''}`}
+						title={muted ? 'Escuchar la música' : 'Silenciar la música'}
+						onClick={() => musicSetMuted(!muted)}>
+						{muted ? <VolumeX size={18} /> : <Volume2 size={18} />}
 					</button>
-					<Volume2 size={16} />
 					<input
 						type="range"
 						min={0}
 						max={1}
 						step={0.05}
 						value={volume}
-						disabled={detached}
+						title="Volumen de la música"
 						onChange={(event) => musicSetVolume(Number(event.target.value))}
 					/>
 				</div>

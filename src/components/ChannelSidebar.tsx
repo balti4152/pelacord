@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {ListMusic} from 'lucide-react';
+import {ListMusic, Music} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
@@ -189,9 +189,12 @@ export function ChannelSidebar({
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
 }): JSX.Element {
-	const {state, dispatch, addChannel, removeChannel, moveMember} = useStore();
+	const {state, dispatch, addChannel, removeChannel, moveMember, musicByChannel} = useStore();
 	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
 	const [dropTarget, setDropTarget] = useState<string | null>(null);
+
+	// Los que están en la llamada conmigo: son los que escuchan la Jam.
+	const listeners = state.voice.channelId ? (state.voiceMembers[state.voice.channelId] ?? []) : [];
 	/** Categoría en la que se está creando un canal (null = no hay diálogo abierto). */
 	const [creating, setCreating] = useState<Channel['type'] | null>(null);
 	const [newName, setNewName] = useState('');
@@ -302,6 +305,9 @@ export function ChannelSidebar({
 												<Icon name={channel.type === 'text' ? 'hash' : 'speaker'} size={18} />
 											</span>
 											<span className="channel-name">{channel.name}</span>
+											{channel.type === 'voice' && musicByChannel[channel.id]?.track ? (
+												<Music size={12} className="channel-music" />
+											) : null}
 											{state.unread[channel.id] ? <span className="channel-unread" title="Mensajes sin leer" /> : null}
 										</button>
 										{channel.type === 'voice' ? <VoiceChannelMembers channelId={channel.id} /> : null}
@@ -316,6 +322,29 @@ export function ChannelSidebar({
 				<ListMusic size={18} />
 				<span>Música</span>
 			</button>
+			{listeners.length > 0 ? (
+				<div className="music-listeners" title="Están escuchando con vos">
+					<div className="music-listeners-avatars">
+						{listeners.map((participant) => (
+							<ColorAvatar
+								key={participant.id}
+								name={participant.name}
+								color={participant.color}
+								url={participant.avatarUrl}
+								crop={participant.avatarCrop}
+								decoration={participant.decoration}
+								decorationColor={participant.decorationColor}
+								customDeco={participant.customDeco}
+								decoImage={participant.decoImage}
+								decoSize={participant.decoSize}
+								original={participant.original}
+								size={20}
+							/>
+						))}
+					</div>
+					<span>{listeners.length === 1 ? 'escuchando con vos' : `y ${listeners.length} más`}</span>
+				</div>
+			) : null}
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />
 			{menu ? (
