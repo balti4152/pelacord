@@ -233,6 +233,32 @@ function handleMessage(socket, raw) {
 		return;
 	}
 
+	// El log de mensajes: la reconciliación del historial entre peers. Si viene dirigido, se
+	// entrega al destinatario (y si no lo tengo identificado, lo reenvía el que lo originó); si no,
+	// se difunde como la Jam.
+	if (message.type === 'messages') {
+		if (message.to) {
+			if (message.to === myPeerId) {
+				sendToRenderer('pelacord:messages', {from: message.from, payload: message.payload});
+				return;
+			}
+			if (peers.has(message.to)) {
+				const target = peers.get(message.to);
+				if (target.readyState === WebSocket.OPEN) {
+					target.send(JSON.stringify(message));
+					return;
+				}
+			}
+			// Sólo lo retransmite el que lo originó, para que no se arme un bucle.
+			if (message.from === myPeerId) broadcast(message, socket);
+			return;
+		}
+		if (message.from === myPeerId) return;
+		sendToRenderer('pelacord:messages', {from: message.from, payload: message.payload});
+		broadcast(message, socket);
+		return;
+	}
+
 	// Comandos para otro peer (mover de canal de voz, y lo que venga después).
 	if (message.type === 'command') {
 		if (message.to === myPeerId) {
@@ -456,6 +482,12 @@ ipcMain.on('pelacord:command', (_event, message) => {
 ipcMain.on('pelacord:music', (_event, payload) => {
 	if (!myPeerId) return;
 	broadcast({type: 'music', from: myPeerId, payload});
+});
+
+/** Manda el log de mensajes: dirigido a un peer (reconciliación) o difundido (mensaje nuevo). */
+ipcMain.on('pelacord:messages', (_event, message) => {
+	if (!myPeerId || !message || !message.payload) return;
+	broadcast({type: 'messages', from: myPeerId, to: message.to, payload: message.payload});
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);

@@ -16,7 +16,17 @@ import {currentMusicAudio, setHostVolume, startMusicStream, stopMusicStream} fro
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
-import {deleteMessage as deleteRemoteMessage, postMessage, putChannel, removeRemoteChannel, subscribeChannels, subscribeMessages, updateMessage} from '@/lib/remote';
+import {
+	type MessageLog,
+	type MessageRecord,
+	type MessageSyncPayload,
+	applyDelete,
+	mergeRecord,
+	messagesOf,
+	recordsSince,
+	watermarks,
+} from '@/lib/messageLog';
+import {putChannel, putRecord, removeRemoteChannel, subscribeChannels, subscribeMessages} from '@/lib/remote';
 import {playSound} from '@/lib/sounds';
 import type {
 	AppState,
@@ -177,14 +187,11 @@ function seedState(): AppState {
 
 type Action =
 	| {type: 'selectChannel'; channelId: string}
-	| {type: 'sendMessage'; channelId: string; content: string; attachments: Attachment[]}
 	| {type: 'setChannelMessages'; channelId: string; messages: Message[]}
 	| {type: 'markRead'; channelId: string}
 	| {type: 'bumpUnread'; channelId: string}
 	| {type: 'toggleChannelMute'; channelId: string}
 	| {type: 'setKnownMembers'; knownMembers: Record<string, Member>}
-	| {type: 'editMessage'; channelId: string; messageId: string; content: string}
-	| {type: 'deleteMessage'; channelId: string; messageId: string}
 	| {type: 'setRemoteMembers'; members: Member[]}
 	| {type: 'setVoiceMembers'; voiceMembers: Record<string, VoiceParticipant[]>}
 	| {type: 'updateProfile'; patch: Partial<Member>}
@@ -226,38 +233,8 @@ function reducer(state: AppState, action: Action): AppState {
 			};
 		case 'setKnownMembers':
 			return {...state, knownMembers: action.knownMembers};
-		case 'sendMessage': {
-			const message: Message = {
-				id: uid(),
-				channelId: action.channelId,
-				authorId: state.me.id,
-				authorName: state.me.name,
-				authorColor: state.me.avatarColor,
-				content: action.content,
-				createdAt: Date.now(),
-				attachments: action.attachments,
-			};
-			const list = state.messages[action.channelId] ?? [];
-			return {...state, messages: {...state.messages, [action.channelId]: [...list, message]}};
-		}
 		case 'setChannelMessages':
 			return {...state, messages: {...state.messages, [action.channelId]: action.messages}};
-		case 'editMessage': {
-			const list = state.messages[action.channelId] ?? [];
-			return {
-				...state,
-				messages: {
-					...state.messages,
-					[action.channelId]: list.map((message) =>
-						message.id === action.messageId ? {...message, content: action.content, edited: true} : message,
-					),
-				},
-			};
-		}
-		case 'deleteMessage': {
-			const list = state.messages[action.channelId] ?? [];
-			return {...state, messages: {...state.messages, [action.channelId]: list.filter((message) => message.id !== action.messageId)}};
-		}
 		case 'setRemoteMembers':
 			return {...state, members: action.members};
 		case 'setVoiceMembers':
@@ -416,6 +393,53 @@ function persist(state: AppState): void {
 	}
 }
 
+const MESSAGE_LOG_KEY = 'pelacord.messagelog.v1';
+
+/**
+ * Cuánto tiempo se considera "noticia" un mensaje que llega por sincronización.
+ *
+ * Al reconciliar puede venir historial viejo de golpe (una instalación nueva, o un peer que
+ * estuvo mucho tiempo desconectado). Eso tiene que APARECER en el chat, pero no sonar ni marcar
+ * el globito: si no, la primera sincronización haría explotar todo de avisos.
+ */
+const ANNOUNCE_WINDOW_MS = 15 * 60 * 1000;
+/** Para el globito se es más generoso: un mensaje de las últimas horas sí cuenta como no leído. */
+const UNREAD_WINDOW_MS = 12 * 60 * 60 * 1000;
+
+function loadMessageLog(): MessageLog {
+	if (typeof localStorage === 'undefined') return {};
+	try {
+		const raw = localStorage.getItem(MESSAGE_LOG_KEY);
+		if (!raw) return {};
+		const parsed = JSON.parse(raw) as MessageLog;
+		return parsed && typeof parsed === 'object' ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+/** Guarda el log en disco. Los `blob:` locales no se guardan: no sobreviven un reinicio. */
+function persistMessageLog(log: MessageLog): void {
+	if (typeof localStorage === 'undefined') return;
+	try {
+		const clean: MessageLog = {};
+		for (const [id, record] of Object.entries(log)) {
+			clean[id] = {
+				...record,
+				message: {
+					...record.message,
+					attachments: record.message.attachments.map((a) => ((a.url ?? '').startsWith('blob:') ? {...a, url: ''} : a)),
+				},
+			};
+		}
+		localStorage.setItem(MESSAGE_LOG_KEY, JSON.stringify(clean));
+	} catch (error) {
+		// El chat sigue andando (el log vive en memoria), pero conviene que quede dicho: si se llenó
+		// el almacenamiento, al reabrir la app no van a estar los mensajes más viejos.
+		console.warn('[pelacord] no se pudo guardar el historial de mensajes en disco:', error);
+	}
+}
+
 function applyEffects(state: AppState): void {
 	if (typeof document === 'undefined') return;
 	const body = document.body;
@@ -493,7 +517,6 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const peersRef = useRef<Record<string, PeerPresence>>({});
 	const lastSeenRef = useRef<Record<string, number>>({});
 	const sharingRef = useRef<Record<string, boolean>>({});
-	const messageCountRef = useRef<Record<string, number>>({});
 	const activeChannelRef = useRef(state.activeChannelId);
 	activeChannelRef.current = state.activeChannelId;
 	const notificationsRef = useRef(state.settings.notifications);
@@ -505,6 +528,146 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const channelsRef = useRef<Channel[]>(state.channels);
 	channelsRef.current = state.channels;
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
+
+	/**
+	 * El log local de mensajes: es la FUENTE DE VERDAD de lo que se ve en el chat.
+	 *
+	 * Firestore y la malla son réplicas que entran por el mismo merge. Por eso "Firebase primero
+	 * y P2P si falla" no se pelean: da igual por dónde llegue un mensaje, el resultado es el mismo.
+	 */
+	const messageLogRef = useRef<MessageLog>({});
+	const logReadyRef = useRef(false);
+	if (!logReadyRef.current) {
+		logReadyRef.current = true;
+		messageLogRef.current = loadMessageLog();
+		// Migración: si todavía no había log guardado, se arma con lo que ya estaba en el estado
+		// local (los mensajes que se guardaban en el estado antes de este cambio).
+		if (Object.keys(messageLogRef.current).length === 0) {
+			for (const list of Object.values(state.messages)) {
+				for (const message of list) {
+					messageLogRef.current = mergeRecord(messageLogRef.current, {message, updatedAt: message.createdAt});
+				}
+			}
+		}
+	}
+	/** Mensajes propios que Firestore no llegó a recibir (se reintenta subirlos cuando vuelve). */
+	const pendingCloudRef = useRef<Set<string>>(new Set());
+	/** Con qué peers ya se reconcilió el historial (se olvida cuando se van, para re-sincronizar). */
+	const syncedPeersRef = useRef<Set<string>>(new Set());
+
+	/** Publica en la vista lo que dice el log para cada canal de texto. */
+	const publishLog = useCallback((log: MessageLog): void => {
+		for (const channel of channelsRef.current) {
+			if (channel.type !== 'text') continue;
+			dispatch({type: 'setChannelMessages', channelId: channel.id, messages: messagesOf(log, channel.id)});
+		}
+	}, []);
+
+	/** Avisa (sonido, globito, notificación) de un mensaje que acaba de llegar. */
+	const announceMessage = useCallback((message: Message): void => {
+		const channel = channelsRef.current.find((item) => item.id === message.channelId);
+		if (!channel || channel.type !== 'text') return;
+		const watching = channel.id === activeChannelRef.current && document.hasFocus();
+		const muted = mutedChannelsRef.current.includes(channel.id);
+		const mentioned = mentionsName(message.content ?? '', meRef.current.name);
+		// Silenciado: ni suena ni avisa, SALVO que te mencionen.
+		const audible = !muted || mentioned;
+		if (audible) playSound('message');
+		if (watching) return;
+		dispatch({type: 'bumpUnread', channelId: channel.id});
+		if (!notificationsRef.current || !audible) return;
+		const attachment = message.attachments?.[0];
+		const body = message.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
+		// La foto de quien escribe: la del peer si está online, o la que quedó guardada en el perfil
+		// cacheado. Se convierte a PNG acá (ver avatarIconDataUrl) porque el proceso principal no lee GIF.
+		const peer = peersRef.current[message.authorId];
+		const known = knownMembersRef.current[message.authorId];
+		const photo = peer?.avatarUrl ?? known?.cachedAvatar ?? known?.avatarUrl ?? undefined;
+		void avatarIconDataUrl(photo).then((iconDataUrl) => {
+			showNotification({
+				title: mentioned
+					? `Te mencionaron en #${channel.name}`
+					: `${message.authorName ?? 'Alguien'} en #${channel.name}`,
+				body: body.slice(0, 180),
+				channelId: channel.id,
+				iconUrl: photo,
+				iconDataUrl: iconDataUrl ?? undefined,
+			});
+		});
+	}, []);
+
+	/**
+	 * ÚNICO camino de entrada de mensajes: fusiona registros (vengan de Firestore o de la malla),
+	 * actualiza la vista y avisa de lo que es realmente nuevo.
+	 */
+	const ingestRecords = useCallback(
+		(incoming: MessageRecord[]): void => {
+			if (incoming.length === 0) return;
+			let next = messageLogRef.current;
+			const fresh: Message[] = [];
+			for (const record of incoming) {
+				// "Nuevo" = nunca visto y no lo escribí yo: eso es lo que suena y avisa.
+				if (!next[record.message.id] && !record.deleted && record.message.authorId !== meRef.current.id) {
+					fresh.push(record.message);
+				}
+				next = mergeRecord(next, record);
+			}
+			// Si no cambió nada (el mismo mensaje recibido dos veces), no hay nada que republicar.
+			if (next === messageLogRef.current) return;
+			messageLogRef.current = next;
+			persistMessageLog(next);
+			publishLog(next);
+			const now = Date.now();
+			for (const message of fresh) {
+				if (now - message.createdAt > UNREAD_WINDOW_MS) continue;
+				// Con más atraso que la ventana de aviso: aparece en el chat y marca el globito, pero
+				// no suena (es historial que recién se sincroniza, no algo que acaba de pasar).
+				if (now - message.createdAt > ANNOUNCE_WINDOW_MS) {
+					if (message.channelId !== activeChannelRef.current) dispatch({type: 'bumpUnread', channelId: message.channelId});
+					continue;
+				}
+				announceMessage(message);
+			}
+		},
+		[announceMessage, publishLog],
+	);
+
+	/** Sube un registro a Firestore; si falla, queda anotado para reintentar. */
+	const pushRecordToCloud = useCallback((record: MessageRecord): void => {
+		void putRecord(record.message.channelId, record)
+			.then(() => {
+				pendingCloudRef.current.delete(record.message.id);
+			})
+			.catch(() => {
+				pendingCloudRef.current.add(record.message.id);
+			});
+	}, []);
+
+	/** Manda un registro a los demás: por la malla (tiempo real) y, si se puede, a Firestore. */
+	const broadcastRecord = useCallback(
+		(record: MessageRecord): void => {
+			getDesktopTransport()?.sendMessages({kind: 'records', records: [record]});
+			if (!isRemoteEnabled()) return;
+			// "Firebase primero": si está disponible, el mensaje también queda en la nube. Si falla no
+			// se pierde nada: ya está en el log local y viajó por la malla, y queda pendiente de subir.
+			pendingCloudRef.current.add(record.message.id);
+			pushRecordToCloud(record);
+		},
+		[pushRecordToCloud],
+	);
+
+	/** Reintenta subir a Firestore lo que no llegó a entrar (por ejemplo, escrito sin conexión). */
+	const pushPendingToCloud = useCallback((): void => {
+		if (!isRemoteEnabled() || pendingCloudRef.current.size === 0) return;
+		for (const id of [...pendingCloudRef.current]) {
+			const record = messageLogRef.current[id];
+			if (!record) {
+				pendingCloudRef.current.delete(id);
+				continue;
+			}
+			pushRecordToCloud(record);
+		}
+	}, [pushRecordToCloud]);
 
 	useEffect(() => {
 		const transport = getDesktopTransport();
@@ -746,6 +909,12 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			peersRef.current = {...peersRef.current, [from]: payload};
 			lastSeenRef.current[from] = Date.now();
 			applyPresence();
+			// Peer nuevo: se le pide el historial que me falta. Él, por su lado, me pide el suyo
+			// (el pedido lo dispara VER a alguien, nunca recibir un pedido: si no, sería un bucle).
+			if (!syncedPeersRef.current.has(from)) {
+				syncedPeersRef.current.add(from);
+				transport.sendMessages({kind: 'sync', since: watermarks(messageLogRef.current)}, from);
+			}
 		});
 	}, [applyPresence]);
 
@@ -758,6 +927,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			delete peersRef.current[id];
 			delete lastSeenRef.current[id];
 			delete sharingRef.current[id];
+			// Se olvida la reconciliación: si vuelve, se le pide de nuevo lo que me falte.
+			syncedPeersRef.current.delete(id);
 			applyPresence();
 		});
 	}, [applyPresence]);
@@ -817,6 +988,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					delete peersRef.current[id];
 					delete lastSeenRef.current[id];
 					delete sharingRef.current[id];
+					// Si vuelve, se le pide otra vez el historial que me falte.
+					syncedPeersRef.current.delete(id);
 					changed = true;
 				}
 			}
@@ -869,58 +1042,30 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		});
 	}, []);
 
-	// Messages come from Firestore. Voice presence deliberately does NOT: it runs peer-to-peer
-	// over ZeroTier through the desktop transport, so it never touches the Firebase quota.
+	// El chat ya no depende de Firestore: lo que se ve sale del LOG LOCAL (que se guarda en disco).
 	//
-	// Se escuchan TODOS los canales de texto: así llegan las notificaciones y el puntito rojo
-	// aunque estés mirando otro canal.
+	// Firestore y la malla son dos réplicas que alimentan ese log por el mismo merge. Por eso el
+	// chat anda aunque la nube no esté, y cuando la nube vuelve no hay que "elegir" una verdad:
+	// gana el cambio más nuevo, venga de donde venga.
 	const textChannelIds = state.channels
 		.filter((channel) => channel.type === 'text')
 		.map((channel) => channel.id)
 		.join(',');
+
+	// Primero la vista: se arma con el log (así, al abrir, ya se ven los mensajes guardados).
+	useEffect(() => {
+		publishLog(messageLogRef.current);
+	}, [textChannelIds, publishLog]);
+
+	// Firestore como réplica ("Firebase primero"): lo que llega entra al log por el mismo merge.
 	useEffect(() => {
 		if (!isRemoteEnabled()) return;
 		const textChannels = channelsRef.current.filter((channel) => channel.type === 'text');
 		const unsubscribe = textChannels.map((channel) =>
-			subscribeMessages(channel.id, (messages) => {
-				const previous = messageCountRef.current[channel.id];
-				const last = messages[messages.length - 1];
-				const isNew =
-					previous !== undefined && messages.length > previous && Boolean(last) && last.authorId !== meRef.current.id;
-				if (isNew && last) {
-					const watching = channel.id === activeChannelRef.current && document.hasFocus();
-					const muted = mutedChannelsRef.current.includes(channel.id);
-					const mentioned = mentionsName(last.content ?? '', meRef.current.name);
-					// Silenciado: ni suena ni avisa, SALVO que te mencionen.
-					const audible = !muted || mentioned;
-					if (audible) playSound('message');
-					if (!watching) {
-						dispatch({type: 'bumpUnread', channelId: channel.id});
-						if (notificationsRef.current && audible) {
-							const attachment = last.attachments?.[0];
-							const body = last.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
-							// La foto de quien escribe: la del peer si está online, o la que quedó
-							// guardada en el perfil cacheado. Se convierte a PNG acá (ver
-							// avatarIconDataUrl) porque el proceso principal no lee GIF.
-							const peer = peersRef.current[last.authorId];
-							const known = knownMembersRef.current[last.authorId];
-							const photo = peer?.avatarUrl ?? known?.cachedAvatar ?? known?.avatarUrl ?? undefined;
-							void avatarIconDataUrl(photo).then((iconDataUrl) => {
-								showNotification({
-									title: mentioned
-										? `Te mencionaron en #${channel.name}`
-										: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
-									body: body.slice(0, 180),
-									channelId: channel.id,
-									iconUrl: photo,
-									iconDataUrl: iconDataUrl ?? undefined,
-								});
-							});
-						}
-					}
-				}
-				messageCountRef.current[channel.id] = messages.length;
-				dispatch({type: 'setChannelMessages', channelId: channel.id, messages});
+			subscribeMessages(channel.id, (records) => {
+				ingestRecords(records);
+				// Con la nube disponible, se sube lo que no llegó a entrar (lo escrito sin conexión).
+				pushPendingToCloud();
 			}),
 		);
 		return () => {
@@ -929,6 +1074,34 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// textChannelIds resume los ids: la suscripción se rehace sólo cuando cambia la lista.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [textChannelIds]);
+
+	// La malla como réplica: al ver un peer se pide lo que falta, y los mensajes nuevos llegan al
+	// instante. Esto es lo que hace que el chat funcione sin Firebase.
+	useEffect(() => {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		return transport.onMessages(({from, payload}) => {
+			const incoming = payload as MessageSyncPayload | null;
+			if (!incoming || typeof incoming !== 'object') return;
+			if (incoming.kind === 'records') {
+				ingestRecords(incoming.records ?? []);
+				return;
+			}
+			if (incoming.kind === 'sync') {
+				// Me pide lo que cambió después de lo que ya sabe. Le contesto SÓLO a él, y no
+				// le devuelvo otro pedido: si no, se los pedirían mutuamente para siempre.
+				const records = recordsSince(messageLogRef.current, incoming.since ?? {});
+				if (records.length > 0) transport.sendMessages({kind: 'records', records}, from);
+			}
+		});
+	}, [ingestRecords]);
+
+	// Reintento periódico: si Firestore volvió pero no llegó ningún aviso, igual se sube lo pendiente.
+	useEffect(() => {
+		if (!isRemoteEnabled()) return;
+		const timer = setInterval(() => pushPendingToCloud(), 30000);
+		return () => clearInterval(timer);
+	}, [pushPendingToCloud]);
 
 	// El globito de la barra de tareas sigue el total de mensajes sin leer.
 	useEffect(() => {
@@ -984,25 +1157,23 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		(content: string, attachments: Attachment[]) => {
 			if (!content.trim() && attachments.length === 0) return;
 			const channelId = state.activeChannelId;
-			if (isRemoteEnabled()) {
-				const message: Message = {
-					id: uid(),
-					channelId,
-					authorId: state.me.id,
-					authorName: state.me.name,
-					authorColor: state.me.avatarColor,
-					content,
-					createdAt: Date.now(),
-					attachments,
-				};
-				void postMessage(channelId, message).catch((error: unknown) => {
-					console.error('[pelacord-error] no se pudo enviar el mensaje:', error);
-				});
-			} else {
-				dispatch({type: 'sendMessage', channelId, content, attachments});
-			}
+			const message: Message = {
+				id: uid(),
+				channelId,
+				authorId: state.me.id,
+				authorName: state.me.name,
+				authorColor: state.me.avatarColor,
+				content,
+				createdAt: Date.now(),
+				attachments,
+			};
+			const record: MessageRecord = {message, updatedAt: message.createdAt};
+			// Primero el log local (así el mensaje aparece al instante, aunque no haya red) y después
+			// se reparte: malla (tiempo real) + Firestore (si está).
+			ingestRecords([record]);
+			broadcastRecord(record);
 		},
-		[state.activeChannelId, state.me.id, state.me.name, state.me.avatarColor],
+		[state.activeChannelId, state.me.id, state.me.name, state.me.avatarColor, ingestRecords, broadcastRecord],
 	);
 
 	const updateProfile = useCallback((patch: Partial<Member>) => {
@@ -1017,26 +1188,29 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 
 	const editMessage = useCallback(
 		(messageId: string, content: string) => {
-			const channelId = state.activeChannelId;
-			if (isRemoteEnabled()) {
-				void updateMessage(channelId, messageId, content).catch(() => {});
-			} else {
-				dispatch({type: 'editMessage', channelId, messageId, content});
-			}
+			const current = messageLogRef.current[messageId];
+			if (!current) return;
+			const record: MessageRecord = {
+				message: {...current.message, content, edited: true},
+				updatedAt: Date.now(),
+			};
+			ingestRecords([record]);
+			broadcastRecord(record);
 		},
-		[state.activeChannelId],
+		[ingestRecords, broadcastRecord],
 	);
 
 	const removeMessage = useCallback(
 		(messageId: string) => {
-			const channelId = state.activeChannelId;
-			if (isRemoteEnabled()) {
-				void deleteRemoteMessage(channelId, messageId).catch(() => {});
-			} else {
-				dispatch({type: 'deleteMessage', channelId, messageId});
-			}
+			// El borrado es una LÁPIDA (no se saca la fila): si no, un peer que todavía tuviera el
+			// mensaje lo "reviviría" en la próxima reconciliación.
+			const deleted = applyDelete(messageLogRef.current, messageId);
+			if (deleted === messageLogRef.current) return;
+			const record = deleted[messageId];
+			ingestRecords([record]);
+			broadcastRecord(record);
 		},
-		[state.activeChannelId],
+		[ingestRecords, broadcastRecord],
 	);
 
 	const addChannel = useCallback((type: ChannelType, name: string) => {

@@ -58,17 +58,42 @@ export function messagesOf(log: MessageLog, channelId: string): Message[] {
 		.map((record) => record.message);
 }
 
-/** Lo que hay que mandarle a alguien que ya sabe hasta `since` (0 = todo). */
-export function recordsSince(log: MessageLog, since: number): MessageRecord[] {
-	return Object.values(log).filter((record) => record.updatedAt > since);
+/**
+ * El "hasta cuándo sé" de CADA autor: por autor, el mayor `updatedAt` que tengo.
+ *
+ * Se lleva por autor (y no un solo número global) porque cada máquina pone la hora con su propio
+ * reloj: comparar un mensaje de un autor contra el "hasta cuándo" de otro compara peras con
+ * manzanas. Si un reloj está corrido, un número global dejaría a esa persona sin recibir nunca
+ * los mensajes del otro; así cada autor se compara contra su propio reloj.
+ */
+export type LogWatermarks = Record<string, number>;
+
+export function watermarks(log: MessageLog): LogWatermarks {
+	const marks: LogWatermarks = {};
+	for (const record of Object.values(log)) {
+		const author = record.message.authorId;
+		if (!author) continue;
+		if (record.updatedAt > (marks[author] ?? 0)) marks[author] = record.updatedAt;
+	}
+	return marks;
 }
 
-/** Hasta cuándo sabe ese peer (el mayor updatedAt que tiene), para pedirle sólo lo que falta. */
-export function lastUpdatedAt(log: MessageLog): number {
-	let max = 0;
-	for (const record of Object.values(log)) if (record.updatedAt > max) max = record.updatedAt;
-	return max;
+/** Lo que hay que mandarle a alguien que ya sabe hasta `since` (vacío = todo). */
+export function recordsSince(log: MessageLog, since: LogWatermarks): MessageRecord[] {
+	return Object.values(log).filter((record) => record.updatedAt > (since[record.message.authorId] ?? 0));
 }
+
+/**
+ * Lo que viaja por la malla para reconciliar el historial.
+ *
+ * El pedido lo dispara ver a un peer nuevo (no el recibir un pedido): si cada uno contestara un
+ * pedido con otro pedido, se los pedirían mutuamente para siempre.
+ */
+export type MessageSyncPayload =
+	/** Pedido: "mandame lo que cambió después de esto que ya sé" (vacío = todo). */
+	| {kind: 'sync'; since: LogWatermarks}
+	/** Respuesta (o mensaje en el momento): los registros que el otro no tiene. */
+	| {kind: 'records'; records: MessageRecord[]};
 
 /** Cuántos mensajes vivos hay en un canal (para la interfaz). */
 export function countMessages(log: MessageLog, channelId: string): number {

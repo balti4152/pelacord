@@ -1,16 +1,20 @@
-import {collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc, updateDoc} from 'firebase/firestore';
+import {collection, deleteDoc, doc, onSnapshot, orderBy, query, setDoc} from 'firebase/firestore';
 import {getDb} from '@/lib/firebase';
+import type {MessageRecord} from '@/lib/messageLog';
 import type {Attachment, Channel, ChannelType, Message} from '@/types';
 
 /**
- * Firestore is used ONLY for text messages, attachment metadata and the channel list.
+ * Firestore is used as a REPLICA of the message log (and for the channel list).
  *
  *   messages/{channelId}/items/{messageId}
  *   channels/{channelId}
  *
- * Voice presence ("who is in a call") is intentionally NOT here: it is meant to run
- * peer-to-peer over ZeroTier so it never touches the Firebase quota. See README.
- * File bytes are never stored either; a message only carries attachment metadata.
+ * The local log (`lib/messageLog.ts`) is the source of truth: what arrives from here and what
+ * arrives over the ZeroTier mesh both go through the same merge. That is what makes "Firebase
+ * first, P2P when it is down" safe — it does not matter which path a message takes, the result
+ * is the same. Voice presence is intentionally NOT here: it runs peer-to-peer so it never
+ * touches the Firebase quota. File bytes are never stored either; a message only carries
+ * attachment metadata.
  *
  * Los canales son pocos documentos y cambian casi nunca (alguien crea o borra uno), así que
  * no mueven la aguja de la cuota: es la forma más simple de que todos vean la misma lista.
@@ -40,32 +44,40 @@ function stripAttachment(attachment: Attachment): Record<string, unknown> {
 	return clean;
 }
 
-export async function postMessage(channelId: string, message: Message): Promise<void> {
+/**
+ * Guarda (o actualiza) un mensaje en Firestore.
+ *
+ * Se usa `setDoc` para todo —crear, editar y borrar— porque el registro ya trae su versión
+ * (`updatedAt`): escribir el documento entero es idempotente y no hay que decidir entre
+ * insertar, actualizar o borrar.
+ *
+ * El borrado es una LÁPIDA (`deleted: true`), no un `deleteDoc`: si se borrara la fila, un peer
+ * que todavía tuviera el mensaje lo "reviviría" en la próxima reconciliación.
+ */
+export async function putRecord(channelId: string, record: MessageRecord): Promise<void> {
 	const db = getDb();
 	if (!db) return;
-	await setDoc(doc(db, 'messages', channelId, 'items', message.id), {
+	const message = record.message;
+	const docData: Record<string, unknown> = {
 		authorId: message.authorId,
 		authorName: message.authorName ?? '',
 		authorColor: message.authorColor ?? '',
 		content: message.content,
 		createdAt: message.createdAt,
 		attachments: message.attachments.map(stripAttachment),
-	});
+		updatedAt: record.updatedAt,
+	};
+	if (record.deleted) docData.deleted = true;
+	await setDoc(doc(db, 'messages', channelId, 'items', message.id), docData);
 }
 
-export async function updateMessage(channelId: string, messageId: string, content: string): Promise<void> {
-	const db = getDb();
-	if (!db) return;
-	await updateDoc(doc(db, 'messages', channelId, 'items', messageId), {content, edited: true});
-}
-
-export async function deleteMessage(channelId: string, messageId: string): Promise<void> {
-	const db = getDb();
-	if (!db) return;
-	await deleteDoc(doc(db, 'messages', channelId, 'items', messageId));
-}
-
-export function subscribeMessages(channelId: string, onData: (messages: Message[]) => void): () => void {
+/**
+ * Escucha los mensajes de un canal.
+ *
+ * Devuelve REGISTROS (con versión y lápida), no mensajes sueltos: así lo que llega de Firestore
+ * entra por el mismo merge que lo que llega por la malla, y no hay dos verdades peleando.
+ */
+export function subscribeMessages(channelId: string, onData: (records: MessageRecord[]) => void): () => void {
 	const db = getDb();
 	if (!db) return () => {};
 	const q = query(collection(db, 'messages', channelId, 'items'), orderBy('createdAt'));
@@ -75,25 +87,31 @@ export function subscribeMessages(channelId: string, onData: (messages: Message[
 			onData(
 				snap.docs.map((docSnap) => {
 					const value = docSnap.data();
-					return {
+					const createdAt = (value.createdAt as number) ?? 0;
+					// Los documentos viejos no tienen `updatedAt`: se cae a `createdAt` (nunca editados).
+					const updatedAt = (value.updatedAt as number) ?? createdAt;
+					const message: Message = {
 						id: docSnap.id,
 						channelId,
 						authorId: value.authorId as string,
 						authorName: value.authorName as string,
 						authorColor: value.authorColor as string,
 						content: value.content as string,
-						createdAt: value.createdAt as number,
-						edited: Boolean(value.edited),
+						createdAt,
+						// Editado = la versión es posterior a la creación (o lo dice el campo viejo).
+						edited: Boolean(value.edited) || updatedAt > createdAt,
 						attachments: ((value.attachments ?? []) as Array<Omit<Attachment, 'url'> & {url?: string}>).map((a) => ({
 							...a,
 							url: a.url ?? '',
 						})),
-					} satisfies Message;
+					};
+					return {message, updatedAt, deleted: Boolean(value.deleted)} satisfies MessageRecord;
 				}),
 			);
 		},
-		() => {
-			// Permission or network error: keep the local view as-is.
+		(error) => {
+			// Sin permiso o sin red: se sigue con el log local (y con lo que venga por la malla).
+			console.warn('[pelacord] no se pudieron escuchar los mensajes de', channelId, error?.message ?? error);
 		},
 	);
 }

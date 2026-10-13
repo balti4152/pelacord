@@ -95,8 +95,13 @@ On Windows, allow the app through the firewall for private networks.
 
 ## Delivery plan (decided)
 
-- **Messages:** stored in **Firebase Firestore** (free Spark plan, no credit card). Each peer
-  syncs the log on connect, so a message sent while you were offline is waiting for you.
+- **Messages:** the **local log is the source of truth** (`src/lib/messageLog.ts`): each peer keeps the
+  whole history on disk and, when it sees another peer, they exchange what is missing. **Firebase
+  Firestore is a replica** (first choice while it is reachable, so the history also lives in the
+  cloud), and the **ZeroTier mesh is the fallback** (so the chat keeps working when the quota is
+  exhausted or there is no internet). Both feed the same merge, so it does not matter which path a
+  message takes — "last write wins" on `updatedAt`, with tombstones for deletes. What is written
+  while Firestore is down is pushed up when it comes back.
 - **Files:** the bytes are **not** uploaded to Firebase. Only file *metadata* goes to Firestore.
   The actual content is served **directly by the sender while they are online**, over ZeroTier.
   So a file is downloadable only while whoever shared it is connected — no storage bill.

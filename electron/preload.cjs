@@ -14,6 +14,12 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 		ipcRenderer.on('pelacord:music', handler);
 		return () => ipcRenderer.removeListener('pelacord:music', handler);
 	},
+	sendMessages: (payload, to) => ipcRenderer.send('pelacord:messages', {to, payload}),
+	onMessages: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:messages', handler);
+		return () => ipcRenderer.removeListener('pelacord:messages', handler);
+	},
 	onCommand: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:command', handler);
