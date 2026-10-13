@@ -59,49 +59,36 @@ function bloqueaClics() {
 	}, 2000);
 }
 
-document.addEventListener('DOMContentLoaded', bloqueaClics);
-window.addEventListener('load', bloqueaClics);
-bloqueaClics();
-
 /**
- * Elige los subtítulos en español.
+ * Esconde la barra del reproductor: usamos la nuestra.
  *
- * Se abre el panel de subtítulos del reproductor, se elige "Spanish" y, si aparece un submenú con
- * las pistas, se elige la primera. Se hace con llamadas del código (click()), así funciona aunque
- * el video no reciba clics.
+ * Ojo: el botón de subtítulos vive ADENTRO de esa barra. Se esconde igual porque igual lo podemos
+ * apretar por código (`element.click()` anda aunque esté oculto), y así los subtítulos se activan
+ * sin que se vea nada de su interfaz.
  */
-async function subtitulosEnEspanol() {
-	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-	const clickeable = (el) => el && typeof el.click === 'function';
-	for (let intento = 0; intento < 6; intento++) {
-		const boton = [...document.querySelectorAll('button')].find((el) =>
-			/subtitle settings/i.test(el.getAttribute('aria-label') || el.title || ''),
-		);
-		if (!clickeable(boton)) {
-			await wait(1000);
-			continue;
-		}
-		boton.click();
-		await wait(1200);
-		const opciones = [...document.querySelectorAll('button, [role="option"], [role="menuitem"], li')];
-		const spanish = opciones.find((el) => /^spanish(\s|$)/i.test((el.textContent || '').trim()));
-		if (!clickeable(spanish)) {
-			await wait(1200);
-			continue;
-		}
-		spanish.click();
-		await wait(1200);
-		// Si Spanish abre un submenú con pistas ("Default", "Spanish 1", …), se elige la primera.
-		const pistas = [...document.querySelectorAll('button, [role="option"], [role="menuitem"]')].filter((el) => {
-			const texto = (el.textContent || '').trim();
-			return texto.length > 0 && texto.length < 24 && /^(default|forzad|spanish\s*\d*|1|2)$/i.test(texto) && !/^spanish$/i.test(texto);
-		});
-		if (pistas.length > 0) pistas[0].click();
-		return true;
-	}
-	return false;
+const CSS_OCULTA_BARRA = `
+	media-control-bar,
+	.notflix-controlbar { display: none !important; }
+`;
+
+function ocultaBarra() {
+	if (!document.head || document.getElementById('pelacord-movie-css')) return;
+	const style = document.createElement('style');
+	style.id = 'pelacord-movie-css';
+	style.textContent = CSS_OCULTA_BARRA;
+	document.head.appendChild(style);
 }
 
-ipcRenderer.on('pelacord:movie-subtitles-es', () => {
-	void subtitulosEnEspanol().then((ok) => ipcRenderer.sendToHost('pelacord:movie-subtitles', {ok}));
+document.addEventListener('DOMContentLoaded', () => {
+	bloqueaClics();
+	ocultaBarra();
 });
+window.addEventListener('load', () => {
+	bloqueaClics();
+	ocultaBarra();
+});
+bloqueaClics();
+ocultaBarra();
+
+// Los subtítulos en español los pone el proceso principal (pelacord:movie-subtitles) porque el
+// reproductor sólo responde a clics REALES de mouse; acá solo se reenvían eventos y comandos.

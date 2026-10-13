@@ -12,6 +12,14 @@ import {
 	currentPositionMs,
 	electHost,
 } from '@/lib/musicQueue';
+import {
+	type MovieMedia,
+	type MovieRoom,
+	type MovieRoomCommand,
+	applyMovieCommand,
+	isStale,
+	sortRooms,
+} from '@/lib/movieRooms';
 import {currentMusicAudio, setHostVolume, startMusicStream, stopMusicStream} from '@/lib/musicPlayer';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
@@ -506,6 +514,24 @@ interface StoreContextValue {
 	/** Silenciar la música de la Jam (sólo para vos) o volver a escucharla. */
 	musicSetMuted: (muted: boolean) => void;
 	musicSetVolume: (value: number) => void;
+	/** Pelaflix: las salas activas, ya ordenadas (así el número es el mismo para todos). */
+	movieRoomsList: MovieRoom[];
+	/** Mi sala, si estoy compartiendo algo. */
+	myMovieRoom: MovieRoom | null;
+	/** La sala que estoy mirando (puede ser la mía o la de otro). */
+	myJoinedMovieRoom: MovieRoom | null;
+	/** Abrir una película o serie: crea mi sala, o cambia la que ya tengo. */
+	movieOpen: (media: MovieMedia) => void;
+	/** Entrar a una sala: me sincronizo con quien la está compartiendo. */
+	movieJoin: (roomId: string) => void;
+	/** Salir: si soy el host, la sala se cierra para todos. */
+	movieLeave: () => void;
+	/** Una orden para la sala (play, pausa, saltar). */
+	movieCommand: (command: MovieRoomCommand) => void;
+	/** El host avisa por dónde va su video (los demás corrigen el desvío). */
+	movieHostSync: (positionMs: number, paused: boolean) => void;
+	/** Quiénes están mirando una sala. */
+	movieRoomViewers: (roomId: string) => PeerPresence[];
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -743,6 +769,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			status: me.status,
 			fileHost: endpoint?.host,
 			filePort: endpoint?.port,
+			// En qué sala de Pelaflix estoy mirando (los demás lo usan para mostrar quién está).
+			movieRoomId: joinedMovieRoomRef.current,
 		};
 	}, []);
 
@@ -943,7 +971,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		const transport = getDesktopTransport();
 		if (!transport) return;
 		return transport.onCommand(({payload}) => {
-			const command = payload as {kind?: string; channelId?: string; on?: boolean; command?: MusicCommand} | null;
+			const command = payload as {
+				kind?: string;
+				channelId?: string;
+				on?: boolean;
+				command?: MusicCommand;
+				movieCommand?: MovieRoomCommand;
+			} | null;
 			if (!command?.kind) return;
 			// Órdenes de la Jam (play, pausa, cola): las aplica sólo el host de turno y las difunde.
 			if (command.kind === 'music' && command.command) {
@@ -959,6 +993,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				const next = applyMusicCommand(musicStateRef.current, command.command);
 				setMusicState(next);
 				broadcastMusic(next);
+				return;
+			}
+			// Órdenes de Pelaflix: las aplica sólo el host de esa sala y las difunde.
+			if (command.kind === 'movie' && command.movieCommand) {
+				const mine = myMovieRoomRef.current;
+				if (!mine) return;
+				const next = applyMovieCommand(mine, command.movieCommand);
+				setMyMovieRoom(next);
+				broadcastMovieRoom(next);
 				return;
 			}
 			// Mover de canal: se entra sin preguntar (arrastrar a alguien lo mueve de verdad).
@@ -1519,6 +1562,187 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicState}});
 	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey]);
 
+	// ---------- Pelaflix: salas (por la malla, nada de Firebase) ----------
+
+	const [movieRooms, setMovieRooms] = useState<Record<string, MovieRoom>>({});
+	const [myMovieRoom, setMyMovieRoom] = useState<MovieRoom | null>(null);
+	const [joinedMovieRoomId, setJoinedMovieRoomId] = useState<string | null>(null);
+	const myMovieRoomRef = useRef<MovieRoom | null>(null);
+	myMovieRoomRef.current = myMovieRoom;
+	const joinedMovieRoomRef = useRef<string | null>(null);
+	joinedMovieRoomRef.current = joinedMovieRoomId;
+	const movieRoomsRef = useRef<Record<string, MovieRoom>>({});
+	movieRoomsRef.current = movieRooms;
+
+	/** Manda mi sala a la malla (o avisa que ya no tengo). */
+	const broadcastMovieRoom = useCallback((room: MovieRoom | null) => {
+		getDesktopTransport()?.sendMovieRoom({room});
+	}, []);
+
+	/** Guarda una sala que llegó de la malla (o la borra si el host avisó que cerró). */
+	const saveMovieRoom = useCallback((room: MovieRoom | null, from: string) => {
+		setMovieRooms((rooms) => {
+			if (!room) {
+				if (!rooms[from]) return rooms;
+				const next = {...rooms};
+				delete next[from];
+				return next;
+			}
+			const previous = rooms[room.id];
+			// Si llega una versión más vieja, se ignora.
+			if (previous && previous.updatedAt > room.updatedAt) return rooms;
+			return {...rooms, [room.id]: room};
+		});
+	}, []);
+
+	// Mi propia sala también vive en el mapa: la interfaz la trata igual que las demás.
+	useEffect(() => {
+		if (!myMovieRoom) return;
+		setMovieRooms((rooms) => ({...rooms, [myMovieRoom.id]: myMovieRoom}));
+	}, [myMovieRoom]);
+
+	// Se escucha lo que difunden los hosts.
+	useEffect(() => {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		return transport.onMovieRoom(({from, payload}) => {
+			const incoming = payload as {room?: MovieRoom | null} | null;
+			const room = incoming?.room ?? null;
+			// La sala tiene que ser de quien la manda: si no, se ignora.
+			if (room && room.hostId !== from) return;
+			saveMovieRoom(room, from);
+		});
+	}, [saveMovieRoom]);
+
+	// El host reafirma su sala cada 4 s: así el que entra tarde la ve sin pedir nada.
+	useEffect(() => {
+		if (!myMovieRoom) return;
+		const timer = setInterval(() => {
+			const room = myMovieRoomRef.current;
+			if (room) broadcastMovieRoom(room);
+		}, 4000);
+		return () => clearInterval(timer);
+	}, [myMovieRoom, broadcastMovieRoom]);
+
+	// Las salas de gente que se fue se limpian solas.
+	useEffect(() => {
+		const timer = setInterval(() => {
+			const now = Date.now();
+			setMovieRooms((rooms) => {
+				let changed = false;
+				const next: Record<string, MovieRoom> = {};
+				for (const [id, room] of Object.entries(rooms)) {
+					if (id !== meRef.current.id && isStale(room, now)) {
+						changed = true;
+						continue;
+					}
+					next[id] = room;
+				}
+				return changed ? next : rooms;
+			});
+		}, 8000);
+		return () => clearInterval(timer);
+	}, []);
+
+	/**
+	 * Abrir una película o serie.
+	 *
+	 * Si ya estoy compartiendo una sala, cambia la película de ESA sala (mis invitados siguen).
+	 * Si no, me crea mi propia sala (la "Sala N" que van a ver los demás).
+	 */
+	const movieOpen = useCallback(
+		(media: MovieMedia) => {
+			const now = Date.now();
+			const mine = myMovieRoomRef.current;
+			const room: MovieRoom = mine
+				? applyMovieCommand(mine, {kind: 'open', media}, now)
+				: {
+						id: meRef.current.id,
+						hostId: meRef.current.id,
+						hostName: meRef.current.name,
+						media,
+						positionMs: 0,
+						paused: true,
+						startedAt: now,
+						createdAt: now,
+						updatedAt: now,
+					};
+			setMyMovieRoom(room);
+			setJoinedMovieRoomId(room.id);
+			broadcastMovieRoom(room);
+		},
+		[broadcastMovieRoom],
+	);
+
+	/** Entrar a una sala (la mía o la de otro). Dejo de compartir si tenía otra. */
+	const movieJoin = useCallback(
+		(roomId: string) => {
+			const mine = myMovieRoomRef.current;
+			if (mine && mine.id !== roomId) {
+				broadcastMovieRoom(null);
+				setMyMovieRoom(null);
+			}
+			setJoinedMovieRoomId(roomId);
+		},
+		[broadcastMovieRoom],
+	);
+
+	/** Salir: si soy el host, se cierra la sala para todos. */
+	const movieLeave = useCallback(() => {
+		if (myMovieRoomRef.current) {
+			broadcastMovieRoom(null);
+			setMyMovieRoom(null);
+		}
+		setJoinedMovieRoomId(null);
+	}, [broadcastMovieRoom]);
+
+	/** Una orden a mi sala: la aplico yo si soy el host; si no, se la mando al host. */
+	const movieCommand = useCallback(
+		(command: MovieRoomCommand) => {
+			const roomId = joinedMovieRoomRef.current;
+			if (!roomId) return;
+			const room = movieRoomsRef.current[roomId];
+			if (!room) return;
+			if (room.hostId === meRef.current.id) {
+				const next = applyMovieCommand(room, command);
+				setMyMovieRoom(next);
+				broadcastMovieRoom(next);
+				return;
+			}
+			getDesktopTransport()?.sendCommand(room.hostId, {kind: 'movie', movieCommand: command});
+		},
+		[broadcastMovieRoom],
+	);
+
+	/** El host informa por dónde va su video para que los demás corrijan el desvío. */
+	const movieHostSync = useCallback(
+		(positionMs: number, paused: boolean) => {
+			const mine = myMovieRoomRef.current;
+			if (!mine) return;
+			const now = Date.now();
+			const next: MovieRoom = {
+				...mine,
+				positionMs: Math.max(0, Math.round(positionMs)),
+				paused,
+				startedAt: now,
+				updatedAt: now,
+			};
+			setMyMovieRoom(next);
+			broadcastMovieRoom(next);
+		},
+		[broadcastMovieRoom],
+	);
+
+	/** Las salas ordenadas (así a todos les toca el mismo número). */
+	const movieRoomsList = useMemo(() => sortRooms(Object.values(movieRooms)), [movieRooms]);
+	/** En qué sala estoy mirando (la mía o la de otro). */
+	const myJoinedMovieRoom = joinedMovieRoomId ? (movieRooms[joinedMovieRoomId] ?? null) : null;
+	/** Quiénes están mirando esa sala (sale de la presencia, que ya se comparte). */
+	const movieRoomViewers = useCallback(
+		(roomId: string) => Object.values(peersRef.current).filter((peer) => peer.movieRoomId === roomId),
+		[],
+	);
+
 	// Volumen guardado de la música: se aplica al grupo (los demás) y también al host, que
 	// escucha desde su propio reproductor.
 	useEffect(() => {
@@ -1560,6 +1784,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicTogglePause,
 			musicSetMuted,
 			musicSetVolume,
+			movieRoomsList,
+			myMovieRoom,
+			myJoinedMovieRoom,
+			movieOpen,
+			movieJoin,
+			movieLeave,
+			movieCommand,
+			movieHostSync,
+			movieRoomViewers,
 		}),
 		[
 			state,
@@ -1586,6 +1819,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicTogglePause,
 			musicSetMuted,
 			musicSetVolume,
+			movieRoomsList,
+			myMovieRoom,
+			myJoinedMovieRoom,
+			movieOpen,
+			movieJoin,
+			movieLeave,
+			movieCommand,
+			movieHostSync,
+			movieRoomViewers,
 		],
 	);
 

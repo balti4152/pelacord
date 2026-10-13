@@ -7,7 +7,7 @@
 //
 // Nadie edita nada: cada uno abre la app, pone su nombre y ya se ve con los demás.
 
-const {app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, net, protocol, safeStorage, session, shell, Notification, nativeImage, Tray} = require('electron');
+const {app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, net, protocol, safeStorage, session, shell, Notification, nativeImage, Tray, webContents} = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const dgram = require('node:dgram');
@@ -215,6 +215,16 @@ function handleMessage(socket, raw) {
 	if (message.type === 'music') {
 		if (message.from === myPeerId) return;
 		sendToRenderer('pelacord:music', {from: message.from, payload: message.payload});
+		broadcast(message, socket);
+		return;
+	}
+
+	// Salas de Pelaflix: viajan por la MALLA (broadcast), igual que la música y la presencia. Es
+	// tiempo real (quién está mirando qué y por dónde va), así que no puede gastar cuota ni depender
+	// de internet: nada de Firebase.
+	if (message.type === 'movie-room') {
+		if (message.from === myPeerId) return;
+		sendToRenderer('pelacord:movie-room', {from: message.from, payload: message.payload});
 		broadcast(message, socket);
 		return;
 	}
@@ -509,8 +519,13 @@ ipcMain.on('pelacord:music', (_event, payload) => {
 	broadcast({type: 'music', from: myPeerId, payload});
 });
 
-/** Manda el log de mensajes: dirigido a un peer (reconciliación) o difundido (mensaje nuevo). */
-ipcMain.on('pelacord:messages', (_event, message) => {
+/** Difunde el estado de mi sala de Pelaflix (película, minuto y si está pausada). */
+ipcMain.on('pelacord:movie-room', (_event, payload) => {
+	if (!myPeerId) return;
+	broadcast({type: 'movie-room', from: myPeerId, payload});
+});
+
+/** Manda el log de mensajes: dirigido a un peer (reconciliación) o difundido (mensaje nuevo). */ipcMain.on('pelacord:messages', (_event, message) => {
 	if (!myPeerId || !message || !message.payload) return;
 	broadcast({type: 'messages', from: myPeerId, to: message.to, payload: message.payload});
 });
@@ -1275,6 +1290,94 @@ ipcMain.handle('pelacord:tmdb-movie', async (_event, id, mediaType = 'movie') =>
 	const type = mediaType === 'tv' ? 'tv' : 'movie';
 	const data = await tmdb(`/${type}/${movieId}`);
 	return {ok: Boolean(data), movie: data ? tmdbMovie(data, type) : null};
+});
+
+/**
+ * Pone los subtítulos en español en un reproductor de películas.
+ *
+ * Detalle importante que costó descubrir: el reproductor IGNORA los clics sintéticos
+ * (`element.click()`); sólo responde a eventos de mouse de verdad. Así que esto se hace desde acá,
+ * con `sendInputEvent` (indistinguible de un clic humano) y con las coordenadas que se sacan de la
+ * propia página del reproductor.
+ *
+ * El flujo: se muestra su barra (hace falta para poder tocarla), se hace clic en su botón de
+ * subtítulos, se elige "Spanish" y, si aparece un submenú con las pistas, se elige la primera. Al
+ * final se vuelve a esconder su barra y se cierra el panel.
+ */
+ipcMain.handle('pelacord:movie-subtitles', async (_event, viewId) => {
+	const guest = webContents.fromId(Number(viewId) || 0);
+	if (!guest || guest.getType() !== 'webview') return {ok: false, error: 'No encontré el reproductor.'};
+	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	const js = (code) => guest.executeJavaScript(code).catch(() => null);
+	const cajaDe = (selector) =>
+		js(`(() => {
+			const el = ${selector};
+			if (!el) return null;
+			const r = el.getBoundingClientRect();
+			if (r.width < 2 || r.height < 2) return null;
+			return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+		})()`);
+	const clicReal = async (caja) => {
+		if (!caja) return false;
+		const punto = {x: Math.round(caja.x), y: Math.round(caja.y)};
+		guest.sendInputEvent({type: 'mouseMove', x: punto.x, y: punto.y});
+		await wait(100);
+		guest.sendInputEvent({type: 'mouseDown', x: punto.x, y: punto.y, button: 'left', clickCount: 1});
+		await wait(70);
+		guest.sendInputEvent({type: 'mouseUp', x: punto.x, y: punto.y, button: 'left', clickCount: 1});
+		return true;
+	};
+	/** ¿Ya hay una pista en español? */
+	const yaEsta = () =>
+		js(`(() => {
+			const video = document.querySelector('video');
+			if (!video || !video.textTracks) return false;
+			return [...video.textTracks].some((t) => /spanish|espa|(^|[^a-z])es([^a-z]|$)/i.test((t.language || '') + ' ' + (t.label || '')));
+		})()`);
+
+	await js("document.getElementById('pelacord-movie-css')?.remove(); true");
+	await wait(700);
+	try {
+		for (let intento = 0; intento < 6; intento++) {
+			if (await yaEsta()) return {ok: true};
+			const boton = await cajaDe(
+				`[...document.querySelectorAll('button')].find((el) => /subtitle settings/i.test(el.getAttribute('aria-label') || ''))`,
+			);
+			if (!(await clicReal(boton))) {
+				await wait(900);
+				continue;
+			}
+			await wait(1800);
+			const spanish = await cajaDe(`[...document.querySelectorAll('button')].find((el) => /^spanish/i.test((el.textContent || '').trim()))`);
+			if (!spanish) {
+				await wait(900);
+				continue;
+			}
+			await clicReal(spanish);
+			await wait(2500);
+			// Si Spanish abre un submenú con las pistas, se elige la primera.
+			const pista = await cajaDe(
+				`[...document.querySelectorAll('button, [role="option"], [role="menuitem"]')].find((el) => { const t = (el.textContent || '').trim(); return t.length > 0 && t.length < 26 && /^(default|forzad|pista|\\d+)$/i.test(t); })`,
+			);
+			if (pista) {
+				await clicReal(pista);
+				await wait(2500);
+			}
+			if (await yaEsta()) return {ok: true};
+		}
+		return {ok: false, error: 'No se pudieron activar los subtítulos en español.'};
+	} finally {
+		// Se cierra el panel y se vuelve a esconder su barra.
+		await js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); true");
+		await js(`(() => {
+			if (document.getElementById('pelacord-movie-css')) return true;
+			const style = document.createElement('style');
+			style.id = 'pelacord-movie-css';
+			style.textContent = 'media-control-bar, .notflix-controlbar { display: none !important; }';
+			document.head.appendChild(style);
+			return true;
+		})()`);
+	}
 });
 
 // ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------

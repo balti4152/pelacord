@@ -9,6 +9,13 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	/** Comando para un peer puntual (moverlo de canal de voz, etc.). */
 	sendCommand: (to, payload) => ipcRenderer.send('pelacord:command', {to, payload}),
 	sendMusic: (payload) => ipcRenderer.send('pelacord:music', payload),
+	/** Pelaflix: difunde el estado de mi sala (película, minuto, pausa). */
+	sendMovieRoom: (payload) => ipcRenderer.send('pelacord:movie-room', payload),
+	onMovieRoom: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:movie-room', handler);
+		return () => ipcRenderer.removeListener('pelacord:movie-room', handler);
+	},
 	onMusic: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:music', handler);
@@ -65,6 +72,8 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	tmdbRows: () => ipcRenderer.invoke('pelacord:tmdb-rows'),
 	tmdbSearch: (query) => ipcRenderer.invoke('pelacord:tmdb-search', query),
 	tmdbMovie: (id) => ipcRenderer.invoke('pelacord:tmdb-movie', id),
+	/** Películas: pone los subtítulos en español en el reproductor (con clics reales). */
+	movieSubtitles: (viewId) => ipcRenderer.invoke('pelacord:movie-subtitles', viewId),
 	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),

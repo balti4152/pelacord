@@ -27,6 +27,8 @@ export interface PeerPresence {
 	particleLife?: number;
 	/** Sube cuando el usuario cambia algo de su perfil (para refrescar las imágenes guardadas). */
 	profileVersion?: number;
+	/** En qué sala de Pelaflix está mirando (null = ninguna). */
+	movieRoomId?: string | null;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -52,6 +54,9 @@ interface DesktopTransport {
 	/** La Jam: el host difunde el estado de la m�sica por la malla. */
 	sendMusic(payload: unknown): void;
 	onMusic(callback: (message: PeerMessage<unknown>) => void): () => void;
+	/** Pelaflix: el host de cada sala difunde su estado (película, minuto, pausa) por la malla. */
+	sendMovieRoom(payload: unknown): void;
+	onMovieRoom(callback: (message: PeerMessage<unknown>) => void): () => void;
 	/** El log de mensajes: reconciliación del historial por la malla (con destinatario o difundido). */
 	sendMessages(payload: unknown, to?: string): void;
 	onMessages(callback: (message: PeerMessage<unknown>) => void): () => void;
@@ -85,6 +90,8 @@ interface DesktopTransport {
 	tmdbRows(): Promise<{ok: boolean; rows: TmdbRow[]; hero: TmdbMovie | null}>;
 	tmdbSearch(query: string): Promise<{ok: boolean; movies: TmdbMovie[]}>;
 	tmdbMovie(id: number, mediaType?: 'movie' | 'tv'): Promise<{ok: boolean; movie: TmdbMovie | null}>;
+	/** Películas: pone los subtítulos en español en el reproductor. */
+	movieSubtitles(viewId: number): Promise<{ok: boolean; error?: string}>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;
