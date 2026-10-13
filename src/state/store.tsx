@@ -19,6 +19,13 @@ import type {
 const STORAGE_KEY = 'pelacord.state.v4';
 const CUSTOM_CSS_ID = 'pelacord-custom-css';
 
+/** Colores de la barra de título de Windows, por tema. */
+const TITLEBAR_COLORS: Record<ThemeName, {color: string; symbolColor: string}> = {
+	dark: {color: '#1a181e', symbolColor: '#b1acbb'},
+	light: {color: '#ffffff', symbolColor: '#4e5058'},
+	coal: {color: '#0b0912', symbolColor: '#b1acbb'},
+};
+
 export function uid(): string {
 	if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
 	return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -338,6 +345,10 @@ function applyEffects(state: AppState): void {
 	for (const [name, value] of Object.entries(state.settings.cssVariables)) {
 		if (name.startsWith('--')) root.style.setProperty(name, value);
 	}
+
+	// La barra de título (botones de la ventana) sigue el tema elegido.
+	const titleBar = TITLEBAR_COLORS[state.settings.theme] ?? TITLEBAR_COLORS.dark;
+	getDesktopTransport()?.setTitleBar(titleBar);
 
 	let styleEl = document.getElementById(CUSTOM_CSS_ID) as HTMLStyleElement | null;
 	if (!styleEl) {

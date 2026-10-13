@@ -297,6 +297,9 @@ function createWindow() {
 		show: !startHidden,
 		backgroundColor: '#0b0912',
 		autoHideMenuBar: true,
+		// Barra de título integrada al tema: sin el texto "Pelacord" y con los botones nativos.
+		titleBarStyle: 'hidden',
+		titleBarOverlay: {color: '#1a181e', symbolColor: '#b1acbb', height: 40},
 		icon: iconPath ?? undefined,
 		webPreferences: {
 			preload: path.join(__dirname, 'preload.cjs'),
@@ -704,8 +707,22 @@ ipcMain.on('pelacord:notify', (_event, payload) => {
 	}
 });
 
-/** Globito (overlay icon) sobre el ícono de la barra de tareas: el típico puntito rojo. */
-ipcMain.on('pelacord:badge', (_event, payload) => {
+/** Colores de la barra de título, para que siga el tema elegido. */
+ipcMain.on('pelacord:set-titlebar', (_event, payload) => {
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	const {color, symbolColor} = payload ?? {};
+	try {
+		mainWindow.setTitleBarOverlay({
+			color: color || '#1a181e',
+			symbolColor: symbolColor || '#b1acbb',
+			height: 40,
+		});
+	} catch (error) {
+		console.error('[pelacord] titlebar error', String(error));
+	}
+});
+
+/** Globito (overlay icon) sobre el ícono de la barra de tareas: el típico puntito rojo. */ipcMain.on('pelacord:badge', (_event, payload) => {
 	if (!mainWindow || mainWindow.isDestroyed()) return;
 	const {dataUrl, description} = payload ?? {};
 	try {

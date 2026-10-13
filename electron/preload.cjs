@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	getLoginItem: () => ipcRenderer.invoke('pelacord:get-login-item'),
 	setLoginItem: (enabled) => ipcRenderer.invoke('pelacord:set-login-item', enabled),
 	setBadge: (payload) => ipcRenderer.send('pelacord:badge', payload),
+	setTitleBar: (payload) => ipcRenderer.send('pelacord:set-titlebar', payload),
 	onNotificationClick: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:notification-click', handler);

@@ -7,6 +7,7 @@ import {getDesktopTransport} from '@/lib/desktop';
 import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
+import {APP_VERSION, formatBuildFull} from '@/lib/build';
 import {useStore} from '@/state/store';
 import type {AvatarCrop, Member, Presence, ProfileEffect, ThemeName} from '@/types';
 
@@ -607,6 +608,20 @@ function AppearanceTab(props: {
 					Controla la voz de la llamada y los sonidos. Si Windows tiene la app al 1% en el mezclador, esto no lo arregla:
 					hay que resetear el mezclador (ver abajo).
 				</p>
+			</div>
+			<div className="settings-section">
+				<span className="settings-label">Información de la versión</span>
+				<div className="version-info">
+					<div className="version-row">
+						<span className="version-key">Versión</span>
+						<span className="version-value">v{APP_VERSION}</span>
+					</div>
+					<div className="version-row">
+						<span className="version-key">Actualizada</span>
+						<span className="version-value">{formatBuildFull()}</span>
+					</div>
+				</div>
+				<p className="settings-hint">Se actualiza sola cuando hay una versión nueva.</p>
 			</div>
 			<div className="settings-section">
 				<span className="settings-label">Actualizaciones</span>

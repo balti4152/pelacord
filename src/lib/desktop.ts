@@ -77,6 +77,8 @@ interface DesktopTransport {
 	setLoginItem(enabled: boolean): Promise<boolean>;
 	/** Globito sobre el ícono de la barra de tareas (dataUrl vacío = sacarlo). */
 	setBadge(payload: {dataUrl?: string; description?: string}): void;
+	/** Colores de la barra de título (para que siga el tema). */
+	setTitleBar(payload: {color: string; symbolColor: string}): void;
 	onNotificationClick(callback: (message: {channelId?: string}) => void): () => void;
 	checkUpdate(): Promise<{ok: boolean; error?: string}>;
 	installUpdate(): Promise<boolean>;

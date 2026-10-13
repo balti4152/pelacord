@@ -1,8 +1,6 @@
 import {useEffect, useState} from 'react';
-import logo from '@/assets/logo.png';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
-import {formatBuildTime} from '@/lib/build';
 import {installUpdate, useUpdater} from '@/lib/updater';
 import {VoicePanel} from '@/components/VoicePanel';
 import {useStore} from '@/state/store';
@@ -157,12 +155,7 @@ export function ChannelSidebar({
 	return (
 		<div className="sidebar">
 			<button type="button" className="sidebar-header">
-				<img className="sidebar-logo" src={logo} alt="" />
 				<span className="sidebar-header-title">Pelacord</span>
-				<span className="build-time" title="Versión: fecha y hora de compilación">
-					{formatBuildTime()}
-				</span>
-				<Icon name="chevronDown" size={18} />
 			</button>
 			<UpdateBanner />
 			<div className="sidebar-scroll">

@@ -5,6 +5,8 @@ declare module '*.mp3' {
 
 declare const __BUILD_TIME__: string;
 
+declare const __APP_VERSION__: string;
+
 declare module '*.wav' {
 	const src: string;
 	export default src;
