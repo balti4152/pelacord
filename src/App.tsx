@@ -194,6 +194,7 @@ export function App(): JSX.Element {
 					onOpenSettings={() => setSettingsOpen(true)}
 					onOpenVoice={() => dispatch({type: 'openVoiceStage'})}
 					onOpenMusic={() => setMusicOpen(true)}
+					onChannelClick={() => setMusicOpen(false)}
 				/>
 				{musicOpen ? <MusicView onClose={() => setMusicOpen(false)} /> : showStage ? <CallStage /> : <ChatView />}
 				{showMembers ? <MemberList /> : null}

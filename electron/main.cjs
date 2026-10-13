@@ -455,8 +455,37 @@ function ytDlpPath() {
 	return fs.existsSync(dev) ? dev : null;
 }
 
-/** Corre yt-dlp y devuelve la salida. */
-function runYtDlp(args, timeoutMs = 60000) {
+/** Procesos de yt-dlp vivos. Sin esto quedan huérfanos cuando se cierra o reinicia la app. */
+const ytDlpChildren = new Set();
+/** La búsqueda en curso: si llega otra, se mata la anterior (si no, se apilan procesos). */
+let currentSearch = null;
+
+/** Mata un proceso y TODA su descendencia (yt-dlp puede lanzar ffmpeg). */
+function killTree(child) {
+	if (!child || !child.pid) return;
+	try {
+		if (process.platform === 'win32') {
+			// En Windows child.kill() no mata a los hijos: taskkill /T se lleva el árbol entero.
+			spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {windowsHide: true});
+		} else {
+			child.kill('SIGKILL');
+		}
+	} catch {
+		// se ignora
+	}
+}
+
+function killAllYtDlp() {
+	for (const child of ytDlpChildren) killTree(child);
+	ytDlpChildren.clear();
+	currentSearch = null;
+}
+
+// Al cerrar la app no puede quedar ningún yt-dlp corriendo.
+app.on('will-quit', killAllYtDlp);
+
+/** Corre yt-dlp y devuelve la salida. `onSpawn` recibe el proceso por si hay que matarlo después. */
+function runYtDlp(args, timeoutMs = 60000, onSpawn) {
 	return new Promise((resolve) => {
 		const bin = ytDlpPath();
 		if (!bin) {
@@ -464,15 +493,21 @@ function runYtDlp(args, timeoutMs = 60000) {
 			return;
 		}
 		const child = spawn(bin, args, {windowsHide: true});
+		ytDlpChildren.add(child);
+		if (onSpawn) onSpawn(child);
 		let out = '';
 		let err = '';
+		let finished = false;
+		const finish = (result) => {
+			if (finished) return;
+			finished = true;
+			clearTimeout(timer);
+			ytDlpChildren.delete(child);
+			resolve(result);
+		};
 		const timer = setTimeout(() => {
-			try {
-				child.kill();
-			} catch {
-				// se ignora
-			}
-			resolve({ok: false, error: 'tardó demasiado'});
+			killTree(child);
+			finish({ok: false, error: 'tardó demasiado'});
 		}, timeoutMs);
 		child.stdout.on('data', (chunk) => {
 			out += chunk.toString();
@@ -480,13 +515,9 @@ function runYtDlp(args, timeoutMs = 60000) {
 		child.stderr.on('data', (chunk) => {
 			err += chunk.toString();
 		});
-		child.on('error', (error) => {
-			clearTimeout(timer);
-			resolve({ok: false, error: String(error)});
-		});
+		child.on('error', (error) => finish({ok: false, error: String(error)}));
 		child.on('close', (code) => {
-			clearTimeout(timer);
-			resolve(code === 0 ? {ok: true, output: out.trim()} : {ok: false, error: err.trim() || `salió con ${code}`});
+			finish(code === 0 ? {ok: true, output: out.trim()} : {ok: false, error: err.trim() || `salió con ${code}`});
 		});
 	});
 }
@@ -503,12 +534,21 @@ ipcMain.handle('pelacord:ytdlp-version', async () => {
 ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
 	const clean = String(query || '').trim();
 	if (!clean) return [];
+	// Una sola búsqueda a la vez: la anterior se mata. Sin esto se apilan procesos de yt-dlp.
+	if (currentSearch) {
+		killTree(currentSearch);
+		currentSearch = null;
+	}
 	const count = Math.min(25, Math.max(1, Number(limit) || 15));
 	// "flat-playlist" trae sólo los datos de la lista: rápido, no toca cada video.
 	const result = await runYtDlp(
 		['--dump-single-json', '--flat-playlist', '--no-warnings', `ytsearch${count}:${clean}`],
-		90000,
+		30000,
+		(child) => {
+			currentSearch = child;
+		},
 	);
+	currentSearch = null;
 	if (!result.ok) return [];
 	try {
 		const parsed = JSON.parse(result.output);
@@ -535,7 +575,7 @@ ipcMain.handle('pelacord:yt-audio-url', async (_event, target) => {
 	const value = String(target || '').trim();
 	if (!value) return null;
 	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
-	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 90000);
+	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 40000);
 	if (!result.ok) {
 		console.warn('[pelacord] no se pudo sacar el audio:', result.error);
 		return null;

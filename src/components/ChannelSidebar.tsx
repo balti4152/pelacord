@@ -184,10 +184,13 @@ export function ChannelSidebar({
 	onOpenSettings,
 	onOpenVoice,
 	onOpenMusic,
+	onChannelClick,
 }: {
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
+	/** Al abrir cualquier canal: sirve para cerrar la vista de Música, como con la llamada. */
+	onChannelClick?: () => void;
 }): JSX.Element {
 	const {state, dispatch, addChannel, removeChannel, moveMember, musicByChannel, musicSetMuted} = useStore();
 	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
@@ -236,6 +239,8 @@ export function ChannelSidebar({
 	}, [menu]);
 
 	function openChannel(channel: Channel): void {
+		// Abrir cualquier canal cierra la vista de Música (igual que pasa con la llamada).
+		onChannelClick?.();
 		if (channel.type === 'text') {
 			dispatch({type: 'selectChannel', channelId: channel.id});
 			return;
