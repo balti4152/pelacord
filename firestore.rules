@@ -13,6 +13,14 @@ service cloud.firestore {
     match /channels/{channelId} {
       allow read, write: if true;
     }
+    // Música: cola compartida y estado de reproducción (pista actual, hora de inicio, quién la puso).
+    match /music/{docId} {
+      allow read, write: if true;
+    }
+    // Playlists guardadas del grupo.
+    match /musicPlaylists/{playlistId} {
+      allow read, write: if true;
+    }
     match /voice/{channelId}/members/{clientId} {
       allow read, write: if true;
     }
