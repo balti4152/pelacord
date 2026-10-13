@@ -5,11 +5,8 @@ import {type SpotifyPlaylist, type TrackResult, getDesktopTransport} from '@/lib
 import {type MusicTrack} from '@/lib/musicQueue';
 import {useSpotifyImport} from '@/lib/spotifyImport';
 import {SPOTIFY_GREEN, SpotifyView} from '@/components/SpotifyView';
+import {SpotifyPlaylistDetail} from '@/components/SpotifyPlaylistDetail';
 import {useStore} from '@/state/store';
-
-/** Dónde se guardan las portadas del fondo del buscador (y por cuánto se consideran frescas). */
-const SPOTIFY_COVERS_KEY = 'pelacord.spotify.covers.v1';
-const SPOTIFY_COVERS_TTL_MS = 2 * 60 * 60 * 1000;
 
 /** Convierte un resultado de búsqueda en un tema de la cola. */
 function toMusicTrack(track: TrackResult, addedBy: string): MusicTrack {
@@ -54,21 +51,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	/** Playlists destacadas para el buscador (se ven cuando no hay búsqueda). */
 	const [discover, setDiscover] = useState<SpotifyPlaylist[]>([]);
 	const [discoverLoading, setDiscoverLoading] = useState(true);
-	/**
-	 * Portadas de álbumes al azar para el fondo decorativo del buscador. Se guardan en disco 2 horas
-	 * (así al abrir están al toque y van cambiando solas de vez en cuando). Son sólo decoración.
-	 */
-	const [covers, setCovers] = useState<string[]>(() => {
-		try {
-			const raw = localStorage.getItem(SPOTIFY_COVERS_KEY);
-			if (!raw) return [];
-			const parsed = JSON.parse(raw) as {covers: string[]; at: number};
-			if (parsed?.covers?.length && Date.now() - parsed.at < SPOTIFY_COVERS_TTL_MS) return parsed.covers;
-		} catch {
-			// sin caché
-		}
-		return [];
-	});
+	/** Playlist abierta desde el buscador (se ve igual que en la pestaña de Spotify). */
+	const [openDiscover, setOpenDiscover] = useState<SpotifyPlaylist | null>(null);
 	const spotifyImport = useSpotifyImport();
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
@@ -130,48 +114,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 		};
 	}, []);
 
-	// Portadas del fondo: sólo si no hay guardadas y frescas (si no, se piden y quedan 2 horas).
-	useEffect(() => {
-		if (covers.length > 0) return;
-		let alive = true;
-		void getDesktopTransport()
-			?.spotifyCovers()
-			.then((result) => {
-				if (!alive || !result?.covers?.length) return;
-				setCovers(result.covers);
-				try {
-					localStorage.setItem(SPOTIFY_COVERS_KEY, JSON.stringify({covers: result.covers, at: Date.now()}));
-				} catch {
-					// best effort
-				}
-			})
-			.catch(() => {});
-		return () => {
-			alive = false;
-		};
-	}, [covers.length]);
-
-	/** Lee una playlist destacada (del embed público) y la agrega entera a la cola. */	async function addDiscover(playlist: SpotifyPlaylist): Promise<void> {
-		if (spotifyImport.isBusy()) return;
-		if (!inVoice) {
-			spotifyImport.setError('Unite a un canal de voz para escuchar la música.');
-			return;
-		}
-		const transport = getDesktopTransport();
-		if (!transport) return;
-		spotifyImport.setError('');
-		spotifyImport.setNotice(`Leyendo "${playlist.name}"…`);
-		try {
-			const result = await transport.spotifyPublicTracks(playlist.id);
-			if (!result.ok) {
-				spotifyImport.setError(result.error ?? 'No se pudo leer esa playlist.');
-				return;
-			}
-			await spotifyImport.importTracks(result.tracks, playlist.name);
-		} catch (failure) {
-			spotifyImport.setError(failure instanceof Error ? failure.message : 'No se pudo leer esa playlist.');
-		}
-	}
+	// La playlist del buscador no se agrega de una: se abre para ver sus canciones (ver el detalle).
 
 	return (
 		<div className="music-view">
@@ -200,7 +143,15 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 			</header>
 
 			<div className="music-body">
-				{tab === 'search' ? (
+				{/* Una playlist del buscador se abre para ver sus canciones, igual que en la pestaña de Spotify. */}
+				{tab === 'search' && openDiscover ? (
+					<SpotifyPlaylistDetail
+						playlist={openDiscover}
+						onBack={() => setOpenDiscover(null)}
+						onShowQueue={() => setTab('queue')}
+					/>
+				) : null}
+				{tab === 'search' && !openDiscover ? (
 					<>
 						<div className="music-search">
 							<Search size={16} />
@@ -249,15 +200,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 									</p>
 								) : null}
 								{discover.length > 0 ? (
-									<section className="music-discover">
-										{/* Fondo decorativo: 10 portadas al azar, difuminadas y apagadas en los costados. */}
-										{covers.length > 0 ? (
-											<div className="music-discover-art" aria-hidden="true">
-												{covers.map((url) => (
-													<span key={url} style={{backgroundImage: `url("${url}")`}} />
-												))}
-											</div>
-										) : null}
+									<>
 										<span className="music-grid-title">
 											<SiSpotify size={15} color={SPOTIFY_GREEN} /> Playlists para escuchar
 										</span>
@@ -268,9 +211,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 													type="button"
 													className="music-card"
 													style={{'--card-hue': String((index * 47) % 360)} as CSSProperties}
-													disabled={Boolean(spotifyImport.busy) || !inVoice}
-													title={inVoice ? `Agregar "${playlist.name}" a la cola` : 'Unite a un canal de voz primero'}
-													onClick={() => void addDiscover(playlist)}>
+													title={`Ver las canciones de "${playlist.name}"`}
+													onClick={() => setOpenDiscover(playlist)}>
 													<span className="music-card-art">
 														{playlist.image ? (
 															<img src={playlist.image} alt="" loading="lazy" />
@@ -281,13 +223,11 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 													<span className="music-card-name" title={playlist.name}>
 														{playlist.name}
 													</span>
-													<span className="music-card-sub">
-														{spotifyImport.busy === playlist.name ? 'Agregando…' : playlist.owner || 'Spotify'}
-													</span>
+													<span className="music-card-sub">{playlist.owner || 'Spotify'}</span>
 												</button>
 											))}
 										</div>
-									</section>
+									</>
 								) : null}
 							</>
 						) : null}
@@ -324,7 +264,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							))}
 						</ul>
 					</>
-				) : tab === 'queue' ? (
+				) : null}
+				{tab === 'queue' ? (
 					<>
 						{current ? (
 							<div

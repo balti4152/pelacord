@@ -965,43 +965,8 @@ ipcMain.handle('pelacord:spotify-discover', async () => {
 	return {ok: true, playlists};
 });
 
-/** Términos para sacar portadas de álbumes variadas (son decorativas: no tienen que ver con nada). */
-const SPOTIFY_COVER_TERMS = ['rock', 'pop', 'jazz', 'clásicos', 'indie', 'electrónica', 'cumbia', 'soul', 'hip hop', 'instrumental', 'punk', 'blues'];
-
-let spotifyCoversCache = null;
-
-/**
- * Diez portadas de álbumes al azar, para el fondo decorativo del buscador.
- *
- * Son SÓLO decoración (no tienen nada que ver con lo que se escucha ni con la playlist). Se
- * guardan 2 horas y después se vuelven a pedir con términos al azar, así van cambiando solas.
- * No se guardan todas: sólo 10.
- */
-ipcMain.handle('pelacord:spotify-covers', async () => {
-	if (spotifyCoversCache && Date.now() - spotifyCoversCache.at < 2 * 60 * 60 * 1000) {
-		return {ok: true, covers: spotifyCoversCache.covers, cached: true};
-	}
-	const token = await spotifyAppToken();
-	if (!token) return {ok: false, covers: []};
-	const terms = [...SPOTIFY_COVER_TERMS].sort(() => Math.random() - 0.5).slice(0, 4);
-	const covers = [];
-	for (const term of terms) {
-		const res = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(term)}&type=album&limit=6`, {
-			headers: {Authorization: `Bearer ${token}`},
-		});
-		if (!res.ok) continue;
-		const data = await res.json().catch(() => ({}));
-		for (const album of data.albums?.items ?? []) {
-			const url = album?.images?.[0]?.url || album?.images?.[1]?.url || '';
-			if (url && !covers.includes(url)) covers.push(url);
-		}
-	}
-	const picked = covers.sort(() => Math.random() - 0.5).slice(0, 10);
-	if (picked.length > 0) spotifyCoversCache = {covers: picked, at: Date.now()};
-	return {ok: true, covers: picked};
-});
-
-/** ¿Hay sesión? Devuelve también el nombre para saludar y la dirección de vuelta que hay que registrar. */ipcMain.handle('pelacord:spotify-status', async () => {
+/** ¿Hay sesión? Devuelve también el nombre para saludar y la dirección de vuelta que hay que registrar. */
+ipcMain.handle('pelacord:spotify-status', async () => {
 	const store = readSpotifyStore();
 	if (!store?.refreshToken) return {connected: false, redirectUri: SPOTIFY_REDIRECT};
 	const token = await spotifyToken();

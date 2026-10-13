@@ -4994,9 +4994,12 @@ body.no-cosmetic-anim .avatar-effect::after {
 .music-now {
 	display: flex;
 	flex-direction: column;
-	gap: 0.25rem;
+	justify-content: center;
+	gap: 0.375rem;
+	/* Más alto: es la tarjeta de "suena ahora", la que más se mira. */
+	min-height: 9.5rem;
 	margin-bottom: 1rem;
-	padding: 0.75rem 1rem;
+	padding: 1.25rem 1.25rem;
 	border-radius: var(--radius-lg);
 	border: 1px solid var(--border-color);
 	background-color: var(--background-secondary);
@@ -5026,7 +5029,8 @@ body.no-cosmetic-anim .avatar-effect::after {
 	position: relative;
 	overflow: hidden;
 	justify-content: center;
-	min-height: 6.5rem;
+	/* Un poco más alta todavía: con la foto de fondo se ve mejor. */
+	min-height: 10rem;
 	border-color: transparent;
 }
 
@@ -5085,69 +5089,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	margin-bottom: 1rem;
 }
 
-/* El bloque de playlists del buscador, con las portadas al azar de fondo (decorativo). */
-.music-discover {
-	position: relative;
-	overflow: hidden;
-	min-height: 15rem;
-	margin: 0.75rem 0 1rem;
-	padding: 1.25rem 1rem;
-	border-radius: var(--radius-lg);
-	border: 1px solid var(--border-color);
-}
-
-.music-discover .music-grid-title {
-	color: #ffffff;
-	text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-}
-
-.music-discover-art {
-	position: absolute;
-	inset: -14% -8%;
-	display: flex;
-	gap: 0.5rem;
-	z-index: 0;
-	/* Difuminado y con los costados que se apagan: el recurso clásico de Spotify. */
-	filter: blur(12px) saturate(1.4) brightness(0.7);
-	-webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 14%, #000 86%, transparent 100%);
-	mask-image: linear-gradient(90deg, transparent 0%, #000 14%, #000 86%, transparent 100%);
-	animation: music-discover-pan 120s ease-in-out infinite alternate;
-}
-
-.music-discover-art > span {
-	flex: 1 0 7rem;
-	min-width: 7rem;
-	aspect-ratio: 1;
-	border-radius: var(--radius-md);
-	background-color: var(--background-tertiary);
-	background-size: cover;
-	background-position: center;
-}
-
-/* Se mueve muy despacio, para que el fondo no parezca una foto muerta. */
-@keyframes music-discover-pan {
-	from {
-		transform: translateX(0);
-	}
-	to {
-		transform: translateX(-10%);
-	}
-}
-
-/* Velo oscuro: sin esto las tarjetas no se leen arriba de las portadas. */
-.music-discover::after {
-	content: '';
-	position: absolute;
-	inset: 0;
-	z-index: 1;
-	background: linear-gradient(180deg, rgba(9, 9, 13, 0.62) 0%, rgba(9, 9, 13, 0.88) 100%);
-}
-
-.music-discover > * {
-	position: relative;
-	z-index: 2;
-}
-
+/* El bloque de playlists del buscador. */
 .music-card {
 	display: flex;
 	flex-direction: column;

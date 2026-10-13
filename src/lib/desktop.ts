@@ -81,8 +81,6 @@ interface DesktopTransport {
 	spotifyPublicTracks(playlistId: string): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}>;
 	/** Playlists destacadas para el buscador (se arman con búsquedas reales). */
 	spotifyDiscover(): Promise<{ok: boolean; error?: string; playlists: SpotifyPlaylist[]}>;
-	/** Portadas de álbumes al azar (10), para el fondo decorativo del buscador. */
-	spotifyCovers(): Promise<{ok: boolean; covers: string[]}>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;
