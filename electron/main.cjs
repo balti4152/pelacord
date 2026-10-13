@@ -795,7 +795,11 @@ const UPDATE_FEED_URL =
  * se duplica hasta 30 minutos para no golpear de más. Además se chequea siempre al iniciar.
  */
 const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 60000);
-const UPDATE_MAX_INTERVAL_MS = 1800000;
+/**
+ * Tope del backoff. Se deja bajo a propósito: un 404 suele ser transitorio (la release
+ * todavía se estaba subiendo), así que conviene reintentar pronto y no esperar media hora.
+ */
+const UPDATE_MAX_INTERVAL_MS = 300000;
 
 /** Deja un registro en userData para poder diagnosticar si algo falla. */
 function logUpdater(message) {

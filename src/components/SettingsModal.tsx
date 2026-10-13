@@ -875,7 +875,10 @@ function HotkeysTab({
 	);
 }
 
-function UpdateSettings(): JSX.Element {	const status = useUpdater();
+function UpdateSettings(): JSX.Element {
+	const status = useUpdater();
+	// El error crudo de electron-updater es larguísimo: se muestra sólo la primera línea.
+	const shortError = (status.error ?? '').split('\n')[0].slice(0, 120);
 	const text =
 		status.state === 'checking'
 			? 'Buscando…'
@@ -888,7 +891,7 @@ function UpdateSettings(): JSX.Element {	const status = useUpdater();
 						: status.state === 'none'
 							? 'Estás al día'
 							: status.state === 'error'
-								? `No se pudo actualizar: ${status.error ?? ''}`
+								? `No se pudo chequear (se reintenta solo): ${shortError}`
 								: 'La app busca sola al iniciar y cada 1 minuto mientras está abierta.';
 	return (
 		<div className="input-row" style={{alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem'}}>
