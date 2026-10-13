@@ -1,7 +1,7 @@
 {
   "name": "pelacord",
   "private": true,
-  "version": "0.10.2",
+  "version": "0.10.3",
   "type": "module",
   "main": "electron/main.cjs",
   "description": "Pelacord - a peer-to-peer voice, screen share and chat app. UI design derived from Fluxer (AGPL-3.0-or-later).",

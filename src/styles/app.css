@@ -4778,14 +4778,14 @@ body.no-cosmetic-anim .avatar-effect::after {
 }
 
 
-/* ---------- Música (la Jam): layout estilo Spotify con los colores de Pelacord ---------- */
+/* ---------- Mï¿½sica (la Jam): layout estilo Spotify con los colores de Pelacord ---------- */
 
 .music-button {
 	display: flex;
 	align-items: center;
 	gap: 0.5rem;
-	width: 100%;
-	margin: 0.25rem 0 0.375rem;
+	width: auto;
+	margin: 0.25rem 0.625rem 0.375rem;
 	padding: 0.5rem 0.625rem;
 	border-radius: var(--radius-md);
 	background-color: var(--background-secondary-alt);
@@ -5130,7 +5130,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 .music-detach.is-active {
 	background-color: var(--background-modifier-selected);
 }
-/* Botón de silenciar la música (reemplaza al de "separarse"). */
+/* Botï¿½n de silenciar la mï¿½sica (reemplaza al de "separarse"). */
 .music-mute {
 	display: grid;
 	place-items: center;
@@ -5149,14 +5149,14 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: var(--status-dnd);
 }
 
-/* Ícono de música en el canal que tiene una Jam sonando. */
+/* ï¿½cono de mï¿½sica en el canal que tiene una Jam sonando. */
 .channel-music {
 	margin-left: 0.25rem;
 	color: var(--brand-primary-light);
 	flex-shrink: 0;
 }
 
-/* Caritas de los que están escuchando con vos, debajo del botón Música. */
+/* Caritas de los que estï¿½n escuchando con vos, debajo del botï¿½n Mï¿½sica. */
 .music-listeners {
 	display: flex;
 	align-items: center;
@@ -5179,7 +5179,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 .music-listeners-avatars > *:first-child {
 	margin-left: 0;
 }
-/* Caritas de los que escuchan, DENTRO del botón Música (hasta 4 y después +N). */
+/* Caritas de los que escuchan, DENTRO del botï¿½n Mï¿½sica (hasta 4 y despuï¿½s +N). */
 .music-button-avatars {
 	display: flex;
 	align-items: center;
@@ -5208,7 +5208,7 @@ body.no-cosmetic-anim .avatar-effect::after {
 	font-weight: 700;
 }
 
-/* Ícono de música del canal: si está silenciada, se tacha y se pone rojo. */
+/* ï¿½cono de mï¿½sica del canal: si estï¿½ silenciada, se tacha y se pone rojo. */
 .channel-music.is-muted {
 	color: var(--status-dnd);
 	text-decoration: line-through;

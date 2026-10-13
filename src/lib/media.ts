@@ -340,6 +340,9 @@ class VoiceMesh {
 		const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
 		this.pcs.set(peerId, pc);
 		this.remotes.set(peerId, {peerId, audios: [], video: null, music: null});
+		// Si ya estoy mandando música, se lo aviso a este peer nuevo: si no, cuando alguien se
+		// va y vuelve al canal, recibiría el audio pero no sabría que es la música de la Jam.
+		if (this.music) this.send(peerId, {kind: 'music', streamId: this.music.id});
 		this.states.set(peerId, 'new');
 		this.diagnostics.set(peerId, {sent: 0, received: 0, ice: 'new'});
 
