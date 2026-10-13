@@ -29,6 +29,19 @@ function formatSourceLabel(source: DesktopSource): string {
 	return source.name.length > 60 ? `${source.name.slice(0, 57)}…` : source.name;
 }
 
+/**
+ * Nombre de la aplicación, sacado del título de la ventana.
+ * Windows titula las ventanas como "archivo.txt - Notepad" o "pestaña — Google Chrome",
+ * así que se toma el último tramo. Es una heurística, pero es lo único que da Chromium.
+ */
+function appName(source: DesktopSource): string | null {
+	if (source.kind !== 'window') return null;
+	const parts = source.name.split(/\s[-–—·|]\s/);
+	if (parts.length < 2) return null;
+	const last = parts[parts.length - 1].trim();
+	return last.length >= 2 && last.length <= 40 ? last : null;
+}
+
 export function ScreenSharePicker({
 	onPick,
 	onCancel,
@@ -107,6 +120,7 @@ export function ScreenSharePicker({
 							type="button"
 							key={source.id}
 							className={`share-source${selected === source.id ? ' is-selected' : ''}`}
+							title={source.name}
 							onClick={() => setSelected(source.id)}>
 							{source.thumbnail ? (
 								<img src={source.thumbnail} alt="" />
@@ -117,7 +131,10 @@ export function ScreenSharePicker({
 							)}
 							<span className="share-source-name">
 								{source.appIcon ? <img src={source.appIcon} alt="" className="share-source-icon" /> : null}
-								<span>{formatSourceLabel(source)}</span>
+								<span className="share-source-text">
+									<span className="share-source-title">{formatSourceLabel(source)}</span>
+									{appName(source) ? <span className="share-source-app">{appName(source)}</span> : null}
+								</span>
 							</span>
 							{selected === source.id ? (
 								<span className="share-source-check">
