@@ -8,7 +8,7 @@ import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {APP_VERSION, formatBuildFull} from '@/lib/build';
-import {DEFAULT_HOTKEYS, HOTKEYS, type HotkeyAction, eventToAccelerator, formatAccelerator, isRiskyAlone} from '@/lib/hotkeys';
+import {DEFAULT_HOTKEYS, HOTKEYS, type HotkeyAction, eventToAccelerator, formatAccelerator} from '@/lib/hotkeys';
 import {useStore} from '@/state/store';
 import type {AvatarCrop, Member, Presence, ProfileEffect, ThemeName} from '@/types';
 
@@ -868,21 +868,16 @@ function HotkeysTab({
 							)}
 						</div>
 						<p className="settings-hint">{info.description}</p>
-						{isRiskyAlone(accelerator) ? (
-							<p className="settings-hint hotkey-warn">
-								Ojo: «{formatAccelerator(accelerator)}» sola se usa en TODOS los programas. Si esa tecla la necesitás para
-								escribir (letras, números, signos como - o +), no la vas a poder usar normalmente.
-							</p>
-						) : null}
 					</div>
 				);
 			})}
 			<p className="settings-hint">
-				Si un atajo no funciona, probablemente lo esté usando otro programa: probá con otra combinación.
+				Elegí cualquier tecla o combinación: una sola (F8, -, x, …) o con Ctrl/Alt/Shift. Si alguna no responde,
+				suele ser porque otro programa ya la está usando.
 			</p>
 			{recording ? (
 				<p className="settings-hint hotkey-hint">
-					{hint ?? 'Apretá la tecla o combinación que quieras (Esc cancela). Podés usar una sola, ej. F8 o -.'}
+					{hint ?? 'Apretá la tecla o combinación que quieras (Esc cancela).'}
 				</p>
 			) : null}
 		</>

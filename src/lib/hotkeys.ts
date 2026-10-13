@@ -58,16 +58,12 @@ const NAMED_KEYS: Record<string, string> = {
 	'-': '-',
 };
 
-/** Teclas que se pueden usar SOLAS (sin modificador) sin molestar en otros programas. */
-const SAFE_ALONE_KEY = /^F([1-9]|1[0-9]|2[0-4])$/;
-const SAFE_ALONE_NAMED = ['PrintScreen', 'ScrollLock', 'Pause', 'Insert'];
-
 /**
  * Convierte lo que apretó el usuario al formato de Electron ("Control+Shift+M").
  *
- * Devuelve null sólo si apretó modificadores solos. Cualquier otra tecla se acepta: si no
- * tiene modificador, el sistema la va a usar en TODOS los programas (por eso la interfaz
- * avisa con `isRiskyAlone`).
+ * No hay restricciones: cualquier tecla vale, sola o con modificadores (el usuario decide).
+ * Devuelve null sólo si apretó modificadores sueltos (Ctrl, Alt, Shift…), porque ahí todavía
+ * no hay atajo.
  */
 export function eventToAccelerator(event: KeyboardEvent): string | null {
 	const modifiers: string[] = [];
@@ -79,16 +75,6 @@ export function eventToAccelerator(event: KeyboardEvent): string | null {
 	if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return null;
 	const name = NAMED_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 	return [...modifiers, name].join('+');
-}
-
-/**
- * ¿Es un atajo de una sola tecla que no sea "segura"? Entonces se va a usar en todos los
- * programas: si es una letra, número o signo que el usuario escribe, dejará de escribirla.
- */
-export function isRiskyAlone(accelerator?: string): boolean {
-	if (!accelerator) return false;
-	if (accelerator.includes('+')) return false;
-	return !SAFE_ALONE_KEY.test(accelerator) && !SAFE_ALONE_NAMED.includes(accelerator);
 }
 
 /** Texto lindo para mostrar: "Ctrl + Shift + M", "+", "-". */
