@@ -38,8 +38,8 @@ export function setTaskbarBadge(count: number): void {
 	});
 }
 
-/** Muestra una notificación nativa de Windows. */
-export function showNotification(payload: {title: string; body: string; channelId?: string}): void {
+/** Muestra una notificación nativa de Windows. `iconUrl` es la foto de quien escribió. */
+export function showNotification(payload: {title: string; body: string; channelId?: string; iconUrl?: string}): void {
 	getDesktopTransport()?.notify(payload);
 }
 

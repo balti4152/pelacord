@@ -163,6 +163,13 @@ const ICONS: Record<string, ReactNode> = {
 			<circle cx="18" cy="16" r="3" />
 		</>
 	),
+	play: <polygon points="6 4 20 12 6 20 6 4" />,
+	pause: (
+		<>
+			<rect x="6" y="4" width="4" height="16" />
+			<rect x="14" y="4" width="4" height="16" />
+		</>
+	),
 	grid: (
 		<>
 			<rect x="3" y="3" width="7" height="7" />

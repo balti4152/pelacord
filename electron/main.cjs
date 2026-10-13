@@ -685,27 +685,53 @@ ipcMain.handle('pelacord:cache-avatar', async (_event, payload) => {
  */
 app.setAppUserModelId('app.pelacord.desktop');
 
-ipcMain.on('pelacord:notify', (_event, payload) => {
-	const {title, body, channelId, silent} = payload ?? {};
-	if (!title && !body) return;
+/**
+ * Baja la foto de quien manda el mensaje para usarla como ícono de la notificación.
+ *
+ * Se cachea por URL (la imagen no cambia): si falla, se cae al ícono de la app. Windows muestra
+ * el ícono grande y el de la app chico, así que sin esto se veía el logo de Pelacord dos veces.
+ */
+const notificationIcons = new Map();
+
+async function fetchNotificationIcon(url) {
+	if (!url || typeof url !== 'string' || !/^https?:/i.test(url)) return null;
+	if (notificationIcons.has(url)) return notificationIcons.get(url);
 	try {
-		const notification = new Notification({
-			title: String(title ?? 'Pelacord'),
-			body: String(body ?? ''),
-			silent: Boolean(silent),
-			icon: appIconPath() ?? undefined,
-		});
-		notification.on('click', () => {
-			if (!mainWindow || mainWindow.isDestroyed()) return;
-			if (mainWindow.isMinimized()) mainWindow.restore();
-			mainWindow.show();
-			mainWindow.focus();
-			sendToRenderer('pelacord:notification-click', {channelId});
-		});
-		notification.show();
+		const response = await net.fetch(url);
+		if (!response.ok) throw new Error(`HTTP ${response.status}`);
+		const image = nativeImage.createFromBuffer(Buffer.from(await response.arrayBuffer()));
+		if (image.isEmpty()) throw new Error('imagen vacía');
+		notificationIcons.set(url, image);
+		return image;
 	} catch (error) {
-		console.error('[pelacord] notify error', String(error));
+		console.warn('[pelacord] no se pudo bajar la foto para la notificación:', String(error));
+		return null;
 	}
+}
+
+ipcMain.on('pelacord:notify', (_event, payload) => {
+	const {title, body, channelId, silent, iconUrl} = payload ?? {};
+	if (!title && !body) return;
+	void (async () => {
+		try {
+			const notification = new Notification({
+				title: String(title ?? 'Pelacord'),
+				body: String(body ?? ''),
+				silent: Boolean(silent),
+				icon: (await fetchNotificationIcon(iconUrl)) ?? appIconPath() ?? undefined,
+			});
+			notification.on('click', () => {
+				if (!mainWindow || mainWindow.isDestroyed()) return;
+				if (mainWindow.isMinimized()) mainWindow.restore();
+				mainWindow.show();
+				mainWindow.focus();
+				sendToRenderer('pelacord:notification-click', {channelId});
+			});
+			notification.show();
+		} catch (error) {
+			console.error('[pelacord] notify error', String(error));
+		}
+	})();
 });
 
 // ---------- Atajos globales (funcionan aunque la app no tenga el foco) ----------

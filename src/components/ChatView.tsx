@@ -1,4 +1,4 @@
-import {type ReactNode, useEffect, useRef, useState} from 'react';
+import {type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState} from 'react';
 import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
@@ -90,6 +90,20 @@ function highlightTerm(content: string, term: string): ReactNode {
  * Audio: se reproduce en línea, sin descargarlo antes. El servidor P2P del dueño
  * responde a los pedidos por rango, así que la barra de progreso y "adelantar" funcionan.
  */
+/** "1:05" a partir de segundos. */
+function formatClock(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return '0:00';
+	const total = Math.floor(seconds);
+	const minutes = Math.floor(total / 60);
+	return `${minutes}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Reproductor de audio propio, estilo Discord.
+ *
+ * Nada del `<audio controls>` de Chrome: ese control gris con el menú de tres puntos era lo que
+ * se veía horrible al lado del texto. Acá hay play/pausa, barra para saltar y tiempos.
+ */
 function AudioAttachment({
 	attachment,
 	url,
@@ -99,16 +113,59 @@ function AudioAttachment({
 	url: string;
 	onFailed: () => void;
 }): JSX.Element {
+	const audioRef = useRef<HTMLAudioElement>(null);
+	const [playing, setPlaying] = useState(false);
+	const [current, setCurrent] = useState(0);
+	const [duration, setDuration] = useState(0);
+
+	function toggle(): void {
+		const audio = audioRef.current;
+		if (!audio) return;
+		if (audio.paused) void audio.play().catch(() => {});
+		else audio.pause();
+	}
+
+	/** Click en la barra: salta a esa parte. */
+	function seek(event: ReactMouseEvent<HTMLDivElement>): void {
+		const audio = audioRef.current;
+		if (!audio || !duration) return;
+		const rect = event.currentTarget.getBoundingClientRect();
+		const ratio = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+		audio.currentTime = ratio * duration;
+		setCurrent(audio.currentTime);
+	}
+
+	const percent = duration > 0 ? (current / duration) * 100 : 0;
+
 	return (
-		<div className="attachment-audio">
-			<span className="attachment-audio-icon">
-				<Icon name="music" size={18} />
-			</span>
-			<div className="attachment-audio-body">
-				<span className="attachment-audio-name" title={attachment.name}>
+		<div className="audio-card">
+			<audio
+				ref={audioRef}
+				src={url}
+				preload="metadata"
+				onError={onFailed}
+				onPlay={() => setPlaying(true)}
+				onPause={() => setPlaying(false)}
+				onEnded={() => {
+					setPlaying(false);
+					setCurrent(0);
+				}}
+				onLoadedMetadata={(event) => setDuration(event.currentTarget.duration || 0)}
+				onTimeUpdate={(event) => setCurrent(event.currentTarget.currentTime)}
+			/>
+			<button type="button" className="audio-card-play" onClick={toggle} title={playing ? 'Pausar' : 'Reproducir'}>
+				<Icon name={playing ? 'pause' : 'play'} size={18} />
+			</button>
+			<div className="audio-card-body">
+				<span className="audio-card-name" title={attachment.name}>
 					{attachment.name}
 				</span>
-				<audio className="attachment-audio-player" src={url} controls preload="metadata" onError={onFailed} />
+				<div className="audio-card-track" onClick={seek} role="presentation">
+					<div className="audio-card-progress" style={{width: `${percent}%`}} />
+				</div>
+				<span className="audio-card-time">
+					{formatClock(current)} / {formatClock(duration)}
+				</span>
 			</div>
 		</div>
 	);
@@ -123,6 +180,7 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	const [zoom, setZoom] = useState(false);
 	const [text, setText] = useState<string | null>(null);
 	const [textFailed, setTextFailed] = useState(false);
+	const [copiado, setCopiado] = useState(false);
 	const url =
 		attachment.ownerHost && attachment.ownerPort
 			? `http://${attachment.ownerHost}:${attachment.ownerPort}/file/${attachment.id}`
@@ -210,12 +268,31 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 		return <AudioAttachment attachment={attachment} url={url} onFailed={() => setFailed(true)} />;
 	}
 
-	// Previsualización de texto plano.
+	// Previsualización de texto plano: en una caja tipo código, con copiar y descargar.
 	if (attachment.kind === 'text' && url && !textFailed) {
 		return (
-			<div className="attachment-text-wrap">
-				<div className="attachment-text-head">{attachment.name}</div>
-				<pre className="attachment-text">{text ?? 'Cargando…'}</pre>
+			<div className="code-card">
+				<div className="code-card-head">
+					<span className="code-card-name" title={attachment.name}>
+						{attachment.name}
+					</span>
+					<div className="code-card-actions">
+						<button
+							type="button"
+							className="button secondary"
+							onClick={() => {
+								void navigator.clipboard.writeText(text ?? '');
+								setCopiado(true);
+								window.setTimeout(() => setCopiado(false), 1500);
+							}}>
+							{copiado ? '¡Copiado!' : 'Copiar'}
+						</button>
+						<button type="button" className="button secondary" onClick={() => void download()}>
+							Descargar .txt
+						</button>
+					</div>
+				</div>
+				<pre className="code-card-body">{text ?? 'Cargando…'}</pre>
 			</div>
 		);
 	}

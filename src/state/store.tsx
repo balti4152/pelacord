@@ -825,12 +825,17 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 						if (notificationsRef.current && audible) {
 							const attachment = last.attachments?.[0];
 							const body = last.content?.trim() || (attachment ? `📎 ${attachment.name}` : 'Nuevo mensaje');
+							// La foto de quien escribe: la del peer si está online, o la que quedó
+							// guardada en el perfil cacheado. Así Windows no muestra el logo dos veces.
+							const peer = peersRef.current[last.authorId];
+							const known = knownMembersRef.current[last.authorId];
 							showNotification({
 								title: mentioned
 									? `Te mencionaron en #${channel.name}`
 									: `${last.authorName ?? 'Alguien'} en #${channel.name}`,
 								body: body.slice(0, 180),
 								channelId: channel.id,
+								iconUrl: peer?.avatarUrl ?? known?.cachedAvatar ?? known?.avatarUrl ?? undefined,
 							});
 						}
 					}
