@@ -128,6 +128,7 @@ export function SpotifyPlaylistDetail({
 				{tracks.map((track, index) => (
 					<li key={`${track.title}-${index}`} className="spotify-row">
 						<span className="music-row-index">{index + 1}</span>
+						{/* El embed público no trae la portada de cada canción: se usa la de la playlist. */}
 						{track.image || playlist.image ? (
 							<img src={track.image || playlist.image} alt="" loading="lazy" />
 						) : (
