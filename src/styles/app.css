@@ -2466,6 +2466,27 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* Buscador del chat */
+.chat-search-input {
+	width: 15rem;
+	max-width: 40vw;
+	padding: 0.25rem 0.5rem;
+	font-size: 0.875rem;
+}
+
+.chat-search-count {
+	white-space: nowrap;
+	font-size: 0.75rem;
+	color: var(--text-tertiary);
+}
+
+.search-hit {
+	padding: 0 1px;
+	border-radius: 2px;
+	background-color: color-mix(in srgb, var(--status-idle) 45%, transparent);
+	color: var(--text-primary);
+}
+
 /* Puntito de mensajes sin leer en la lista de canales */
 .channel.is-unread {
 	color: var(--text-primary);

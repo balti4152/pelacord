@@ -25,6 +25,8 @@ export interface PeerPresence {
 	particleOriginal?: boolean;
 	particleSpeed?: number;
 	particleLife?: number;
+	/** Sube cuando el usuario cambia algo de su perfil (para refrescar las imágenes guardadas). */
+	profileVersion?: number;
 	channelId: string | null;
 	muted: boolean;
 	deafened: boolean;
@@ -70,8 +72,8 @@ interface DesktopTransport {
 	getPathForFile(file: File): string;
 	/** Notificación nativa de Windows (toast). */
 	notify(payload: {title: string; body: string; channelId?: string; silent?: boolean}): void;
-	/** Guarda la foto de un peer en disco y devuelve la URL local (para verla offline). */
-	cacheAvatar(payload: {peerId: string; url: string}): Promise<string | null>;
+	/** Guarda una imagen de perfil de un peer en disco y devuelve la URL local (para verla offline). */
+	cacheAvatar(payload: {peerId: string; url: string; kind?: 'avatar' | 'banner' | 'deco' | 'particle'}): Promise<string | null>;
 	/** Arranque automático con Windows (abierto en la bandeja). */
 	getLoginItem(): Promise<boolean>;
 	setLoginItem(enabled: boolean): Promise<boolean>;

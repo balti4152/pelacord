@@ -644,13 +644,14 @@ function peerAvatarDirectory() {
 }
 
 ipcMain.handle('pelacord:cache-avatar', async (_event, payload) => {
-	const {peerId, url} = payload ?? {};
+	const {peerId, url, kind} = payload ?? {};
 	if (!peerId || typeof url !== 'string' || !/^https?:/i.test(url)) return null;
 	try {
 		const dir = peerAvatarDirectory();
 		fs.mkdirSync(dir, {recursive: true});
 		const client = url.startsWith('https') ? https : http;
 		const safeId = String(peerId).replace(/[^a-zA-Z0-9_-]/g, '_');
+		const safeKind = kind === 'banner' || kind === 'deco' || kind === 'particle' ? kind : 'avatar';
 		const result = await new Promise((resolve, reject) => {
 			client
 				.get(url, (response) => {
@@ -660,7 +661,7 @@ ipcMain.handle('pelacord:cache-avatar', async (_event, payload) => {
 					}
 					const type = String(response.headers['content-type'] ?? '');
 					const extension = type.includes('gif') ? 'gif' : type.includes('png') ? 'png' : 'webp';
-					const name = `${safeId}.${extension}`;
+					const name = `${safeId}-${safeKind}.${extension}`;
 					const target = path.join(dir, name);
 					const out = fs.createWriteStream(target);
 					response.on('error', reject);

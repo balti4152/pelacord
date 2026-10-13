@@ -1,4 +1,4 @@
-import {useEffect, useRef, useState} from 'react';
+import {type ReactNode, useEffect, useRef, useState} from 'react';
 import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
@@ -70,6 +70,20 @@ function formatSpeed(bytesPerSecond: number): string {
 	if (bytesPerSecond < 1024) return `${Math.round(bytesPerSecond)} B/s`;
 	if (bytesPerSecond < 1024 * 1024) return `${(bytesPerSecond / 1024).toFixed(0)} KB/s`;
 	return `${(bytesPerSecond / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
+/** Resalta todas las apariciones del término buscado. */
+function highlightTerm(content: string, term: string): ReactNode {
+	if (!term) return content;
+	const index = content.toLowerCase().indexOf(term);
+	if (index === -1) return content;
+	return (
+		<>
+			{content.slice(0, index)}
+			<mark className="search-hit">{content.slice(index, index + term.length)}</mark>
+			{highlightTerm(content.slice(index + term.length), term)}
+		</>
+	);
 }
 
 /**
@@ -246,7 +260,12 @@ export function ChatView(): JSX.Element {
 	const muted = state.mutedChannels.includes(state.activeChannelId);
 	const [menu, setMenu] = useState<{message: Message; isMe: boolean; x: number; y: number} | null>(null);
 	const [editingId, setEditingId] = useState<string | null>(null);
+	const [search, setSearch] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const searching = search !== null;
+	const term = (search ?? '').trim().toLowerCase();
+	// Con búsqueda activa se muestran sólo los mensajes que coinciden.
+	const visible = term ? messages.filter((message) => (message.content ?? '').toLowerCase().includes(term)) : messages;
 
 	useEffect(() => {
 		const el = scrollRef.current;
@@ -276,7 +295,7 @@ export function ChatView(): JSX.Element {
 	let lastTimestamp = 0;
 	const rendered: JSX.Element[] = [];
 
-	for (const message of messages) {
+	for (const message of visible) {
 		const {member, isMe} = authorFor(state, message);
 		const grouped = message.authorId === lastAuthorId && message.createdAt - lastTimestamp < 5 * 60 * 1000;
 		const compact = state.settings.messageDisplay === 'compact';
@@ -292,6 +311,7 @@ export function ChatView(): JSX.Element {
 				compact={compact}
 				editing={editingId === message.id}
 				mentionNames={mentionNames}
+				searchTerm={term}
 				onMenu={(x, y) => setMenu({message, isMe, x, y})}
 				onSaveEdit={(content) => {
 					if (content.trim() && content !== message.content) editMessage(message.id, content);
@@ -311,21 +331,42 @@ export function ChatView(): JSX.Element {
 					{channel.topic ? <span className="chat-header-topic">{channel.topic}</span> : null}
 				</div>
 				<div className="chat-header-tools">
-					<IconButton
-						icon={muted ? 'bellOff' : 'bell'}
-						label={muted ? 'Activar las notificaciones del canal' : 'Silenciar el canal'}
-						active={muted}
-						onClick={() => dispatch({type: 'toggleChannelMute', channelId: state.activeChannelId})}
-					/>
-					<IconButton
-						icon="members"
-						label="Mostrar lista de miembros"
-						active={state.settings.showMembers}
-						onClick={() => updateSettings({showMembers: !state.settings.showMembers})}
-					/>
-					<IconButton icon="search" label="Buscar" />
-					<IconButton icon="inbox" label="Bandeja de entrada" />
-					<IconButton icon="help" label="Ayuda" />
+					{searching ? (
+						<>
+							<input
+								className="input chat-search-input"
+								autoFocus
+								placeholder="Buscar en el canal…"
+								value={search ?? ''}
+								onChange={(event) => setSearch(event.target.value)}
+								onKeyDown={(event) => {
+									if (event.key === 'Escape') setSearch(null);
+								}}
+							/>
+							<span className="chat-search-count">
+								{term ? `${visible.length} ${visible.length === 1 ? 'resultado' : 'resultados'}` : 'Escribí para buscar'}
+							</span>
+							<IconButton icon="x" label="Cerrar búsqueda" onClick={() => setSearch(null)} />
+						</>
+					) : (
+						<>
+							<IconButton
+								icon={muted ? 'bellOff' : 'bell'}
+								label={muted ? 'Activar las notificaciones del canal' : 'Silenciar el canal'}
+								active={muted}
+								onClick={() => dispatch({type: 'toggleChannelMute', channelId: state.activeChannelId})}
+							/>
+							<IconButton
+								icon="members"
+								label="Mostrar lista de miembros"
+								active={state.settings.showMembers}
+								onClick={() => updateSettings({showMembers: !state.settings.showMembers})}
+							/>
+							<IconButton icon="search" label="Buscar en el canal" onClick={() => setSearch('')} />
+							<IconButton icon="inbox" label="Bandeja de entrada" />
+							<IconButton icon="help" label="Ayuda" />
+						</>
+					)}
 				</div>
 			</header>
 
@@ -447,6 +488,7 @@ function MessageRow({
 	compact,
 	editing,
 	mentionNames,
+	searchTerm,
 	onMenu,
 	onSaveEdit,
 	onCancelEdit,
@@ -458,6 +500,7 @@ function MessageRow({
 	compact: boolean;
 	editing: boolean;
 	mentionNames: string[];
+	searchTerm?: string;
 	onMenu: (x: number, y: number) => void;
 	onSaveEdit: (content: string) => void;
 	onCancelEdit: () => void;
@@ -537,15 +580,17 @@ function MessageRow({
 					</div>
 				) : message.content ? (
 					<div className="message-content">
-						{splitMentions(message.content, mentionNames).map((part, index) =>
-							part.mention ? (
-								<span className="mention" key={index}>
-									{part.text}
-								</span>
-							) : (
-								<span key={index}>{part.text}</span>
-							),
-						)}
+						{searchTerm
+							? highlightTerm(message.content, searchTerm)
+							: splitMentions(message.content, mentionNames).map((part, index) =>
+									part.mention ? (
+										<span className="mention" key={index}>
+											{part.text}
+										</span>
+									) : (
+										<span key={index}>{part.text}</span>
+									),
+								)}
 					</div>
 				) : null}
 				{message.attachments.length > 0 ? (

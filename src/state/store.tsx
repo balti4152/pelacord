@@ -453,6 +453,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			particleOriginal: me.particleOriginal,
 			particleSpeed: me.particleSpeed,
 			particleLife: me.particleLife,
+			profileVersion: me.profileVersion,
 			channelId: voice.channelId,
 			muted: voice.muted,
 			deafened: voice.deafened,
@@ -476,6 +477,46 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 
 	// --- Desktop transport: presence over the ZeroTier peer mesh (no cloud) ---
 
+	/** Guarda en disco una imagen del perfil de un peer (avatar, banner, marco o partículas). */
+	function cachePeerAsset(
+		peerId: string,
+		kind: 'avatar' | 'banner' | 'deco' | 'particle',
+		url?: string,
+		version?: number,
+	): void {
+		const transport = getDesktopTransport();
+		if (!transport || !url || !/^https?:/i.test(url)) return;
+		const key = `${url}|${version ?? 0}`;
+		const member = knownMembersRef.current[peerId];
+		// Si ya está guardada esa versión, no se vuelve a bajar.
+		if (!member || member.cachedUrls?.[kind] === key) return;
+		void transport
+			.cacheAvatar({peerId, url, kind})
+			.then((local) => {
+				if (!local) return;
+				const current = knownMembersRef.current[peerId];
+				if (!current) return;
+				const updated: Member = {
+					...current,
+					cachedUrls: {...(current.cachedUrls ?? {}), [kind]: key},
+				};
+				if (kind === 'avatar') {
+					updated.cachedAvatar = local;
+					updated.avatarPoster = local;
+				} else if (kind === 'banner') {
+					updated.cachedBanner = local;
+				} else if (kind === 'deco') {
+					updated.cachedDeco = local;
+				} else {
+					updated.cachedParticle = local;
+				}
+				const next = {...knownMembersRef.current, [peerId]: updated};
+				knownMembersRef.current = next;
+				dispatch({type: 'setKnownMembers', knownMembers: next});
+			})
+			.catch(() => {});
+	}
+
 	const applyPresence = useCallback(() => {
 		const me = meRef.current;
 		const voice = voiceRef.current;
@@ -483,7 +524,6 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		const online: Member[] = [];
 		const onlineIds = new Set<string>();
 		const known = {...knownMembersRef.current};
-		const transport = getDesktopTransport();
 
 		for (const peer of Object.values(peersRef.current)) {
 			if (peer.id === me.id) continue;
@@ -501,15 +541,20 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				avatarPoster: previous?.cachedAvatar,
 				cachedAvatar: previous?.cachedAvatar,
 				lastAvatarUrl: previous?.lastAvatarUrl,
-				bannerUrl: peer.bannerUrl,
+				cachedUrls: previous?.cachedUrls,
+				profileVersion: peer.profileVersion,
+				bannerUrl: previous?.cachedBanner ?? peer.bannerUrl,
+				cachedBanner: previous?.cachedBanner,
 				bannerColor: peer.bannerColor,
 				effect: peer.effect as Member['effect'],
 				decoration: peer.decoration as Member['decoration'],
 				decorationColor: peer.decorationColor,
 				profileEffect: peer.profileEffect,
 				profileEffectColor: peer.profileEffectColor,
-				customParticle: peer.customParticle,
-				customDeco: peer.customDeco,
+				customParticle: previous?.cachedParticle ?? peer.customParticle,
+				cachedParticle: previous?.cachedParticle,
+				customDeco: previous?.cachedDeco ?? peer.customDeco,
+				cachedDeco: previous?.cachedDeco,
 				particleSize: peer.particleSize,
 				particleCount: peer.particleCount,
 				decoSize: peer.decoSize,
@@ -524,25 +569,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				status: peer.status,
 			};
 			known[peer.id] = member;
+			knownMembersRef.current = known;
 			online.push(member);
 
-			// Se guarda la foto en disco para poder seguir viéndola cuando se desconecte.
-			if (transport && peer.avatarUrl && /^https?:/i.test(peer.avatarUrl) && peer.avatarUrl !== previous?.lastAvatarUrl) {
-				void transport
-					.cacheAvatar({peerId: peer.id, url: peer.avatarUrl})
-					.then((local) => {
-						if (!local) return;
-						const current = knownMembersRef.current[peer.id];
-						if (!current) return;
-						const next = {
-							...knownMembersRef.current,
-							[peer.id]: {...current, cachedAvatar: local, lastAvatarUrl: peer.avatarUrl},
-						};
-						knownMembersRef.current = next;
-						dispatch({type: 'setKnownMembers', knownMembers: next});
-					})
-					.catch(() => {});
-			}
+			// Se guardan las imágenes del perfil en disco: así se siguen viendo cuando se desconecte
+			// y se refrescan solas cuando el otro cambia algo (sube profileVersion).
+			cachePeerAsset(peer.id, 'avatar', peer.avatarUrl, peer.profileVersion);
+			cachePeerAsset(peer.id, 'banner', peer.bannerUrl, peer.profileVersion);
+			cachePeerAsset(peer.id, 'deco', peer.customDeco, peer.profileVersion);
+			cachePeerAsset(peer.id, 'particle', peer.customParticle, peer.profileVersion);
 
 			if (peer.channelId) {
 				voiceMembers[peer.channelId] = [...(voiceMembers[peer.channelId] ?? []), peerToParticipant(peer)];
@@ -568,6 +603,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				presence: 'offline' as const,
 				avatarUrl: member.cachedAvatar ?? member.avatarUrl,
 				avatarPoster: member.cachedAvatar,
+				bannerUrl: member.cachedBanner ?? member.bannerUrl,
+				customDeco: member.cachedDeco ?? member.customDeco,
+				customParticle: member.cachedParticle ?? member.customParticle,
 			}));
 		dispatch({type: 'setKnownMembers', knownMembers: known});
 		dispatch({type: 'setVoiceMembers', voiceMembers});
@@ -746,7 +784,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[state.activeChannelId, state.me.id, state.me.name, state.me.avatarColor],
 	);
 
-	const updateProfile = useCallback((patch: Partial<Member>) => dispatch({type: 'updateProfile', patch}), []);
+	const updateProfile = useCallback((patch: Partial<Member>) => {
+		// Si cambia alguna imagen del perfil, sube la versión: así los demás la vuelven a guardar
+		// en disco (si no, seguirían mostrando la vieja cuando el otro esté desconectado).
+		const assetKeys = ['avatarUrl', 'bannerUrl', 'customDeco', 'customParticle', 'decoImage', 'particleImage'];
+		const touchesAssets = Object.keys(patch).some((key) => assetKeys.includes(key));
+		dispatch({type: 'updateProfile', patch: touchesAssets ? {...patch, profileVersion: Date.now()} : patch});
+	}, []);
 	const updateSettings = useCallback((patch: Partial<Settings>) => dispatch({type: 'updateSettings', patch}), []);
 	const setCssVariable = useCallback((name: string, value: string) => dispatch({type: 'setCssVariable', name, value}), []);
 

@@ -79,6 +79,16 @@ export interface Member {
 	avatarPoster?: string;
 	/** Foto guardada en disco de un peer (para verla aunque esté desconectado). */
 	cachedAvatar?: string;
+	/** Banner guardado en disco de un peer. */
+	cachedBanner?: string;
+	/** Imagen del marco guardada en disco. */
+	cachedDeco?: string;
+	/** Imagen de partículas guardada en disco. */
+	cachedParticle?: string;
+	/** Qué URLs ya se guardaron por tipo (para volver a guardar sólo si cambian). */
+	cachedUrls?: Record<string, string>;
+	/** Sube cuando el usuario cambia algo de su perfil: los demás vuelven a guardar sus imágenes. */
+	profileVersion?: number;
 	/** Última URL de avatar vista de ese peer (para saber cuándo volver a guardarla). */
 	lastAvatarUrl?: string;
 	bannerUrl?: string;
