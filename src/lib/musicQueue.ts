@@ -59,6 +59,8 @@ export type MusicCommand =
 	| {kind: 'enqueue'; track: MusicTrack}
 	/** Una playlist entera de una sola vez: un solo mensaje y el orden queda garantizado. */
 	| {kind: 'enqueueMany'; tracks: MusicTrack[]}
+	/** Vacía la cola (lo que está sonando sigue sonando). */
+	| {kind: 'clearQueue'}
 	| {kind: 'remove'; index: number}
 	| {kind: 'move'; from: number; to: number}
 	/** Un peer le pasa su Jam al host (cuando el host arrancó sin nada). */
@@ -127,6 +129,7 @@ export function applyMusicCommand(state: MusicState, command: MusicCommand): Mus
 	}
 	if (command.kind === 'enqueue') return {...state, queue: appendToQueue(state, command.track)};
 	if (command.kind === 'enqueueMany') return {...state, queue: [...state.queue, ...command.tracks]};
+	if (command.kind === 'clearQueue') return {...state, queue: []};
 	if (command.kind === 'remove') return {...state, queue: removeFromQueue(state, command.index)};
 	if (command.kind === 'move') return {...state, queue: moveInQueue(state, command.from, command.to)};
 	return state;

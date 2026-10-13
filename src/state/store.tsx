@@ -498,6 +498,8 @@ interface StoreContextValue {
 	/** Agrega una lista entera (una playlist de Spotify, por ejemplo). */
 	musicEnqueueMany: (tracks: MusicTrack[]) => void;
 	musicRemove: (index: number) => void;
+	/** Vacía la cola (lo que está sonando sigue sonando). */
+	musicClearQueue: () => void;
 	musicMove: (from: number, to: number) => void;
 	musicSkip: () => void;
 	musicTogglePause: () => void;
@@ -1373,6 +1375,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[sendMusicCommand],
 	);
 	const musicRemove = useCallback((index: number) => sendMusicCommand({kind: 'remove', index}), [sendMusicCommand]);
+	/** Vacía la cola (lo que está sonando sigue). */
+	const musicClearQueue = useCallback(() => sendMusicCommand({kind: 'clearQueue'}), [sendMusicCommand]);
 	const musicMove = useCallback(
 		(from: number, to: number) => sendMusicCommand({kind: 'move', from, to}),
 		[sendMusicCommand],
@@ -1550,6 +1554,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicEnqueue,
 			musicEnqueueMany,
 			musicRemove,
+			musicClearQueue,
 			musicMove,
 			musicSkip,
 			musicTogglePause,
@@ -1575,6 +1580,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			musicEnqueue,
 			musicEnqueueMany,
 			musicRemove,
+			musicClearQueue,
 			musicMove,
 			musicSkip,
 			musicTogglePause,

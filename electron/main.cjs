@@ -901,8 +901,71 @@ ipcMain.handle('pelacord:spotify-login', async () => {
 	});
 });
 
-/** ¿Hay sesión? Devuelve también el nombre para saludar y la dirección de vuelta que hay que registrar. */
-ipcMain.handle('pelacord:spotify-status', async () => {
+/**
+ * Token de APLICACIÓN (Client Credentials): sirve para lo que no necesita saber quién sos, como
+ * buscar playlists públicas. Es el único uso que le quedó al secreto del cliente.
+ */
+let spotifyAppAccess = null;
+async function spotifyAppToken() {
+	if (spotifyAppAccess && spotifyAppAccess.expiresAt > Date.now() + 30000) return spotifyAppAccess.token;
+	const basic = Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64');
+	const res = await fetch('https://accounts.spotify.com/api/token', {
+		method: 'POST',
+		headers: {'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${basic}`},
+		body: 'grant_type=client_credentials',
+	});
+	if (!res.ok) return null;
+	const data = await res.json().catch(() => ({}));
+	if (!data.access_token) return null;
+	spotifyAppAccess = {token: data.access_token, expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000};
+	return spotifyAppAccess.token;
+}
+
+/** Con qué se arma el grid de playlists destacadas del buscador. */
+const SPOTIFY_DISCOVER_TERMS = ['top hits', 'éxitos', 'rock clásico', 'reggaeton', 'cumbia', 'pop', 'música de los 80', 'indie'];
+
+let spotifyDiscoverCache = null;
+
+/**
+ * Playlists destacadas para el buscador.
+ *
+ * Se arman con búsquedas reales de Spotify: los endpoints de "destacados" ya no existen (dan 403
+ * desde febrero 2026). Devuelve sólo los datos de la tarjeta; las canciones se leen después del
+ * embed público, playlist por playlist (porque la API no entrega el contenido de playlists ajenas).
+ */
+ipcMain.handle('pelacord:spotify-discover', async () => {
+	if (spotifyDiscoverCache && Date.now() - spotifyDiscoverCache.at < 30 * 60 * 1000) {
+		return {ok: true, playlists: spotifyDiscoverCache.playlists, cached: true};
+	}
+	const token = await spotifyAppToken();
+	if (!token) return {ok: false, error: 'No se pudieron buscar playlists destacadas.', playlists: []};
+	const found = new Map();
+	for (const term of SPOTIFY_DISCOVER_TERMS) {
+		const res = await fetch(`https://api.spotify.com/v1/search?q=${encodeURIComponent(term)}&type=playlist&limit=6`, {
+			headers: {Authorization: `Bearer ${token}`},
+		});
+		if (!res.ok) continue;
+		const data = await res.json().catch(() => ({}));
+		for (const item of data.playlists?.items ?? []) {
+			if (!item?.id || found.has(item.id)) continue;
+			found.set(item.id, {
+				id: String(item.id),
+				name: String(item.name || 'Playlist'),
+				owner: String(item.owner?.display_name || item.owner?.id || ''),
+				tracks: Number(item.tracks?.total) || 0,
+				// Las ajenas no se pueden leer por API: se leen del embed público.
+				readable: false,
+				image: String(item.images?.[0]?.url || ''),
+				url: String(item.external_urls?.spotify || ''),
+			});
+		}
+	}
+	const playlists = [...found.values()].slice(0, 24);
+	spotifyDiscoverCache = {playlists, at: Date.now()};
+	return {ok: true, playlists};
+});
+
+/** ¿Hay sesión? Devuelve también el nombre para saludar y la dirección de vuelta que hay que registrar. */ipcMain.handle('pelacord:spotify-status', async () => {
 	const store = readSpotifyStore();
 	if (!store?.refreshToken) return {connected: false, redirectUri: SPOTIFY_REDIRECT};
 	const token = await spotifyToken();

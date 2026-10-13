@@ -79,6 +79,8 @@ interface DesktopTransport {
 	spotifyTracks(playlistId: string): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}>;
 	/** Playlists de otra cuenta: se leen del embed público, porque la API no las entrega. */
 	spotifyPublicTracks(playlistId: string): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}>;
+	/** Playlists destacadas para el buscador (se arman con búsquedas reales). */
+	spotifyDiscover(): Promise<{ok: boolean; error?: string; playlists: SpotifyPlaylist[]}>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;

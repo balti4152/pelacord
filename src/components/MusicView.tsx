@@ -1,9 +1,10 @@
 import {type CSSProperties, useEffect, useRef, useState} from 'react';
-import {GripVertical, ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, VolumeX, X} from 'lucide-react';
+import {GripVertical, ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Trash2, TriangleAlert, Volume2, VolumeX, X} from 'lucide-react';
 import {SiSpotify} from 'react-icons/si';
-import {type TrackResult, getDesktopTransport} from '@/lib/desktop';
+import {type SpotifyPlaylist, type TrackResult, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
-import {SpotifyView} from '@/components/SpotifyView';
+import {useSpotifyImport} from '@/lib/spotifyImport';
+import {SPOTIFY_GREEN, SpotifyView} from '@/components/SpotifyView';
 import {useStore} from '@/state/store';
 
 /** Convierte un resultado de búsqueda en un tema de la cola. */
@@ -33,7 +34,7 @@ function formatDuration(seconds: number): string {
  * el estilo de Pelacord. Los íconos son de `lucide-react`.
  */
 export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
-	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicMove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
+	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicClearQueue, musicMove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
 		useStore();
 	const [query, setQuery] = useState('');
 	/** Lo que se busca de verdad: cambia con Enter o después de una pausa larga. */
@@ -46,6 +47,10 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const [overIndex, setOverIndex] = useState<number | null>(null);
 	/** El origen del arrastre, en un ref: el estado de React puede no estar actualizado al soltar. */
 	const dragFromRef = useRef<number | null>(null);
+	/** Playlists destacadas para el buscador (se ven cuando no hay búsqueda). */
+	const [discover, setDiscover] = useState<SpotifyPlaylist[]>([]);
+	const [discoverLoading, setDiscoverLoading] = useState(true);
+	const spotifyImport = useSpotifyImport();
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
 	/** Para controlar la Jam hay que estar en un canal de voz: si no, no hay dónde sonar. */
@@ -88,6 +93,46 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	}, [searchTerm]);
 
 	const current = musicState.track;
+
+	// Playlists destacadas del buscador: se piden una sola vez (el proceso principal las guarda 30 min).
+	useEffect(() => {
+		let alive = true;
+		void getDesktopTransport()
+			?.spotifyDiscover()
+			.then((result) => {
+				if (alive) setDiscover(result?.playlists ?? []);
+			})
+			.catch(() => {})
+			.finally(() => {
+				if (alive) setDiscoverLoading(false);
+			});
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	/** Lee una playlist destacada (del embed público) y la agrega entera a la cola. */
+	async function addDiscover(playlist: SpotifyPlaylist): Promise<void> {
+		if (spotifyImport.isBusy()) return;
+		if (!inVoice) {
+			spotifyImport.setError('Unite a un canal de voz para escuchar la música.');
+			return;
+		}
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		spotifyImport.setError('');
+		spotifyImport.setNotice(`Leyendo "${playlist.name}"…`);
+		try {
+			const result = await transport.spotifyPublicTracks(playlist.id);
+			if (!result.ok) {
+				spotifyImport.setError(result.error ?? 'No se pudo leer esa playlist.');
+				return;
+			}
+			await spotifyImport.importTracks(result.tracks, playlist.name);
+		} catch (failure) {
+			spotifyImport.setError(failure instanceof Error ? failure.message : 'No se pudo leer esa playlist.');
+		}
+	}
 
 	return (
 		<div className="music-view">
@@ -132,16 +177,72 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							/>
 							{loading ? <Loader2 size={16} className="music-spin" /> : null}
 						</div>
-						{!query.trim() ? (
-							<p className="settings-hint">
-								{inVoice ? (
-									<>
-										Buscá algo y dale play: se reproduce para <strong>todos</strong> los que estén en el canal.
-									</>
-								) : (
-									<>Unite a un canal de voz para escuchar y controlar la música con el grupo.</>
-								)}
+						{spotifyImport.busy && spotifyImport.progress.total > 0 ? (
+							<div className="spotify-progress">
+								<span>
+									Agregando a la cola… {spotifyImport.progress.done}/{spotifyImport.progress.total}
+								</span>
+								<button type="button" className="spotify-ghost" title="Cortar" onClick={spotifyImport.cancel}>
+									<X size={15} />
+								</button>
+							</div>
+						) : null}
+						{spotifyImport.error ? (
+							<p className="spotify-error">
+								<TriangleAlert size={15} /> {spotifyImport.error}
 							</p>
+						) : null}
+						{spotifyImport.notice ? <p className="spotify-notice">{spotifyImport.notice}</p> : null}
+						{!query.trim() ? (
+							<>
+								<p className="settings-hint">
+									{inVoice ? (
+										<>
+											Buscá algo y dale play: se reproduce para <strong>todos</strong> los que estén en el canal.
+										</>
+									) : (
+										<>Unite a un canal de voz para escuchar y controlar la música con el grupo.</>
+									)}
+								</p>
+								{discoverLoading ? (
+									<p className="settings-hint">
+										<Loader2 size={16} className="music-spin" /> Buscando playlists de Spotify…
+									</p>
+								) : null}
+								{discover.length > 0 ? (
+									<>
+										<span className="music-grid-title">
+											<SiSpotify size={15} color={SPOTIFY_GREEN} /> Playlists para escuchar
+										</span>
+										<div className="music-grid">
+											{discover.map((playlist, index) => (
+												<button
+													key={playlist.id}
+													type="button"
+													className="music-card"
+													style={{'--card-hue': String((index * 47) % 360)} as CSSProperties}
+													disabled={Boolean(spotifyImport.busy) || !inVoice}
+													title={inVoice ? `Agregar "${playlist.name}" a la cola` : 'Unite a un canal de voz primero'}
+													onClick={() => void addDiscover(playlist)}>
+													<span className="music-card-art">
+														{playlist.image ? (
+															<img src={playlist.image} alt="" loading="lazy" />
+														) : (
+															<SiSpotify size={34} color="#ffffff" />
+														)}
+													</span>
+													<span className="music-card-name" title={playlist.name}>
+														{playlist.name}
+													</span>
+													<span className="music-card-sub">
+														{spotifyImport.busy === playlist.name ? 'Agregando…' : playlist.owner || 'Spotify'}
+													</span>
+												</button>
+											))}
+										</div>
+									</>
+								) : null}
+							</>
 						) : null}
 						{!loading && query.trim() && results.length === 0 ? (
 							<p className="settings-hint">No encontré nada con eso.</p>
@@ -195,6 +296,20 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						) : (
 							<p className="settings-hint">No hay nada sonando. Buscá algo y dale play.</p>
 						)}
+						{musicState.queue.length > 0 ? (
+							<div className="music-queue-head">
+								<span>{musicState.queue.length} en la cola · arrastrá para cambiar el orden</span>
+								<button
+									type="button"
+									className="music-clear"
+									title="Vaciar la cola (lo que está sonando sigue)"
+									onClick={() => {
+										if (window.confirm('¿Vaciar la cola? Lo que está sonando sigue igual.')) void musicClearQueue();
+									}}>
+									<Trash2 size={15} /> Vaciar cola
+								</button>
+							</div>
+						) : null}
 						<ul className="music-list">
 							{musicState.queue.map((track, index) => (
 								<li

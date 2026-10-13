@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	spotifyTracks: (playlistId) => ipcRenderer.invoke('pelacord:spotify-tracks', playlistId),
 	/** Playlists de otra cuenta: se leen del embed público (Spotify no las entrega por API). */
 	spotifyPublicTracks: (playlistId) => ipcRenderer.invoke('pelacord:spotify-public-playlist', playlistId),
+	/** Playlists destacadas para el buscador. */
+	spotifyDiscover: () => ipcRenderer.invoke('pelacord:spotify-discover'),
 	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
