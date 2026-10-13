@@ -3,7 +3,7 @@ import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
 import {VoicePanel} from '@/components/VoicePanel';
-import {VOICE_CATEGORY, useStore} from '@/state/store';
+import {TEXT_CATEGORY, VOICE_CATEGORY, useStore} from '@/state/store';
 import type {Channel} from '@/types';
 
 function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element {
@@ -144,7 +144,9 @@ export function ChannelSidebar({
 	const [menu, setMenu] = useState<{channelId: string; name: string; x: number; y: number} | null>(null);
 	const [deleting, setDeleting] = useState<{channelId: string; name: string} | null>(null);
 
-	const categories = Array.from(new Set(state.channels.map((c) => c.category)));
+	// Las dos categorías se muestran SIEMPRE, aunque estén vacías: si no, al borrar el último canal
+	// de texto la categoría desaparecía y ya no quedaba forma de crear otro (nos pasó).
+	const categories = Array.from(new Set([TEXT_CATEGORY, VOICE_CATEGORY, ...state.channels.map((c) => c.category)]));
 
 	// El menú del clic derecho se cierra con un clic en cualquier lado o con Escape.
 	// Ojo: NO se cierra con `contextmenu`, porque si no, abrir el menú de otro canal no andaría.
@@ -204,6 +206,9 @@ export function ChannelSidebar({
 								<Icon name="plus" size={14} />
 							</button>
 						</div>
+						{state.channels.filter((c) => c.category === category).length === 0 ? (
+							<p className="channel-empty">No hay canales todavía. Usá el + para crear uno.</p>
+						) : null}
 						{state.channels
 							.filter((c) => c.category === category)
 							.map((channel) => {
