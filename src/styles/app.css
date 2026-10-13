@@ -2154,6 +2154,13 @@
 	font-variant-numeric: tabular-nums;
 }
 
+/* Atajos (grabador de teclas) */
+.hotkey-button {
+	min-width: 13rem;
+	justify-content: center;
+	font-variant-numeric: tabular-nums;
+}
+
 /* ---------- Overlay animado del perfil ---------- */
 
 .profile-overlay {

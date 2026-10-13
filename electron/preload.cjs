@@ -45,6 +45,12 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	cacheAvatar: (payload) => ipcRenderer.invoke('pelacord:cache-avatar', payload),
 	getLoginItem: () => ipcRenderer.invoke('pelacord:get-login-item'),
 	setLoginItem: (enabled) => ipcRenderer.invoke('pelacord:set-login-item', enabled),
+	setHotkeys: (bindings) => ipcRenderer.invoke('pelacord:set-hotkeys', bindings),
+	onHotkey: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:hotkey', handler);
+		return () => ipcRenderer.removeListener('pelacord:hotkey', handler);
+	},
 	setBadge: (payload) => ipcRenderer.send('pelacord:badge', payload),
 	setTitleBar: (payload) => ipcRenderer.send('pelacord:set-titlebar', payload),
 	onNotificationClick: (callback) => {

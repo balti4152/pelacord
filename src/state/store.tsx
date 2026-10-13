@@ -2,6 +2,7 @@ import {createContext, type Dispatch, type ReactNode, useCallback, useContext, u
 import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
 import {getIdentity, saveIdentity} from '@/lib/identity';
+import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick} from '@/lib/notifications';
 import {deleteMessage as deleteRemoteMessage, postMessage, subscribeMessages, updateMessage} from '@/lib/remote';
 import {playSound} from '@/lib/sounds';
@@ -147,6 +148,7 @@ function seedState(): AppState {
 			outputDeviceId: 'default',
 			cosmeticAnimations: true,
 			notifications: true,
+			hotkeys: {...DEFAULT_HOTKEYS},
 		},
 		voice: {channelId: null, muted: false, deafened: false, video: false, sharing: false, stageOpen: false, joinedAt: null},
 		voiceMembers: remote ? {} : demoVoiceMembers,
@@ -302,6 +304,9 @@ function loadState(): AppState {
 		if (typeof parsed.settings.outputDeviceId !== 'string') parsed.settings.outputDeviceId = 'default';
 		if (typeof parsed.settings.cosmeticAnimations !== 'boolean') parsed.settings.cosmeticAnimations = true;
 		if (typeof parsed.settings.notifications !== 'boolean') parsed.settings.notifications = true;
+		if (!parsed.settings.hotkeys || typeof parsed.settings.hotkeys !== 'object') {
+			parsed.settings.hotkeys = {...DEFAULT_HOTKEYS};
+		}
 		if (!parsed.unread || typeof parsed.unread !== 'object') parsed.unread = {};
 		if (!Array.isArray(parsed.mutedChannels)) parsed.mutedChannels = [];
 		if (!parsed.knownMembers || typeof parsed.knownMembers !== 'object') parsed.knownMembers = {};
@@ -758,6 +763,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	useEffect(() => subscribeNotificationClick((channelId) => {
 		if (channelId) dispatch({type: 'selectChannel', channelId});
 	}), []);
+
+	// Atajos globales: se registran (y se vuelven a registrar) cuando cambian.
+	useEffect(() => {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		const bindings = Object.entries(state.settings.hotkeys ?? {}).map(([action, accelerator]) => ({action, accelerator}));
+		void transport
+			.setHotkeys(bindings)
+			.then((failed) => {
+				if (Array.isArray(failed) && failed.length > 0) {
+					console.warn('[pelacord] atajos que no se pudieron registrar (¿los usa otro programa?):', failed);
+				}
+			})
+			.catch(() => {});
+	}, [state.settings.hotkeys]);
 
 	const sendMessage = useCallback(
 		(content: string, attachments: Attachment[]) => {

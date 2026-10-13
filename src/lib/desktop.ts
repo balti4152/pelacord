@@ -77,6 +77,10 @@ interface DesktopTransport {
 	/** Arranque automático con Windows (abierto en la bandeja). */
 	getLoginItem(): Promise<boolean>;
 	setLoginItem(enabled: boolean): Promise<boolean>;
+	/** Registra los atajos globales; devuelve los que no se pudieron usar. */
+	setHotkeys(bindings: Array<{action: string; accelerator: string}>): Promise<Array<{action: string; accelerator: string}>>;
+	/** Avisa cuando el usuario aprieta un atajo global. */
+	onHotkey(callback: (message: {action: string}) => void): () => void;
 	/** Globito sobre el ícono de la barra de tareas (dataUrl vacío = sacarlo). */
 	setBadge(payload: {dataUrl?: string; description?: string}): void;
 	/** Colores de la barra de título (para que siga el tema). */

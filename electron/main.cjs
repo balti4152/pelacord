@@ -7,7 +7,7 @@
 //
 // Nadie edita nada: cada uno abre la app, pone su nombre y ya se ve con los demás.
 
-const {app, BrowserWindow, desktopCapturer, ipcMain, Menu, net, protocol, session, shell, Notification, nativeImage, Tray} = require('electron');
+const {app, BrowserWindow, desktopCapturer, globalShortcut, ipcMain, Menu, net, protocol, session, shell, Notification, nativeImage, Tray} = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const dgram = require('node:dgram');
@@ -708,6 +708,46 @@ ipcMain.on('pelacord:notify', (_event, payload) => {
 	}
 });
 
+// ---------- Atajos globales (funcionan aunque la app no tenga el foco) ----------
+
+/** Acciones que se pueden disparar con un atajo. */
+const HOTKEY_ACTIONS = ['mute', 'deafen', 'shareScreen', 'shareFocused'];
+/** Atajos registrados ahora, para poder darlos de baja al cambiarlos. */
+let registeredHotkeys = [];
+
+/**
+ * Registra los atajos configurados. Devuelve los que fallaron (otro programa ya los usa
+ * o el formato no es válido) para poder avisar en la interfaz.
+ */
+function registerHotkeys(bindings) {
+	for (const accelerator of registeredHotkeys) {
+		try {
+			globalShortcut.unregister(accelerator);
+		} catch {
+			// se ignora
+		}
+	}
+	registeredHotkeys = [];
+	const failed = [];
+	if (!Array.isArray(bindings)) return failed;
+	for (const entry of bindings) {
+		const {action, accelerator} = entry ?? {};
+		if (!HOTKEY_ACTIONS.includes(action) || typeof accelerator !== 'string' || !accelerator) continue;
+		try {
+			// No se trae la ventana al frente: el atajo tiene que funcionar sin robar el foco
+			// (si no, "compartir la ventana enfocada" no tendría sentido).
+			const ok = globalShortcut.register(accelerator, () => sendToRenderer('pelacord:hotkey', {action}));
+			if (ok) registeredHotkeys.push(accelerator);
+			else failed.push({action, accelerator});
+		} catch {
+			failed.push({action, accelerator});
+		}
+	}
+	return failed;
+}
+
+ipcMain.handle('pelacord:set-hotkeys', (_event, bindings) => registerHotkeys(bindings));
+
 /** Colores de la barra de título, para que siga el tema elegido. */
 ipcMain.on('pelacord:set-titlebar', (_event, payload) => {
 	if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -1051,4 +1091,13 @@ app.on('window-all-closed', () => {
 // Salir de verdad (bandeja, actualización o apagado) no debe esconderse.
 app.on('before-quit', () => {
 	isQuitting = true;
+});
+
+// Los atajos globales hay que darlos de baja al salir.
+app.on('will-quit', () => {
+	try {
+		globalShortcut.unregisterAll();
+	} catch {
+		// se ignora
+	}
 });

@@ -159,6 +159,8 @@ export interface Settings {
 	cosmeticAnimations: boolean;
 	/** Notificaciones nativas de Windows. */
 	notifications: boolean;
+	/** Atajos globales: acción -> combinación de teclas. */
+	hotkeys: Record<string, string>;
 }
 
 export interface VoiceState {

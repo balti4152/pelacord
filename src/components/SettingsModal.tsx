@@ -8,6 +8,7 @@ import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {APP_VERSION, formatBuildFull} from '@/lib/build';
+import {DEFAULT_HOTKEYS, HOTKEYS, type HotkeyAction, eventToAccelerator, formatAccelerator} from '@/lib/hotkeys';
 import {useStore} from '@/state/store';
 import type {AvatarCrop, Member, Presence, ProfileEffect, ThemeName} from '@/types';
 
@@ -71,7 +72,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 	const {state, updateProfile, updateSettings, setCssVariable} = useStore();
 	const me = state.me;
 	const outputVolume = useOutputVolume();
-	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'customcss'>('account');
+	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'hotkeys' | 'customcss'>('account');
 	const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
 	function handleAvatar(event: ChangeEvent<HTMLInputElement>): void {
@@ -193,6 +194,12 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 					</button>
 					<button
 						type="button"
+						className={`modal-nav-item${tab === 'hotkeys' ? ' is-active' : ''}`}
+						onClick={() => setTab('hotkeys')}>
+						Atajos
+					</button>
+					<button
+						type="button"
 						className={`modal-nav-item${tab === 'customcss' ? ' is-active' : ''}`}
 						onClick={() => setTab('customcss')}>
 						CSS personalizado
@@ -268,6 +275,15 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								outputDeviceId={state.settings.outputDeviceId}
 								onInput={(v) => updateSettings({inputDeviceId: v})}
 								onOutput={(v) => updateSettings({outputDeviceId: v})}
+							/>
+						) : null}
+
+						{tab === 'hotkeys' ? (
+							<HotkeysTab
+								hotkeys={state.settings.hotkeys ?? {}}
+								onHotkey={(action, accelerator) =>
+									updateSettings({hotkeys: {...(state.settings.hotkeys ?? {}), [action]: accelerator ?? ''}})
+								}
 							/>
 						) : null}
 
@@ -788,8 +804,78 @@ function VoiceTab(props: {
 	);
 }
 
-function UpdateSettings(): JSX.Element {
-	const status = useUpdater();
+function HotkeysTab({
+	hotkeys,
+	onHotkey,
+}: {
+	hotkeys: Record<string, string>;
+	onHotkey: (action: string, accelerator: string | undefined) => void;
+}): JSX.Element {
+	const [recording, setRecording] = useState<string | null>(null);
+
+	// Mientras graba, escucha el teclado de toda la ventana.
+	useEffect(() => {
+		if (!recording) return;
+		const onKey = (event: KeyboardEvent) => {
+			event.preventDefault();
+			event.stopPropagation();
+			if (event.key === 'Escape') {
+				setRecording(null);
+				return;
+			}
+			const accelerator = eventToAccelerator(event);
+			// Si sólo apretó modificadores, sigue esperando la tecla.
+			if (!accelerator) return;
+			onHotkey(recording, accelerator);
+			setRecording(null);
+		};
+		window.addEventListener('keydown', onKey, true);
+		return () => window.removeEventListener('keydown', onKey, true);
+	}, [recording, onHotkey]);
+
+	return (
+		<>
+			<h2 className="modal-title">Atajos</h2>
+			<p className="settings-hint">
+				Funcionan aunque Pelacord no tenga el foco: podés mutear, ensordecer o compartir mientras usás otro programa.
+			</p>
+			{HOTKEYS.map((info) => {
+				const accelerator = hotkeys[info.action] ?? '';
+				return (
+					<div className="settings-section" key={info.action}>
+						<span className="settings-label">{info.label}</span>
+						<div className="input-row">
+							<button
+								type="button"
+								className={`button ${recording === info.action ? 'primary' : 'secondary'} hotkey-button`}
+								onClick={() => setRecording(info.action)}>
+								{recording === info.action ? 'Apretá las teclas… (Esc cancela)' : formatAccelerator(accelerator)}
+							</button>
+							{accelerator ? (
+								<button type="button" className="button secondary" onClick={() => onHotkey(info.action, undefined)}>
+									Quitar
+								</button>
+							) : (
+								<button
+									type="button"
+									className="button secondary"
+									onClick={() => onHotkey(info.action, DEFAULT_HOTKEYS[info.action as HotkeyAction])}>
+									Predeterminado
+								</button>
+							)}
+						</div>
+						<p className="settings-hint">{info.description}</p>
+					</div>
+				);
+			})}
+			<p className="settings-hint">
+				Si un atajo no funciona, probablemente lo esté usando otro programa: probá con otra combinación.
+			</p>
+		</>
+	);
+}
+
+function UpdateSettings(): JSX.Element {	const status = useUpdater();
 	const text =
 		status.state === 'checking'
 			? 'Buscando…'

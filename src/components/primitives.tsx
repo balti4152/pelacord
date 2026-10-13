@@ -36,17 +36,17 @@ const ICONS: Record<string, ReactNode> = {
 	),
 	headphones: (
 		<>
-			<path d="M4 14v-2a8 8 0 0 1 16 0v2" />
-			<rect x="3" y="14" width="4" height="6" rx="2" />
-			<rect x="17" y="14" width="4" height="6" rx="2" />
+			<path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+			<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" />
+			<path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
 		</>
 	),
 	headphonesOff: (
 		<>
+			<path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+			<path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z" />
+			<path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
 			<line x1="2" y1="2" x2="22" y2="22" />
-			<path d="M4 14v-2a8 8 0 0 1 12.5-6.7" />
-			<rect x="17" y="14" width="4" height="6" rx="2" />
-			<path d="M6 14H3v6h2a1 1 0 0 0 1-1z" />
 		</>
 	),
 	settings: (

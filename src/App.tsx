@@ -14,7 +14,7 @@ import {hasChosenName} from '@/lib/identity';
 import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
 import {initUpdater} from '@/lib/updater';
-import {subscribeSharePicker} from '@/lib/sharePicker';
+import {openSharePicker, subscribeSharePicker} from '@/lib/sharePicker';
 import {playSound} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 
@@ -144,6 +144,39 @@ export function App(): JSX.Element {
 		if (state.voice.channelId && remoteInChannel > prevRemote.current) playSound('userJoined');
 		prevRemote.current = remoteInChannel;
 	}, [remoteInChannel, state.voice.channelId]);
+
+	/** Comparte la ventana que el usuario tenía enfocada, sin abrir el selector. */
+	async function shareFocusedWindow(): Promise<void> {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		try {
+			const sources = await transport.getDesktopSources();
+			// Chromium devuelve las ventanas por uso reciente: la primera es la que estaba adelante.
+			const target = sources.find((source) => source.kind === 'window') ?? sources[0];
+			if (!target) return;
+			transport.selectSource(target.id);
+			voiceMesh.setScreenOptions({width: 1920, height: 1080, frameRate: 60, audio: false});
+			if (!state.voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+		} catch {
+			// sin fuentes disponibles: no pasa nada
+		}
+	}
+
+	// Atajos globales (funcionan aunque la app esté en segundo plano).
+	useEffect(() => {
+		const transport = getDesktopTransport();
+		if (!transport) return;
+		return transport.onHotkey(({action}) => {
+			if (action === 'mute') dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
+			else if (action === 'deafen') dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
+			else if (action === 'shareScreen') {
+				if (state.voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+				else openSharePicker();
+			} else if (action === 'shareFocused') {
+				void shareFocusedWindow();
+			}
+		});
+	}, [state.voice.sharing]);
 
 	if (!hasChosenName()) return <Onboarding />;
 
