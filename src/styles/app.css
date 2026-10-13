@@ -5179,3 +5179,45 @@ body.no-cosmetic-anim .avatar-effect::after {
 .music-listeners-avatars > *:first-child {
 	margin-left: 0;
 }
+/* Caritas de los que escuchan, DENTRO del botón Música (hasta 4 y después +N). */
+.music-button-avatars {
+	display: flex;
+	align-items: center;
+	margin-left: auto;
+}
+
+.music-button-avatars > * {
+	margin-left: -0.5rem;
+	border-radius: var(--radius-full);
+	box-shadow: 0 0 0 2px var(--background-secondary-alt);
+}
+
+.music-button-avatars > *:first-child {
+	margin-left: 0;
+}
+
+.music-button-more {
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 20px;
+	border-radius: var(--radius-full);
+	background-color: var(--background-tertiary);
+	color: var(--text-secondary);
+	font-size: 0.625rem;
+	font-weight: 700;
+}
+
+/* Ícono de música del canal: si está silenciada, se tacha y se pone rojo. */
+.channel-music.is-muted {
+	color: var(--status-dnd);
+	text-decoration: line-through;
+}
+
+.channel-music:hover {
+	color: var(--text-primary);
+}
+
+.channel-music.is-muted:hover {
+	color: var(--status-dnd);
+}

@@ -13,6 +13,8 @@ let audio: HTMLAudioElement | null = null;
 let context: AudioContext | null = null;
 let destination: MediaStreamAudioDestinationNode | null = null;
 let source: MediaElementAudioSourceNode | null = null;
+/** Controla SÓLO lo que escucha el host. Lo que viaja a los demás va por otro camino. */
+let hostGain: GainNode | null = null;
 
 /** El stream que hay que mandar a los peers (null si no hay nada sonando). */
 export function currentMusicStream(): MediaStream | null {
@@ -55,14 +57,21 @@ export async function startMusicStream(url: string, startAtSeconds = 0): Promise
 	if (audioContext.state === 'suspended') await audioContext.resume();
 	const streamDestination = audioContext.createMediaStreamDestination();
 	const mediaSource = audioContext.createMediaElementSource(element);
+	// El volumen del host va por un GainNode, NO por element.volume: cuando un <audio> pasa por
+	// Web Audio, su propio `volume` deja de tener efecto (por eso el slider "no hacía nada").
+	const gain = audioContext.createGain();
+	gain.gain.value = hostVolume;
+	mediaSource.connect(gain);
+	// Lo que escucha el host, con su volumen...
+	gain.connect(audioContext.destination);
+	// ...y lo que viaja a los demás, SIEMPRE a volumen completo.
 	mediaSource.connect(streamDestination);
-	// Se conecta también a los parlantes: el host también tiene que escuchar lo que pone.
-	mediaSource.connect(audioContext.destination);
 
 	audio = element;
 	context = audioContext;
 	destination = streamDestination;
 	source = mediaSource;
+	hostGain = gain;
 
 	if (startAtSeconds > 0) {
 		// Para retomar en el segundo exacto (traspaso de host o entrar a mitad de la pista).
@@ -95,6 +104,7 @@ export function stopMusicStream(): void {
 		audio?.pause();
 		if (audio) audio.src = '';
 		source?.disconnect();
+		hostGain?.disconnect();
 		destination?.disconnect();
 		void context?.close();
 	} catch {
@@ -104,9 +114,13 @@ export function stopMusicStream(): void {
 	context = null;
 	destination = null;
 	source = null;
+	hostGain = null;
 }
 
-/** Cambia el volumen del host (0 a 1). No afecta a lo que reciben los demás. */
+/** Volumen de la música para el host (0 a 1). No afecta a lo que reciben los demás. */
+let hostVolume = 0.8;
+
 export function setHostVolume(value: number): void {
-	if (audio) audio.volume = Math.min(1, Math.max(0, value));
+	hostVolume = Math.min(1, Math.max(0, value));
+	if (hostGain) hostGain.gain.value = hostVolume;
 }

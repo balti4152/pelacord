@@ -1,5 +1,5 @@
-import {useEffect, useState} from 'react';
-import {ListMusic, Music} from 'lucide-react';
+import {useEffect, useMemo, useState} from 'react';
+import {ListMusic, Music, VolumeX} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
@@ -189,12 +189,25 @@ export function ChannelSidebar({
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
 }): JSX.Element {
-	const {state, dispatch, addChannel, removeChannel, moveMember, musicByChannel} = useStore();
+	const {state, dispatch, addChannel, removeChannel, moveMember, musicByChannel, musicSetMuted} = useStore();
 	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
 	const [dropTarget, setDropTarget] = useState<string | null>(null);
+	const musicMuted = state.settings.musicMuted ?? false;
 
-	// Los que están en la llamada conmigo: son los que escuchan la Jam.
-	const listeners = state.voice.channelId ? (state.voiceMembers[state.voice.channelId] ?? []) : [];
+	// Los que están en la llamada conmigo, sin repetidos: son los que escuchan la Jam.
+	const listeners = useMemo(() => {
+		const seen = new Set<string>();
+		const list: VoiceParticipant[] = [];
+		for (const participant of state.voice.channelId ? (state.voiceMembers[state.voice.channelId] ?? []) : []) {
+			if (seen.has(participant.id)) continue;
+			seen.add(participant.id);
+			list.push(participant);
+		}
+		return list;
+	}, [state.voiceMembers, state.voice.channelId]);
+	// Hasta 4 caritas; si hay más, un "+N".
+	const shownListeners = listeners.slice(0, 4);
+	const extraListeners = Math.max(0, listeners.length - shownListeners.length);
 	/** Categoría en la que se está creando un canal (null = no hay diálogo abierto). */
 	const [creating, setCreating] = useState<Channel['type'] | null>(null);
 	const [newName, setNewName] = useState('');
@@ -306,7 +319,23 @@ export function ChannelSidebar({
 											</span>
 											<span className="channel-name">{channel.name}</span>
 											{channel.type === 'voice' && musicByChannel[channel.id]?.track ? (
-												<Music size={12} className="channel-music" />
+												<span
+													className={`channel-music${musicMuted ? ' is-muted' : ''}`}
+													role="button"
+													tabIndex={0}
+													title={musicMuted ? 'Escuchar la música de este canal' : 'Silenciar la música de este canal'}
+													onClick={(event) => {
+														event.stopPropagation();
+														musicSetMuted(!musicMuted);
+													}}
+													onKeyDown={(event) => {
+														if (event.key === 'Enter' || event.key === ' ') {
+															event.stopPropagation();
+															musicSetMuted(!musicMuted);
+														}
+													}}>
+													{musicMuted ? <VolumeX size={12} /> : <Music size={12} />}
+												</span>
 											) : null}
 											{state.unread[channel.id] ? <span className="channel-unread" title="Mensajes sin leer" /> : null}
 										</button>
@@ -317,15 +346,13 @@ export function ChannelSidebar({
 					</div>
 				))}
 			</div>
-			{/* Música: la Jam del grupo. Va abajo de los canales, como pidió el usuario. */}
+			{/* Música: la Jam del grupo. Las caritas de los que escuchan van DENTRO del botón. */}
 			<button type="button" className="music-button" onClick={onOpenMusic}>
 				<ListMusic size={18} />
 				<span>Música</span>
-			</button>
-			{listeners.length > 0 ? (
-				<div className="music-listeners" title="Están escuchando con vos">
-					<div className="music-listeners-avatars">
-						{listeners.map((participant) => (
+				{shownListeners.length > 0 ? (
+					<span className="music-button-avatars" title="Escuchando con vos">
+						{shownListeners.map((participant) => (
 							<ColorAvatar
 								key={participant.id}
 								name={participant.name}
@@ -341,10 +368,10 @@ export function ChannelSidebar({
 								size={20}
 							/>
 						))}
-					</div>
-					<span>{listeners.length === 1 ? 'escuchando con vos' : `y ${listeners.length} más`}</span>
-				</div>
-			) : null}
+						{extraListeners > 0 ? <span className="music-button-more">+{extraListeners}</span> : null}
+					</span>
+				) : null}
+			</button>
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />
 			{menu ? (

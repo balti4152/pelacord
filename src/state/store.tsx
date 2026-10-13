@@ -14,7 +14,7 @@ import {
 	subscribeMusicStates,
 	updateMusicState,
 } from '@/lib/musicQueue';
-import {currentMusicAudio, startMusicStream, stopMusicStream} from '@/lib/musicPlayer';
+import {currentMusicAudio, setHostVolume, startMusicStream, stopMusicStream} from '@/lib/musicPlayer';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
@@ -1261,10 +1261,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => clearInterval(timer);
 	}, [jamChannelId, musicState.hostId, musicState.track, state.me.id]);
 
-	// Volumen guardado de la música.
+	// Volumen guardado de la música: se aplica al grupo (los demás) y también al host, que
+	// escucha desde su propio reproductor.
 	useEffect(() => {
-		voiceMesh.setMusicVolume(state.settings.musicVolume ?? 0.8);
-	}, [state.settings.musicVolume]);
+		const volume = state.settings.musicVolume ?? 0.8;
+		voiceMesh.setMusicVolume(volume);
+		setHostVolume(state.settings.musicMuted ? 0 : volume);
+	}, [state.settings.musicVolume, state.settings.musicMuted]);
 
 	const value = useMemo<StoreContextValue>(
 		() => ({
