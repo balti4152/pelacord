@@ -741,33 +741,65 @@ ipcMain.on('pelacord:set-titlebar', (_event, payload) => {
 // ---------- Actualizaciones (electron-updater) ----------
 
 /**
- * Cada cuánto se vuelve a chequear MIENTRAS la app está abierta, así una versión nueva
- * aparece sola sin tener que cerrar y volver a abrir. Si un chequeo falla (sin internet,
- * rate limit), el intervalo se duplica hasta 5 minutos para no golpear de más.
+ * URL del feed SIN la API de GitHub: `releases/latest/download` siempre apunta a la última
+ * release y lo sirve el CDN. La API de GitHub permite sólo 60 pedidos/hora, así que usarla
+ * con chequeos seguidos hacía que la cuota se agotara y las actualizaciones no llegaran.
  */
-const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 10000);
-const UPDATE_MAX_INTERVAL_MS = 300000;
+const UPDATE_FEED_URL =
+	process.env.PELACORD_UPDATE_URL || 'https://github.com/balti4152/pelacord/releases/latest/download';
+
+/**
+ * Cada cuánto se vuelve a chequear MIENTRAS la app está abierta, así una versión nueva
+ * aparece sola sin tener que cerrar y volver a abrir. Si un chequeo falla, el intervalo
+ * se duplica hasta 30 minutos para no golpear de más.
+ */
+const UPDATE_INTERVAL_MS = Number(process.env.PELACORD_UPDATE_INTERVAL || 30000);
+const UPDATE_MAX_INTERVAL_MS = 1800000;
+
+/** Deja un registro en userData para poder diagnosticar si algo falla. */
+function logUpdater(message) {
+	console.log(`[pelacord] ${message}`);
+	try {
+		const file = path.join(app.getPath('userData'), 'updater.log');
+		fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
+	} catch {
+		// si no se puede escribir, no pasa nada
+	}
+}
 
 function setupUpdater() {
 	if (!autoUpdater) return;
-	// Se puede pisar el feed con PELACORD_UPDATE_URL (carpeta estática, GitHub Releases, R2, etc.).
-	if (process.env.PELACORD_UPDATE_URL) {
-		try {
-			autoUpdater.setFeedURL({provider: 'generic', url: process.env.PELACORD_UPDATE_URL});
-		} catch (error) {
-			console.error('[pelacord] setFeedURL error', String(error));
-		}
+	// El feed va por el CDN (sin API): se puede chequear seguido sin agotar la cuota.
+	try {
+		autoUpdater.setFeedURL({provider: 'generic', url: UPDATE_FEED_URL});
+	} catch (error) {
+		console.error('[pelacord] setFeedURL error', String(error));
 	}
 	autoUpdater.autoDownload = true;
 	autoUpdater.autoInstallOnAppQuit = true;
 	const send = (payload) => sendToRenderer('pelacord:update-status', payload);
 	autoUpdater.on('checking-for-update', () => send({state: 'checking'}));
-	autoUpdater.on('update-available', (info) => send({state: 'available', version: info?.version}));
-	autoUpdater.on('update-not-available', () => send({state: 'none'}));
+	autoUpdater.on('update-available', (info) => {
+		logUpdater(`actualización disponible: ${info?.version}`);
+		send({state: 'available', version: info?.version});
+	});
+	autoUpdater.on('update-not-available', (info) => {
+		logUpdater(`al día (última: ${info?.version ?? '?'})`);
+		send({state: 'none'});
+	});
 	autoUpdater.on('download-progress', (progress) => send({state: 'downloading', percent: Math.round(progress?.percent ?? 0)}));
-	autoUpdater.on('update-downloaded', (info) => send({state: 'downloaded', version: info?.version}));
-	autoUpdater.on('error', (error) => send({state: 'error', error: String(error?.message ?? error)}));
-	if (!app.isPackaged) return;
+	autoUpdater.on('update-downloaded', (info) => {
+		logUpdater(`descargada: ${info?.version}`);
+		send({state: 'downloaded', version: info?.version});
+	});
+	autoUpdater.on('error', (error) => {
+		logUpdater(`error: ${String(error?.message ?? error)}`);
+		send({state: 'error', error: String(error?.message ?? error)});
+	});
+	if (!app.isPackaged) {
+		logUpdater('sin chequear: la app no está empaquetada (modo dev)');
+		return;
+	}
 
 	let downloading = false;
 	let loop = null;
@@ -784,15 +816,14 @@ function setupUpdater() {
 		downloading = false;
 	});
 
-	// Chequeo periódico mientras la app está abierta: una versión nueva aparece sola,
-	// sin tener que cerrar y volver a abrir.
+	// Chequeo periódico mientras la app está abierta: una versión nueva aparece sola.
 	loop = startUpdateLoop({
 		task: () => autoUpdater.checkForUpdates(),
 		interval: UPDATE_INTERVAL_MS,
 		maxInterval: UPDATE_MAX_INTERVAL_MS,
 		delay: 5000,
 		shouldSkip: () => downloading,
-		log: () => console.log(`[pelacord] chequeo de actualización (${new Date().toLocaleTimeString()})`),
+		log: () => logUpdater('chequeando…'),
 	});
 	app.on('before-quit', () => loop.stop());
 }
