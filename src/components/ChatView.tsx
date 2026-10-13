@@ -3,7 +3,7 @@ import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
 import {resolveMember, splitMentions, useStore} from '@/state/store';
-import {findMediaLinks} from '@/lib/mediaLinks';
+import {findMediaLinks, stripMediaUrls, type MediaLink} from '@/lib/mediaLinks';
 import type {AppState, Attachment, Message} from '@/types';
 
 const FALLBACK_COLOR = 'hsl(0, 0%, 40%)';
@@ -178,8 +178,7 @@ function AudioAttachment({
  * Links del texto que apuntan directo a una imagen, un video o un audio: se muestran como media
  * en vez de dejar sólo el link.
  */
-function MediaLinks({content}: {content: string}): JSX.Element | null {
-	const links = findMediaLinks(content);
+function MediaLinks({links}: {links: MediaLink[]}): JSX.Element | null {
 	if (links.length === 0) return null;
 	return (
 		<div className="media-links">
@@ -617,6 +616,9 @@ function MessageRow({
 	const classes = ['message'];
 	if (grouped) classes.push('is-grouped');
 	if (compact) classes.push('is-compact', 'is-grouped');
+	// Los links que se muestran como media se sacan del texto (no se ven dos veces).
+	const mediaLinks = message.content ? findMediaLinks(message.content) : [];
+	const visibleContent = stripMediaUrls(message.content ?? '', mediaLinks);
 	return (
 		<div
 			className={classes.join(' ')}
@@ -682,11 +684,11 @@ function MessageRow({
 							</button>
 						</div>
 					</div>
-				) : message.content ? (
+				) : visibleContent ? (
 					<div className="message-content">
 						{searchTerm
-							? highlightTerm(message.content, searchTerm)
-							: splitMentions(message.content, mentionNames).map((part, index) =>
+							? highlightTerm(visibleContent, searchTerm)
+							: splitMentions(visibleContent, mentionNames).map((part, index) =>
 									part.mention ? (
 										<span className="mention" key={index}>
 											{part.text}
@@ -697,7 +699,7 @@ function MessageRow({
 								)}
 					</div>
 				) : null}
-				{message.content ? <MediaLinks content={message.content} /> : null}
+				<MediaLinks links={mediaLinks} />
 				{message.attachments.length > 0 ? (
 					<div className="attachments">
 						{message.attachments.map((attachment) => (

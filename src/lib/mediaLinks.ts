@@ -22,8 +22,7 @@ const URL_PATTERN = /https?:\/\/[^\s<>"')]+/gi;
 /** Hasta cuántos media se muestran por mensaje (para no llenar la pantalla). */
 const MAX_PER_MESSAGE = 3;
 
-export function findMediaLinks(content: string): MediaLink[] {
-	if (!content || !content.includes('http')) return [];
+export function findMediaLinks(content: string): MediaLink[] {	if (!content || !content.includes('http')) return [];
 	const found: MediaLink[] = [];
 	for (const match of content.matchAll(URL_PATTERN)) {
 		const url = match[0];
@@ -51,4 +50,16 @@ export function findMediaLinks(content: string): MediaLink[] {
 		if (found.length >= MAX_PER_MESSAGE) break;
 	}
 	return found;
+}
+
+/**
+ * Saca del texto los links que ya se muestran como media, así no se ven dos veces.
+ * Si el mensaje era sólo el link, queda vacío y se ve únicamente el media.
+ */
+export function stripMediaUrls(content: string, links: MediaLink[]): string {
+	if (!content || links.length === 0) return content;
+	let result = content;
+	for (const link of links) result = result.split(link.url).join('');
+	// Espacios de más que quedan al sacar el link (ej. "mirá  y este audio").
+	return result.replace(/[ \t]{2,}/g, ' ').replace(/[ \t]+$/gm, '').trim();
 }
