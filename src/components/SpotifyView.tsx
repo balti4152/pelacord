@@ -1,5 +1,5 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Loader2, LogOut, Play, RefreshCw, TriangleAlert, X} from 'lucide-react';
+import {Copy, Loader2, LogOut, Play, RefreshCw, TriangleAlert, X} from 'lucide-react';
 import {SiSpotify} from 'react-icons/si';
 import {type SpotifyPlaylist, type SpotifyStatus, getDesktopTransport} from '@/lib/desktop';
 import {type MusicTrack} from '@/lib/musicQueue';
@@ -10,6 +10,38 @@ export const SPOTIFY_GREEN = '#1ed760';
 
 /** Cuántas canciones se resuelven por vez: en tandas, así la cola se va llenando sola. */
 const RESOLVE_CHUNK = 8;
+
+/**
+ * Copia al portapapeles y dice si lo logró.
+ *
+ * `navigator.clipboard` falla si la ventana no está enfocada ("Document is not focused"), así que
+ * se usa la vieja técnica del textarea, que funciona siempre. Es importante no avisar "copiado"
+ * cuando no se copió: el usuario pegaría cualquier cosa en el panel de Spotify.
+ */
+function copyText(value: string): boolean {
+	try {
+		const area = document.createElement('textarea');
+		area.value = value;
+		area.setAttribute('readonly', '');
+		area.style.position = 'fixed';
+		area.style.top = '-1000px';
+		area.style.opacity = '0';
+		document.body.appendChild(area);
+		area.select();
+		area.setSelectionRange(0, value.length);
+		const ok = document.execCommand('copy');
+		document.body.removeChild(area);
+		if (ok) return true;
+	} catch {
+		// se intenta con la API moderna
+	}
+	try {
+		void navigator.clipboard?.writeText(value).catch(() => {});
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /**
  * Spotify: iniciar sesión y traer tus playlists.
@@ -210,6 +242,29 @@ export function SpotifyView(): JSX.Element {
 					{connecting ? (
 						<p className="settings-hint">Se abrió tu navegador: autorizá a Pelacord y volvé a esta ventana.</p>
 					) : null}
+					<div className="spotify-uri">
+						<p className="settings-hint">
+							Antes de conectar, en tu panel de Spotify (<strong>Settings → Redirect URIs</strong>) tiene que estar
+							registrada esta dirección, <strong>exacta</strong> (Spotify ya no acepta <code>localhost</code>: va la IP):
+						</p>
+						<div className="spotify-uri-row">
+							<code>{status?.redirectUri ?? ''}</code>
+							<button
+								type="button"
+								className="spotify-ghost"
+								title="Copiar"
+								onClick={() => {
+									const uri = status?.redirectUri ?? '';
+									setNotice(
+										copyText(uri)
+											? 'Dirección copiada: pegala en Redirect URIs y guardá.'
+											: `Copiala a mano (no se pudo usar el portapapeles): ${uri}`,
+									);
+								}}>
+								<Copy size={15} />
+							</button>
+						</div>
+					</div>
 				</div>
 			) : (
 				<>

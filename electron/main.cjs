@@ -882,18 +882,18 @@ ipcMain.handle('pelacord:spotify-login', async () => {
 	});
 });
 
-/** ¿Hay sesión? Devuelve también el nombre para saludar. */
+/** ¿Hay sesión? Devuelve también el nombre para saludar y la dirección de vuelta que hay que registrar. */
 ipcMain.handle('pelacord:spotify-status', async () => {
 	const store = readSpotifyStore();
-	if (!store?.refreshToken) return {connected: false};
+	if (!store?.refreshToken) return {connected: false, redirectUri: SPOTIFY_REDIRECT};
 	const token = await spotifyToken();
-	if (!token) return {connected: false};
+	if (!token) return {connected: false, redirectUri: SPOTIFY_REDIRECT};
 	const res = await fetch('https://api.spotify.com/v1/me', {headers: {Authorization: `Bearer ${token}`}});
-	if (!res.ok) return {connected: true, name: store.name ?? ''};
+	if (!res.ok) return {connected: true, name: store.name ?? '', redirectUri: SPOTIFY_REDIRECT};
 	const me = await res.json().catch(() => ({}));
 	const name = me.display_name || me.id || '';
 	if (name && name !== store.name) writeSpotifyStore({...store, name});
-	return {connected: true, name, image: me.images?.[0]?.url ?? ''};
+	return {connected: true, name, image: me.images?.[0]?.url ?? '', redirectUri: SPOTIFY_REDIRECT};
 });
 
 /** Todas las playlists del usuario (con paginado: Spotify devuelve de a 50). */

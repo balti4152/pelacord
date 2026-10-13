@@ -151,6 +151,8 @@ export interface SpotifyStatus {
 	connected: boolean;
 	name?: string;
 	image?: string;
+	/** La dirección de vuelta que tiene que estar registrada en el panel de Spotify. */
+	redirectUri?: string;
 }
 
 /** Lo que devuelve el preview de un link. */export interface LinkPreviewData {

@@ -5291,6 +5291,31 @@ body.no-cosmetic-anim .avatar-effect::after {
 	cursor: default;
 }
 
+.spotify-uri {
+	margin-top: 1rem;
+	text-align: left;
+}
+
+.spotify-uri-row {
+	display: flex;
+	align-items: center;
+	gap: 0.375rem;
+	margin-top: 0.375rem;
+	padding: 0.375rem 0.375rem 0.375rem 0.625rem;
+	border-radius: var(--radius-md);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-tertiary);
+}
+
+.spotify-uri-row code {
+	flex: 1;
+	overflow-x: auto;
+	white-space: nowrap;
+	font-family: var(--font-mono);
+	font-size: 0.75rem;
+	color: var(--text-secondary);
+}
+
 .spotify-profile {
 	display: flex;
 	align-items: center;
