@@ -838,6 +838,21 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			if (peer.id === me.id) continue;
 			onlineIds.add(peer.id);
 			const previous = known[peer.id];
+			/**
+			 * Reescribe el host:puerto de una URL de archivo con el que ese peer informa AHORA.
+			 *
+			 * Las URLs viajan con el host:puerto de cuando se publicaron. Si el otro cambió de puerto
+			 * (cae a uno libre si el fijo está ocupado) o de adaptador de red, la foto/el archivo NO
+			 * cargaba para nadie (404 / conexión rechazada) — era la foto de perfil que "no se veía".
+			 */
+			const rebase = (url?: string): string | undefined => {
+				if (!url || !peer.fileHost || !peer.filePort) return url;
+				return url.replace(/^https?:\/\/[^/]+(\/file\/)/i, `http://${peer.fileHost}:${peer.filePort}$1`);
+			};
+			const avatarUrl = rebase(peer.avatarUrl);
+			const bannerUrl = rebase(peer.bannerUrl);
+			const customDeco = rebase(peer.customDeco);
+			const customParticle = rebase(peer.customParticle);
 			// La foto guardada en disco se usa como respaldo (y para los tamaños chicos).
 			const member: Member = {
 				id: peer.id,
@@ -845,14 +860,14 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				tag: previous?.tag ?? '0000',
 				presence: 'online',
 				avatarColor: peer.color,
-				avatarUrl: peer.avatarUrl,
+				avatarUrl,
 				avatarCrop: peer.avatarCrop,
 				avatarPoster: previous?.cachedAvatar,
 				cachedAvatar: previous?.cachedAvatar,
 				lastAvatarUrl: previous?.lastAvatarUrl,
 				cachedUrls: previous?.cachedUrls,
 				profileVersion: peer.profileVersion,
-				bannerUrl: previous?.cachedBanner ?? peer.bannerUrl,
+				bannerUrl: previous?.cachedBanner ?? bannerUrl,
 				cachedBanner: previous?.cachedBanner,
 				bannerColor: peer.bannerColor,
 				effect: peer.effect as Member['effect'],
@@ -860,9 +875,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				decorationColor: peer.decorationColor,
 				profileEffect: peer.profileEffect,
 				profileEffectColor: peer.profileEffectColor,
-				customParticle: previous?.cachedParticle ?? peer.customParticle,
+				customParticle: previous?.cachedParticle ?? customParticle,
 				cachedParticle: previous?.cachedParticle,
-				customDeco: previous?.cachedDeco ?? peer.customDeco,
+				customDeco: previous?.cachedDeco ?? customDeco,
 				cachedDeco: previous?.cachedDeco,
 				particleSize: peer.particleSize,
 				particleCount: peer.particleCount,
@@ -876,6 +891,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				accentColor: 'hsl(242, 70%, 55%)',
 				bio: peer.bio,
 				status: peer.status,
+				fileHost: peer.fileHost,
+				filePort: peer.filePort,
 			};
 			known[peer.id] = member;
 			knownMembersRef.current = known;
@@ -883,10 +900,10 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 
 			// Se guardan las imágenes del perfil en disco: así se siguen viendo cuando se desconecte
 			// y se refrescan solas cuando el otro cambia algo (sube profileVersion).
-			cachePeerAsset(peer.id, 'avatar', peer.avatarUrl, peer.profileVersion);
-			cachePeerAsset(peer.id, 'banner', peer.bannerUrl, peer.profileVersion);
-			cachePeerAsset(peer.id, 'deco', peer.customDeco, peer.profileVersion);
-			cachePeerAsset(peer.id, 'particle', peer.customParticle, peer.profileVersion);
+			cachePeerAsset(peer.id, 'avatar', avatarUrl, peer.profileVersion);
+			cachePeerAsset(peer.id, 'banner', bannerUrl, peer.profileVersion);
+			cachePeerAsset(peer.id, 'deco', customDeco, peer.profileVersion);
+			cachePeerAsset(peer.id, 'particle', customParticle, peer.profileVersion);
 
 			if (peer.channelId) {
 				voiceMembers[peer.channelId] = [...(voiceMembers[peer.channelId] ?? []), peerToParticipant(peer)];
@@ -981,7 +998,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			if (!command?.kind) return;
 			// Órdenes de la Jam (play, pausa, cola): las aplica sólo el host de turno y las difunde.
 			if (command.kind === 'music' && command.command) {
-				if (electHost(musicParticipantsRef.current) !== meRef.current.id) return;
+				if (currentJamHost() !== meRef.current.id) return;
 				// "Adoptar": el otro sabe de una Jam que yo no (arranqué vacío). Sólo si no tengo nada.
 				if (command.command.kind === 'adopt') {
 					if (musicStateRef.current.track) return;
@@ -1352,7 +1369,23 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const musicParticipantsRef = useRef<string[]>(musicParticipants);
 	musicParticipantsRef.current = musicParticipants;
 	const musicParticipantsKey = musicParticipants.join(',');
-	const iAmHost = electHost(musicParticipants) === state.me.id;
+	/**
+	 * El host de la Jam: el que manda el audio y el que aplica las órdenes.
+	 *
+	 * Regla: el id más chico de los que YO veo en el canal. Pero al entrar alguien las listas no
+	 * coinciden por unos segundos, y con 3 personas DOS se creían host: cada uno aplicaba la orden
+	 * en su copia, se pisaban los estados y sonaban cosas distintas. Por eso se RECUERDA al último
+	 * host que difundió (mientras siga en el canal) y, si aparece uno más chico, se adopta ese.
+	 * Así todos convergen al mismo host.
+	 */
+	const jamHostRef = useRef<string | null>(null);
+	const currentJamHost = useCallback((): string | null => {
+		const participants = musicParticipantsRef.current;
+		const remembered = jamHostRef.current;
+		if (remembered && participants.includes(remembered)) return remembered;
+		return electHost(participants);
+	}, []);
+	const iAmHost = currentJamHost() === state.me.id;
 
 	/** El host difunde el estado por la malla. No hay Firestore de por medio. */
 	const broadcastMusic = useCallback((next: MusicState) => {
@@ -1371,8 +1404,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return transport.onMusic(({from, payload}) => {
 			const data = payload as MusicBroadcast | null;
 			if (!data?.channelId || data.channelId !== jamChannelRef.current) return;
-			// Sólo vale lo que manda el host elegido: si no, dos estados se pisarían.
-			if (from !== electHost(musicParticipantsRef.current)) return;
+			const participants = musicParticipantsRef.current;
+			if (!participants.includes(from)) return;
+			const elected = electHost(participants);
+			// Si hay alguien MÁS chico que él en el canal, manda ese: gana el más chico.
+			if (elected && from > elected) return;
+			// Se acepta su estado y queda recordado como host (así no hay dos hosts a la vez).
+			jamHostRef.current = from;
 			setMusicState({...data.state, hostId: from});
 		});
 	}, []);
@@ -1380,6 +1418,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	// Al salir del canal, la Jam se vacía: no queda una cola vieja para cuando vuelvas.
 	useEffect(() => {
 		if (jamChannelId) return;
+		jamHostRef.current = null;
 		setMusicState(EMPTY_MUSIC_STATE);
 	}, [jamChannelId]);
 
@@ -1388,7 +1427,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		(command: MusicCommand) => {
 			const channelId = jamChannelRef.current;
 			if (!channelId) return;
-			const host = electHost(musicParticipantsRef.current);
+			const host = currentJamHost();
 			if (host === meRef.current.id) {
 				const next = applyMusicCommand(musicStateRef.current, command);
 				setMusicState(next);
@@ -1397,7 +1436,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			}
 			if (host) getDesktopTransport()?.sendCommand(host, {kind: 'music', command});
 		},
-		[broadcastMusic],
+		[broadcastMusic, currentJamHost],
 	);
 
 	/** Pone un tema (o corta con null). Cualquiera puede: es estilo Jam. */
@@ -1450,9 +1489,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	useEffect(() => {
 		const channelId = jamChannelId;
 		const track = musicState.track;
-		// Quién manda el audio: el id más chico de los que están en el canal. Todos calculan lo
+		// Quién manda el audio: el mismo host de la Jam (ver currentJamHost). Todos calculan lo
 		// mismo, así que nunca hay dos hosts (que era el bug de las dos canciones encimadas).
-		const elected = electHost(musicParticipants);
+		const elected = currentJamHost();
 		const iAmHost = elected === state.me.id;
 
 		// Sin tema, o no estoy en el canal: me aseguro de no estar mandando nada.
@@ -1529,7 +1568,6 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// tarda 1-3 s en pedir el audio) → la música nunca arrancaba.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, state.me.id, iAmHost]);
-
 	// Si me voy de un canal en el que NO quedaba nadie más, se limpia la Jam DE ESE canal.
 	// (Se limpia el canal que dejo, no el que abro: por eso antes, al volver, se borraba todo.)
 	const lastJamChannel = useRef<string | null>(null);
@@ -1557,7 +1595,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	// arrancó vacío), se la paso: así la música vuelve a sonar sin tener que poner otra canción.
 	useEffect(() => {
 		if (iAmHost || !jamChannelId || !musicState.track) return;
-		const host = electHost(musicParticipants);
+		const host = currentJamHost();
 		if (!host) return;
 		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicState}});
 	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey]);

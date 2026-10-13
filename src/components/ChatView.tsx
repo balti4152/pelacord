@@ -312,6 +312,7 @@ function MediaLinks({links}: {links: MediaLink[]}): JSX.Element | null {
 }
 
 function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
+	const {state} = useStore();
 	const [status, setStatus] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
 	const [progress, setProgress] = useState({received: 0, total: attachment.size});
 	const [speed, setSpeed] = useState(0);
@@ -321,10 +322,13 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	const [text, setText] = useState<string | null>(null);
 	const [textFailed, setTextFailed] = useState(false);
 	const [copiado, setCopiado] = useState(false);
-	const url =
-		attachment.ownerHost && attachment.ownerPort
-			? `http://${attachment.ownerHost}:${attachment.ownerPort}/file/${attachment.id}`
-			: attachment.url;
+	// El que comparte el archivo puede haber cambiado de puerto o de IP: se usa lo que informa
+	// AHORA (si está online) y, si no, lo que quedó guardado en el mensaje. Sin esto, los archivos
+	// viejos quedaban en 404 para siempre.
+	const dueno = attachment.ownerId ? state.members.find((member) => member.id === attachment.ownerId) : undefined;
+	const host = dueno?.fileHost ?? attachment.ownerHost;
+	const port = dueno?.filePort ?? attachment.ownerPort;
+	const url = host && port ? `http://${host}:${port}/file/${attachment.id}` : attachment.url;
 
 	useEffect(() => {
 		if (attachment.kind !== 'text' || !url) return;

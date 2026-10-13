@@ -173,7 +173,35 @@ function announce() {
 
 // ---------- Señalización (WebSocket) ----------
 
+/**
+ * Ids de mensajes ya vistos.
+ *
+ * La malla REENVÍA: un mensaje dirigido puede llegar dos veces (directo y por un tercero que lo
+ * retransmitió). Sin esto, el mismo comando se aplicaba DOS veces — a la Jam le duplicaba la cola
+ * (agregabas 12 canciones y quedaban 24) — y las señales de la llamada llegaban repetidas, que es
+ * lo que rompía el WebRTC ("Called in wrong state: stable").
+ *
+ * Con 2 personas no pasaba: no había un tercero que reenviara. Apareció al ser 3.
+ */
+const seenMessages = new Map();
+
+function rememberMessage(msgId) {
+	if (!msgId) return true;
+	const now = Date.now();
+	if (seenMessages.has(msgId)) return false;
+	seenMessages.set(msgId, now);
+	if (seenMessages.size > 4000) {
+		for (const [key, when] of seenMessages) {
+			if (now - when > 120000) seenMessages.delete(key);
+		}
+	}
+	return true;
+}
+
 function broadcast(message, exceptSocket) {
+	// Cada mensaje sale con su id. El que lo reenvía mantiene el MISMO id, así el destinatario
+	// puede descartar la copia que le llegó de más.
+	if (message && !message.msgId) message.msgId = crypto.randomUUID();
 	const data = JSON.stringify(message);
 	for (const socket of peers.values()) {
 		if (socket === exceptSocket) continue;
@@ -189,6 +217,8 @@ function handleMessage(socket, raw) {
 		return;
 	}
 	if (!message || typeof message.type !== 'string') return;
+	// Mensaje repetido: se descarta ACÁ, antes de entregarlo o de aplicarlo.
+	if (message.msgId && !rememberMessage(message.msgId)) return;
 
 	// Registrar al remitente con cualquier mensaje entrante. Así el envío de vuelta queda habilitado
 	// aunque la presentación (hello) se haya perdido.
@@ -704,16 +734,18 @@ ipcMain.handle('pelacord:yt-search-batch', async (_event, queries) => {
  * Se pide en el momento de reproducir: esas URLs vencen, así que no se cachean.
  */
 ipcMain.handle('pelacord:yt-audio-url', async (_event, target) => {
-	const value = String(target || '').trim();
-	if (!value) return null;
-	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
-	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 40000);
-	if (!result.ok) {
-		console.warn('[pelacord] no se pudo sacar el audio:', result.error);
-		return null;
+	const url = await resolveAudioUrl(target);
+	if (!url) return null;
+	// Se sirve desde la app (ver serveAudio): así no depende de IPv6 ni de las cabeceras de CORS
+	// de googlevideo, y si la URL vence se vuelve a resolver sola.
+	const token = crypto.randomUUID();
+	audioStreams.set(token, {target: String(target || ''), url});
+	// Se guardan las últimas 20 para no crecer sin control (una por tema que suena).
+	if (audioStreams.size > 20) {
+		const [oldest] = audioStreams.keys();
+		audioStreams.delete(oldest);
 	}
-	// Puede devolver varias líneas (audio + video): se usa la primera.
-	return result.output.split('\n')[0].trim() || null;
+	return fileServerPort ? `http://127.0.0.1:${fileServerPort}/audio/${token}` : url;
 });
 
 /**
@@ -1439,10 +1471,153 @@ ipcMain.handle('pelacord:link-preview', async (_event, target) => {
 const sharedFiles = new Map();
 let fileServerPort = 0;
 
+/**
+ * Registro en disco de los adjuntos compartidos.
+ *
+ * Sin esto, al reiniciar la app el mapa quedaba vacío y TODAS las URLs ya mandadas respondían 404
+ * para siempre (se veía en la consola del usuario: "10.243...:7789/file/<id> 404" en bucle).
+ * Con el registro, el id sigue vivo mientras el archivo siga en disco.
+ */
+function sharedFilesIndexPath() {
+	return path.join(app.getPath('userData'), 'shared-files.json');
+}
+
+function saveSharedFiles() {
+	try {
+		// Sólo los adjuntos: los assets de perfil (avatar, banner, marco, partículas) ya se guardan
+		// aparte y con ids fijos.
+		const entries = [...sharedFiles.entries()]
+			.filter(([id]) => !PROFILE_ASSETS.includes(id))
+			.slice(-500)
+			.map(([id, file]) => ({id, ...file}));
+		fs.writeFileSync(sharedFilesIndexPath(), JSON.stringify(entries));
+	} catch {
+		// si no se puede guardar, se sigue igual
+	}
+}
+
+function restoreSharedFiles() {
+	try {
+		const entries = JSON.parse(fs.readFileSync(sharedFilesIndexPath(), 'utf8'));
+		let restored = 0;
+		for (const entry of Array.isArray(entries) ? entries : []) {
+			if (!entry?.id || !entry.path || !fs.existsSync(entry.path)) continue;
+			sharedFiles.set(entry.id, {path: entry.path, name: entry.name, mime: entry.mime, size: entry.size});
+			restored += 1;
+		}
+		if (restored > 0) console.log(`[pelacord] adjuntos compartidos restaurados: ${restored}`);
+	} catch {
+		// sin registro: no pasa nada
+	}
+}
+
 function localAddress() {
 	const all = localInterfaces();
 	const zt = all.find((entry) => entry.isZeroTier);
-	return (zt ?? all[0])?.address ?? '127.0.0.1';
+	if (zt) return zt.address;
+	// Si no se detecta ZeroTier, se EVITAN los adaptadores virtuales (WSL, Hyper-V, VirtualBox,
+	// VMware, etc.): si se elige uno de esos, los demás no pueden bajar la foto ni los archivos de
+	// este equipo (era justo el caso de "no me ve la foto de perfil").
+	const virtuales = /wsl|hyper-v|vethernet|virtualbox|vmware|loopback|docker|tailscale|radmin|hamachi|tap|tun/i;
+	const candidatas = all.filter((entry) => !virtuales.test(entry.name) && !entry.address.startsWith('169.254.'));
+	return (candidatas[0] ?? all[0])?.address ?? '127.0.0.1';
+}
+
+// ---------- Proxy de audio (música de la Jam) ----------
+//
+// El audio NO se le pasa al reproductor como URL de YouTube: se sirve desde acá. Dos motivos reales:
+//
+// 1. Esas URLs se firman para una IPv4 (viene "ip=..." adentro). Si Chromium las pide por IPv6
+//    responde 403 — y por eso la música andaba "a veces sí, a veces no". Acá se baja SIEMPRE por
+//    IPv4, así que el 403 no puede pasar.
+// 2. El <audio> de la app la necesita cross-origin con CORS, y googlevideo no manda las cabeceras
+//    de CORS: el elemento quedaba SIN NINGUNA FUENTE ("NotSupportedError: The element has no
+//    supported sources"). Servido desde localhost con CORS, el reproductor lo toma como propio.
+//
+// Además, si la URL venció, acá se vuelve a resolver sola y se reintenta (antes se cortaba la música).
+
+/** token -> {target: link de YouTube del tema, url: URL directa de audio} */
+const audioStreams = new Map();
+
+async function resolveAudioUrl(target) {
+	const value = String(target || '').trim();
+	if (!value) return null;
+	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
+	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 40000);
+	if (!result.ok) {
+		console.warn('[pelacord] no se pudo sacar el audio:', result.error);
+		return null;
+	}
+	// Puede devolver varias líneas (audio + video): se usa la primera.
+	return result.output.split('\n')[0].trim() || null;
+}
+
+const AUDIO_USER_AGENT =
+	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
+
+/** Baja una URL de audio y la escribe en la respuesta. Devuelve true si salió bien. */
+function pipeAudio(url, req, res, onStatus) {
+	return new Promise((resolve) => {
+		const headers = {'User-Agent': AUDIO_USER_AGENT};
+		if (req.headers.range) headers.Range = req.headers.range;
+		let terminado = false;
+		const terminar = (valor) => {
+			if (terminado) return;
+			terminado = true;
+			resolve(valor);
+		};
+		const upstream = https.get(url, {headers, family: 4}, (remote) => {
+			onStatus(remote.statusCode || 0);
+			if (remote.statusCode !== 200 && remote.statusCode !== 206) {
+				remote.resume();
+				terminar(false);
+				return;
+			}
+			res.writeHead(remote.statusCode, {
+				'Content-Type': remote.headers['content-type'] || 'audio/mp4',
+				'Content-Length': remote.headers['content-length'],
+				'Content-Range': remote.headers['content-range'],
+				'Accept-Ranges': 'bytes',
+				'Access-Control-Allow-Origin': '*',
+				'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
+			});
+			remote.pipe(res);
+			remote.on('end', () => terminar(true));
+			remote.on('error', () => terminar(false));
+		});
+		upstream.on('error', () => terminar(false));
+		upstream.setTimeout(30000, () => upstream.destroy());
+	});
+}
+
+/** Sirve el audio de un tema. Si la URL venció, la resuelve de nuevo y reintenta una vez. */
+async function serveAudio(token, req, res) {
+	const entry = audioStreams.get(token);
+	if (!entry) {
+		res.writeHead(404);
+		res.end();
+		return;
+	}
+	let status = 0;
+	const ok = await pipeAudio(entry.url, req, res, (code) => {
+		status = code;
+	});
+	if (ok) return;
+	console.warn(`[pelacord] el audio respondió ${status}: se resuelve de nuevo`);
+	const fresh = await resolveAudioUrl(entry.target);
+	if (!fresh) {
+		if (!res.headersSent) {
+			res.writeHead(502);
+			res.end();
+		}
+		return;
+	}
+	entry.url = fresh;
+	const retry = await pipeAudio(fresh, req, res, () => {});
+	if (!retry && !res.headersSent) {
+		res.writeHead(502);
+		res.end();
+	}
 }
 
 function startFileServer() {
@@ -1455,7 +1630,14 @@ function startFileServer() {
 			res.end();
 			return;
 		}
-		const match = /^\/file\/(.+)$/.exec(new URL(req.url, 'http://localhost').pathname);
+		const pathname = new URL(req.url, 'http://localhost').pathname;
+		// Audio de la música: se baja desde acá (ver serveAudio) y se entrega como propio.
+		const audio = /^\/audio\/(.+)$/.exec(pathname);
+		if (audio) {
+			void serveAudio(audio[1], req, res);
+			return;
+		}
+		const match = /^\/file\/(.+)$/.exec(pathname);
 		const file = match ? sharedFiles.get(match[1]) : null;
 		if (!file || !fs.existsSync(file.path)) {
 			res.writeHead(404);
@@ -1502,6 +1684,7 @@ ipcMain.handle('pelacord:share-file', (_event, payload) => {
 	if (!filePath || !fs.existsSync(filePath)) return null;
 	const id = crypto.randomUUID();
 	sharedFiles.set(id, {path: filePath, name: name || path.basename(filePath), mime: mime || '', size: size || fs.statSync(filePath).size});
+	saveSharedFiles();
 	return id;
 });
 
@@ -1516,6 +1699,7 @@ ipcMain.handle('pelacord:share-buffer', (_event, payload) => {
 		fs.writeFileSync(filePath, Buffer.from(data));
 		const id = crypto.randomUUID();
 		sharedFiles.set(id, {path: filePath, name: safe, mime: mime || '', size: fs.statSync(filePath).size});
+		saveSharedFiles();
 		return id;
 	} catch (error) {
 		console.error('[pelacord] share-buffer error', String(error));
@@ -2139,6 +2323,7 @@ if (!gotLock) {
 		startFileServer();
 		migrateLegacyAvatar();
 		registerSavedProfileAssets();
+		restoreSharedFiles();
 		registerMediaProtocol();
 		setupUpdater();
 		createWindow();

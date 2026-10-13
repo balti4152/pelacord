@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba de la malla de voz</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script>
+			// Sin micrófono: acá se prueba la NEGOCIACIÓN, no la captura de audio.
+			Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+				value: async () => {
+					throw new Error('sin micrófono en la prueba');
+				},
+			});
+			window.__errores = [];
+			window.addEventListener('unhandledrejection', (event) => window.__errores.push('rejection: ' + String(event.reason)));
+			window.addEventListener('error', (event) => window.__errores.push('error: ' + event.message));
+		</script>
+		<script type="module" src="/tests/mesh-test-entry.tsx"></script>
+	</body>
+</html>

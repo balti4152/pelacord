@@ -156,7 +156,8 @@ export function useRemoteVideo(): MediaStream | null {
 	const remotes = useMeshRemotes();
 	for (const remote of remotes) {
 		const track = remote.video?.getVideoTracks()[0];
-		if (remote.video && track && track.readyState === 'live') return remote.video;
+		// `muted` = el otro dejó de mandar (se corta con replaceTrack, sin renegociar).
+		if (remote.video && track && track.readyState === 'live' && !track.muted) return remote.video;
 	}
 	return null;
 }

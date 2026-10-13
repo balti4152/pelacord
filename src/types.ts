@@ -134,6 +134,15 @@ export interface Member {
 	accentColor: string;
 	bio?: string;
 	status?: string;
+	/**
+	 * Dónde sirve sus archivos AHORA este peer (host:puerto).
+	 *
+	 * Las URLs de archivos traen el host:puerto de cuando se publicaron, y eso cambia (el puerto es
+	 * fijo pero puede caer a uno libre, y la IP puede cambiar de adaptador). Con esto se reescriben
+	 * al vuelo y la foto o el archivo se descargan igual.
+	 */
+	fileHost?: string;
+	filePort?: number;
 }
 
 /** Recorte del avatar, en porcentaje del contenedor cuadrado. */

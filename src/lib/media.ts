@@ -8,6 +8,18 @@ export interface MeshRemote {
 	music: MediaStream | null;
 }
 
+/**
+ * Lo mínimo del transporte que usa la malla.
+ *
+ * Se pide por función (y no directo al global) para poder probar la negociación con un
+ * transporte falso: es la parte más delicada de la llamada y así se verifica sin adivinar.
+ */
+export interface MeshTransport {
+	onSignal(callback: (message: {from: string; payload: unknown}) => void): () => void;
+	sendSignal(to: string, payload: unknown): void;
+	selectSource?(id: string): void;
+}
+
 type SignalPayload = {
 	kind: 'offer' | 'answer' | 'candidate' | 'music';
 	sdp?: RTCSessionDescriptionInit;
@@ -25,7 +37,7 @@ function plainSdp(description: RTCSessionDescription | null): RTCSessionDescript
  * Malla de voz/video peer-to-peer con "perfect negotiation": cualquier lado puede renegociar
  * (agregar/quitar la pantalla) y los choques se resuelven solos. Sin STUN ni TURN propios.
  */
-class VoiceMesh {
+export class VoiceMesh {
 	private pcs = new Map<string, RTCPeerConnection>();
 	private remotes = new Map<string, MeshRemote>();
 	private states = new Map<string, RTCPeerConnectionState>();
@@ -34,6 +46,21 @@ class VoiceMesh {
 	private makingOffer = new Set<string>();
 	private listeners = new Set<() => void>();
 	private unsubSignal: (() => void) | null = null;
+	/** Peers del canal con los que HAY que estar conectado. El vigilante reconecta solo. */
+	private desired = new Set<string>();
+	/**
+	 * Señales en cola por peer: cada uno las procesa de a UNA.
+	 *
+	 * Sin esto, dos mensajes se procesaban en paralelo y el estado de la conexión cambiaba entre
+	 * el chequeo y la llamada real: ahí salía "Failed to set remote answer sdp: Called in wrong
+	 * state: stable" (una respuesta se aplicaba dos veces o tarde) y esa conexión quedaba muda.
+	 */
+	private signalChains = new Map<string, Promise<void>>();
+	/** Cuántas veces se reinició el ICE de cada conexión. */
+	private iceRestarts = new Map<string, number>();
+	/** Desde cuándo cada conexión está "disconnected" (para no reiniciar por un hipo corto). */
+	private disconnectedAt = new Map<string, number>();
+	private watchdog: ReturnType<typeof setInterval> | null = null;
 	private myId = '';
 	private muted = false;
 	private deafened = false;
@@ -53,6 +80,13 @@ class VoiceMesh {
 	private speakingTimer: ReturnType<typeof setInterval> | null = null;
 	private diagnostics = new Map<string, {sent: number; received: number; ice: RTCIceConnectionState}>();
 
+	/** El transporte se inyecta para poder probar la malla con uno falso. */
+	private readonly getTransport: () => MeshTransport | null;
+
+	constructor(getTransport: () => MeshTransport | null = () => getDesktopTransport() as MeshTransport | null) {
+		this.getTransport = getTransport;
+	}
+
 	getRemotes(): MeshRemote[] {
 		return [...this.remotes.values()];
 	}
@@ -61,8 +95,24 @@ class VoiceMesh {
 		return Object.fromEntries(this.states);
 	}
 
-	getDiagnostics(): Record<string, {sent: number; received: number; ice: RTCIceConnectionState}> {
-		return Object.fromEntries(this.diagnostics);
+	getDiagnostics(): Record<string, {sent: number; received: number; ice: RTCIceConnectionState; signaling?: RTCSignalingState; canales?: string}> {
+		const result: Record<string, {sent: number; received: number; ice: RTCIceConnectionState; signaling?: RTCSignalingState; canales?: string}> = {};
+		for (const [peerId, entry] of this.diagnostics) {
+			const pc = this.pcs.get(peerId);
+			result[peerId] = {
+				...entry,
+				signaling: pc?.signalingState ?? 'closed',
+				// Los canales de la conexión, en orden: es lo que permite ver si el otro lado tiene
+				// la misma estructura (voz, música, pantalla) o si algo se desalineó.
+				canales: pc
+					? pc
+							.getTransceivers()
+							.map((transceiver) => `${transceiver.receiver.track?.kind ?? '?'}/${transceiver.currentDirection ?? '-'}@${transceiver.mid ?? '-'}`)
+							.join(' ')
+					: '',
+			};
+		}
+		return result;
 	}
 
 	getLocal(): MediaStream | null {
@@ -93,12 +143,13 @@ class VoiceMesh {
 	}
 
 	async start(myId: string): Promise<void> {
-		const transport = getDesktopTransport();
+		const transport = this.getTransport();
 		if (!transport) return;
 		this.myId = myId;
 		if (!this.unsubSignal) {
-			this.unsubSignal = transport.onSignal((message) => void this.onSignal(message));
+			this.unsubSignal = transport.onSignal((message) => this.onSignal(message));
 		}
+		this.startWatchdog();
 		if (!this.local) {
 			this.local = await navigator.mediaDevices.getUserMedia(this.micConstraints()).catch(() => null);
 			this.local?.getAudioTracks().forEach((track) => {
@@ -113,6 +164,12 @@ class VoiceMesh {
 	stop(): void {
 		this.unsubSignal?.();
 		this.unsubSignal = null;
+		this.stopWatchdog();
+		this.desired.clear();
+		this.signalChains.clear();
+		this.iceRestarts.clear();
+		this.disconnectedAt.clear();
+		this.senders.clear();
 		for (const pc of this.pcs.values()) pc.close();
 		this.pcs.clear();
 		this.remotes.clear();
@@ -183,38 +240,52 @@ class VoiceMesh {
 
 	/** Stream de música de la Jam (lo manda el host). */
 	private music: MediaStream | null = null;
-	/** Ids de los tracks de música que mandamos: sirven para reconocer el sender en cada conexión. */
-	private musicTrackIds = new Set<string>();
+	/**
+	 * Los "senders" de cada conexión, por rol: voz, música y pantalla.
+	 *
+	 * Se llenan con `addTrack` la primera vez que hace falta y después sólo se les cambia la pista
+	 * con `replaceTrack` (así no se agregan canales de más ni se renegocia al cambiar de tema).
+	 *
+	 * IMPORTANTE: se usa `addTrack` y NO `addTransceiver`. La diferencia no es cosmética: cuando
+	 * los dos lados agregan una pista al mismo tiempo (los dos ponen música, o comparten pantalla),
+	 * WebRTC REUTILIZA el canal creado con `addTrack` pero NO el creado con `addTransceiver`: con
+	 * `addTransceiver` cada lado terminaba con los suyos y los del otro (6 canales en vez de 3) y la
+	 * negociación se rompía con "The order of m-lines in subsequent offer doesn't match order from
+	 * previous offer/answer" — la conexión quedaba MUDA (dos no se escuchaban y el tercero sí).
+	 * Ese error lo encontramos midiendo, y antes se perdía en un catch vacío.
+	 */
+	private senders = new Map<string, {voice?: RTCRtpSender; music?: RTCRtpSender; screen?: RTCRtpSender}>();
+
+	/** Cambia la pista de un rol (si ese canal todavía no existe, no hace nada). */
+	private async replace(peerId: string, kind: 'voice' | 'music' | 'screen', track: MediaStreamTrack | null): Promise<void> {
+		const sender = this.senders.get(peerId)?.[kind];
+		if (!sender) return;
+		await sender.replaceTrack(track).catch(() => {});
+	}
 
 	/**
 	 * Manda (o corta) el audio de la música a todos los peers.
-	 * Se usa `replaceTrack` cuando ya existe el sender: así no hay renegociación ni corte de audio.
+	 * Si el canal de música todavía no existe, se crea con addTrack (una sola vez).
 	 */
 	async setMusicStream(stream: MediaStream | null): Promise<void> {
 		const nextTrack = stream?.getAudioTracks()[0] ?? null;
 		const previous = this.music?.getAudioTracks()[0] ?? null;
 		this.music = stream;
-		if (nextTrack) this.musicTrackIds.add(nextTrack.id);
-		for (const pc of this.pcs.values()) {
-			const sender = pc.getSenders().find((candidate) => candidate.track && this.musicTrackIds.has(candidate.track.id));
+		// El aviso de "esto es la música" va ANTES de agregar la pista: si llega después, el otro
+		// la toma como voz y no se le puede bajar el volumen por separado.
+		if (nextTrack) this.announceMusicStream(stream?.id ?? null);
+		for (const [peerId, pc] of this.pcs) {
+			const roles = this.senders.get(peerId) ?? {};
 			if (nextTrack) {
-				if (sender) {
-					await sender.replaceTrack(nextTrack).catch(() => {});
-				} else {
-					try {
-						pc.addTrack(nextTrack, stream as MediaStream);
-					} catch {
-						// si falla, la próxima negociación lo agrega
-					}
-				}
-			} else if (sender) {
-				await sender.replaceTrack(null).catch(() => {});
+				if (roles.music) await roles.music.replaceTrack(nextTrack).catch(() => {});
+				else roles.music = pc.addTrack(nextTrack, stream as MediaStream);
+			} else if (roles.music) {
+				await roles.music.replaceTrack(null).catch(() => {});
 			}
+			this.senders.set(peerId, roles);
 		}
-		if (previous && previous !== nextTrack) {
-			this.musicTrackIds.delete(previous.id);
-			previous.stop();
-		}
+		if (!nextTrack) this.announceMusicStream(null);
+		if (previous && previous !== nextTrack) previous.stop();
 		this.emit();
 	}
 
@@ -237,10 +308,11 @@ class VoiceMesh {
 		nextTrack.enabled = !this.muted;
 		const previousTrack = this.local.getAudioTracks()[0];
 		this.local = stream;
-		for (const pc of this.pcs.values()) {
-			const sender = pc.getSenders().find((candidate) => candidate.track?.kind === 'audio');
-			if (sender) await sender.replaceTrack(nextTrack).catch(() => {});
-			else pc.addTrack(nextTrack, stream);
+		for (const [peerId, pc] of this.pcs) {
+			const roles = this.senders.get(peerId) ?? {};
+			if (roles.voice) await roles.voice.replaceTrack(nextTrack).catch(() => {});
+			else roles.voice = pc.addTrack(nextTrack, stream);
+			this.senders.set(peerId, roles);
 		}
 		previousTrack?.stop();
 		if (this.local) this.attachAnalyser(this.myId, this.local);
@@ -250,16 +322,18 @@ class VoiceMesh {
 	/** Conecta con un peer del canal. La negociación la maneja onnegotiationneeded. */
 	async connect(peerId: string): Promise<void> {
 		if (peerId === this.myId) return;
+		this.desired.add(peerId);
 		await this.pcFor(peerId);
 	}
 
 	disconnect(peerId: string): void {
+		this.desired.delete(peerId);
 		this.drop(peerId);
 	}
 
 	async startScreen(sourceId?: string): Promise<void> {
-		const transport = getDesktopTransport();
-		if (sourceId && transport) transport.selectSource(sourceId);
+		const transport = this.getTransport();
+		if (sourceId && transport) transport.selectSource?.(sourceId);
 		if (!this.screen) {
 			const {width, height, frameRate, audio} = this.screenOptions;
 			this.screen = await navigator.mediaDevices
@@ -296,18 +370,15 @@ class VoiceMesh {
 		const stream = this.screen;
 		if (!stream) return;
 		this.screen = null;
-		for (const track of stream.getTracks()) {
-			for (const pc of this.pcs.values()) {
-				const sender = pc.getSenders().find((candidate) => candidate.track === track);
-				if (sender) pc.removeTrack(sender);
-			}
-			track.stop();
-		}
+		// Se deja de mandar por el canal de pantalla (sin renegociar): el otro lado lo detecta por
+		// el "mute" de la pista y esconde el video.
+		for (const peerId of this.pcs.keys()) void this.replace(peerId, 'screen', null);
+		for (const track of stream.getTracks()) track.stop();
 		this.emit();
 	}
 
 	private send(to: string, payload: SignalPayload): void {
-		getDesktopTransport()?.sendSignal(to, payload);
+		this.getTransport()?.sendSignal(to, payload);
 	}
 
 	/** Id del stream de música que anunció cada peer (para saber cuál audio es la música). */
@@ -373,27 +444,28 @@ class VoiceMesh {
 			if (!remote) return;
 			const stream = event.streams[0] ?? new MediaStream([event.track]);
 			if (event.track.kind === 'audio') {
-				// ¿Es la música de la Jam de ese peer? Se reconoce por el id que anunció.
-				if (this.remoteMusicIds.get(peerId) === stream.id) {
+				// ¿Es la música de la Jam de ese peer? Se reconoce por el aviso del host (el id del
+				// stream) y, si el aviso todavía no llegó, porque es un canal de audio por el que
+				// NOSOTROS no mandamos nada (la voz va por uno en el que mandamos nuestro micrófono).
+				const esMusica =
+					this.remoteMusicIds.get(peerId) === stream.id || (event.transceiver.sender.track === null && remote.audios.length > 0);
+				if (esMusica) {
 					remote.music = stream;
-					event.track.addEventListener('ended', () => {
-						if (remote.music === stream) {
-							remote.music = null;
-							this.emit();
-						}
-					});
 				} else if (!remote.audios.includes(stream)) {
 					remote.audios.push(stream);
 					if (!this.analysers.has(peerId)) this.attachAnalyser(peerId, stream);
 				}
 			} else {
-				remote.video = stream;
-				event.track.addEventListener('ended', () => {
-					if (remote.video === stream) {
-						remote.video = null;
-						this.emit();
-					}
-				});
+				// La pantalla se corta con "mute" (se deja de mandar sin renegociar), así que hay que
+				// reflejarlo: si no, quedaba una pantalla congelada.
+				const refrescar = () => {
+					remote.video = event.track.muted ? null : stream;
+					this.emit();
+				};
+				remote.video = event.track.muted ? null : stream;
+				event.track.addEventListener('mute', refrescar);
+				event.track.addEventListener('unmute', refrescar);
+				event.track.addEventListener('ended', refrescar);
 			}
 			this.emit();
 		};
@@ -402,9 +474,24 @@ class VoiceMesh {
 			this.states.set(peerId, pc.connectionState);
 			console.log(`[pelacord-media] ${peerId} conexión: ${pc.connectionState} (ice: ${pc.iceConnectionState})`);
 			this.emit();
-			if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+			if (pc.connectionState === 'failed') {
+				// OJO: NO se tira la conexión. Antes se cerraba y nadie la volvía a armar, así que
+				// dos personas quedaban sin escucharse para siempre (la llamada "a medias").
+				// Primero se intenta reiniciar el ICE; si no da, el vigilante la rearma.
+				this.tryIceRestart(peerId, pc);
+				return;
+			}
+			if (pc.connectionState === 'closed') {
 				this.drop(peerId);
 				return;
+			}
+			if (pc.connectionState === 'disconnected') {
+				if (!this.disconnectedAt.has(peerId)) this.disconnectedAt.set(peerId, Date.now());
+				return;
+			}
+			if (pc.connectionState === 'connected') {
+				this.iceRestarts.set(peerId, 0);
+				this.disconnectedAt.delete(peerId);
 			}
 			// Reaplicar el bitrate cuando la conexión está lista (los encodings ya existen).
 			if (pc.connectionState === 'connected') {
@@ -419,47 +506,45 @@ class VoiceMesh {
 			this.emit();
 		};
 
-		await this.syncTracks(pc);
+		await this.syncTracks(peerId, pc);
 		return pc;
 	}
 
 	private async ensureTracksOnAll(): Promise<void> {
-		for (const pc of this.pcs.values()) await this.syncTracks(pc);
+		for (const [peerId, pc] of this.pcs) await this.syncTracks(peerId, pc);
 	}
 
-	/** Agrega a la conexión las pistas locales que todavía no tenga (micrófono, pantalla, audio de pantalla). */
-	private async syncTracks(pc: RTCPeerConnection): Promise<void> {
-		const existing = new Set(pc.getSenders().map((sender) => sender.track).filter(Boolean));
-		const addStream = (stream: MediaStream | null) => {
-			if (!stream) return;
-			for (const track of stream.getTracks()) {
-				if (existing.has(track)) continue;
-				existing.add(track);
-				if (track.kind === 'video') {
-					// addTransceiver con sendEncodings: así el bitrate sí se aplica (setParameters antes de
-					// negociar no tenía encodings y se descartaba).
-					const transceiver = pc.addTransceiver(track, {
-						direction: 'sendonly',
-						streams: [stream],
-						sendEncodings: [
-							{
-								maxBitrate: this.screenBitrate(),
-								maxFramerate: this.screenOptions.frameRate,
-								scaleResolutionDownBy: 1,
-								priority: 'high',
-								networkPriority: 'high',
-							},
-						],
-					});
-					this.preferH264(transceiver);
-				} else {
-					pc.addTrack(track, stream);
-				}
+	/**
+	 * Deja en la conexión las pistas locales que haya ahora: micrófono, música y pantalla.
+	 *
+	 * La primera vez que hace falta un canal se crea con `addTrack`; después sólo se cambia la pista
+	 * (replaceTrack). Nunca se agregan canales de más (ver la nota de `senders`).
+	 */
+	private async syncTracks(peerId: string, pc: RTCPeerConnection): Promise<void> {
+		const roles = this.senders.get(peerId) ?? {};
+		const voiceTrack = this.local?.getAudioTracks()[0] ?? null;
+		if (voiceTrack && this.local) {
+			if (roles.voice) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
+			else roles.voice = pc.addTrack(voiceTrack, this.local);
+		}
+		const musicTrack = this.music?.getAudioTracks()[0] ?? null;
+		if (musicTrack && this.music) {
+			if (roles.music) await roles.music.replaceTrack(musicTrack).catch(() => {});
+			else roles.music = pc.addTrack(musicTrack, this.music);
+		}
+		const screenTrack = this.screen?.getVideoTracks()[0] ?? null;
+		if (screenTrack && this.screen) {
+			if (roles.screen) await roles.screen.replaceTrack(screenTrack).catch(() => {});
+			else {
+				roles.screen = pc.addTrack(screenTrack, this.screen);
+				const transceiver = pc.getTransceivers().find((candidate) => candidate.sender === roles.screen);
+				if (transceiver) this.preferH264(transceiver);
+				// El bitrate de la pantalla se aplica cuando el encoding ya existe.
+				this.tuneVideoSender(roles.screen);
+				setTimeout(() => this.tuneVideoSender(roles.screen as RTCRtpSender), 800);
 			}
-		};
-		addStream(this.local);
-		addStream(this.screen);
-		addStream(this.music);
+		}
+		this.senders.set(peerId, roles);
 	}
 
 	private preferH264(transceiver: RTCRtpTransceiver): void {
@@ -510,11 +595,83 @@ class VoiceMesh {
 		this.pendingCandidates.delete(peerId);
 		this.remoteReady.delete(peerId);
 		this.diagnostics.delete(peerId);
+		this.disconnectedAt.delete(peerId);
+		this.senders.delete(peerId);
 		this.detachAnalyser(peerId);
 		this.emit();
 	}
 
-	private async onSignal(message: {from: string; payload: unknown}): Promise<void> {
+	/** Reinicia el ICE de una conexión. Si ya se reinició demasiadas veces, la tira para rearmarla. */
+	private tryIceRestart(peerId: string, pc: RTCPeerConnection): void {
+		const attempts = (this.iceRestarts.get(peerId) ?? 0) + 1;
+		this.iceRestarts.set(peerId, attempts);
+		if (attempts > 3) {
+			console.warn(`[pelacord-media] ${peerId}: se rearma la conexión desde cero`);
+			this.drop(peerId);
+			return;
+		}
+		try {
+			pc.restartIce();
+		} catch {
+			this.drop(peerId);
+		}
+	}
+
+	/**
+	 * Vigilante: cada 5 s revisa que todos los peers del canal tengan una conexión viva.
+	 *
+	 * Recrea las que faltan o se cayeron, y corta las que ya no corresponden. Esto es lo que hace
+	 * que la llamada se ARREGLE SOLA: antes, si una conexión se caía, quedaba muerta hasta salir y
+	 * volver a entrar al canal (era justo el caso "dos no se escuchan y el tercero sí").
+	 */
+	private startWatchdog(): void {
+		if (this.watchdog) return;
+		this.watchdog = setInterval(() => {
+			for (const peerId of this.desired) {
+				const pc = this.pcs.get(peerId);
+				if (!pc) {
+					void this.pcFor(peerId);
+					continue;
+				}
+				if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+					this.tryIceRestart(peerId, pc);
+					continue;
+				}
+				if (pc.connectionState === 'disconnected') {
+					const since = this.disconnectedAt.get(peerId) ?? Date.now();
+					if (Date.now() - since > 12000) this.tryIceRestart(peerId, pc);
+				}
+			}
+			for (const peerId of [...this.pcs.keys()]) {
+				if (!this.desired.has(peerId)) this.drop(peerId);
+			}
+		}, 5000);
+	}
+
+	private stopWatchdog(): void {
+		if (!this.watchdog) return;
+		clearInterval(this.watchdog);
+		this.watchdog = null;
+	}
+
+	/**
+	 * Encola la señal: cada peer procesa las suyas de a UNA.
+	 *
+	 * Si se procesan en paralelo, el estado de la conexión cambia entre el chequeo y la llamada
+	 * real (dos respuestas aplicadas a la vez) y sale "Called in wrong state: stable": esa
+	 * conexión quedaba muda. Con la cola, cada mensaje ve el estado verdadero.
+	 */
+	private onSignal(message: {from: string; payload: unknown}): void {
+		const from = message?.from;
+		if (!from) return;
+		const previous = this.signalChains.get(from) ?? Promise.resolve();
+		const next = previous
+			.then(() => this.applySignal(message))
+			.catch((error) => console.warn('[pelacord-media] señal descartada:', String(error)));
+		this.signalChains.set(from, next);
+	}
+
+	private async applySignal(message: {from: string; payload: unknown}): Promise<void> {
 		const payload = message.payload as SignalPayload;
 		if (!payload || !payload.kind) return;
 		const from = message.from;
@@ -522,13 +679,31 @@ class VoiceMesh {
 		// Aviso de "este stream es la música": no es una señal de WebRTC, se guarda y listo.
 		// (Va antes de tocar la conexión: si no, crearía una conexión por un mensaje que no lo es.)
 		if (payload.kind === 'music') {
-			if (payload.streamId) this.remoteMusicIds.set(from, payload.streamId);
-			else this.remoteMusicIds.delete(from);
 			const remote = this.remotes.get(from);
-			if (remote && payload.streamId === null) remote.music = null;
+			if (payload.streamId) {
+				this.remoteMusicIds.set(from, payload.streamId);
+				// Si el aviso llegó DESPUÉS de la pista, se reclasifica: deja de sonar como voz y pasa
+				// a ser la música de la Jam (así se le puede bajar el volumen por separado).
+				if (remote) {
+					const indice = remote.audios.findIndex((stream) => stream.id === payload.streamId);
+					if (indice >= 0) {
+						const [musica] = remote.audios.splice(indice, 1);
+						remote.music = musica;
+					}
+				}
+			} else {
+				// OJO: NO se borra `remote.music`. El canal sigue existiendo y sólo deja de mandar
+				// audio (la pista queda muda): si se borrara, al volver a poner música no habría
+				// ningún "ontrack" nuevo que la vuelva a enganchar y el otro no escucharía nada.
+				this.remoteMusicIds.delete(from);
+			}
 			this.emit();
 			return;
 		}
+
+		// Si el peer no está en el canal (y nunca hablamos con él), se ignora: si no, alguien que
+		// ya se fue puede rearmar la conexión y armar una guerra de reconexiones.
+		if (!this.desired.has(from) && !this.pcs.has(from)) return;
 
 		const pc = await this.pcFor(from);
 		const polite = this.myId > from;
@@ -541,19 +716,46 @@ class VoiceMesh {
 					await pc.setLocalDescription({type: 'rollback'});
 				}
 				await pc.setRemoteDescription(payload.sdp);
-			} catch {
+			} catch (error) {
+				// Se muestra QUÉ canales trae el otro y cuáles tengo yo: si se desalinean, WebRTC
+				// rechaza la oferta ("The order of m-lines...") y la conexión queda muda. Antes este
+				// error se perdía en un catch vacío y parecía que "la llamada no anda y listo".
+				const suyos = String(payload.sdp.sdp ?? '')
+					.split('\n')
+					.filter((line) => line.startsWith('m='))
+					.map((line) => line.slice(2).split(' ')[0])
+					.join(' ');
+				const mios = pc
+					.getTransceivers()
+					.map((transceiver) => `${transceiver.receiver.track?.kind ?? '?'}@${transceiver.mid ?? '-'}`)
+					.join(' ');
+				console.warn(
+					`[pelacord-media] ${from}: no pude aplicar la oferta (${String(error)}) · su oferta: [${suyos}] · mis canales: [${mios}]`,
+				);
 				return;
 			}
 			this.remoteReady.add(from);
 			await this.flushCandidates(from, pc);
-			await pc.setLocalDescription();
+			try {
+				await pc.setLocalDescription();
+			} catch (error) {
+				console.warn(`[pelacord-media] ${from}: no pude armar la respuesta`, String(error));
+				return;
+			}
 			this.send(from, {kind: 'answer', sdp: plainSdp(pc.localDescription)});
 			return;
 		}
 
 		if (payload.kind === 'answer' && payload.sdp) {
+			// Si la respuesta llega cuando ya no la esperábamos (duplicada o tarde) se ignora:
+			// antes esto tiraba "Called in wrong state: stable" y ensuciaba la negociación.
 			if (pc.signalingState !== 'have-local-offer') return;
-			await pc.setRemoteDescription(payload.sdp);
+			try {
+				await pc.setRemoteDescription(payload.sdp);
+			} catch (error) {
+				console.warn(`[pelacord-media] ${from}: no pude aplicar la respuesta`, String(error));
+				return;
+			}
 			this.remoteReady.add(from);
 			await this.flushCandidates(from, pc);
 			return;
