@@ -5390,7 +5390,20 @@ body.no-cosmetic-anim .avatar-effect::after {
 	padding: 0 0.875rem;
 	flex-shrink: 0;
 	background-color: var(--background-primary);
-	border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+	border-bottom: 1px solid var(--border-color);
+	transition: opacity var(--transition-fast);
+}
+
+/* Si no movés el mouse, la cabecera y los controles se van (y el cursor también). */
+.movie-overlay.is-idle {
+	cursor: none;
+}
+
+.movie-overlay.is-idle .movie-top,
+.movie-overlay.is-idle .movie-controls,
+.movie-overlay.is-idle .movie-hint {
+	opacity: 0;
+	pointer-events: none;
 }
 
 .movie-top-title {
@@ -5500,7 +5513,8 @@ body.no-cosmetic-anim .avatar-effect::after {
 	padding: 0 0.875rem;
 	flex-shrink: 0;
 	background-color: var(--background-primary);
-	border-top: 1px solid rgba(255, 255, 255, 0.08);
+	border-top: 1px solid var(--border-color);
+	transition: opacity var(--transition-fast);
 }
 
 .movie-icon-button {

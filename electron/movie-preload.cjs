@@ -24,6 +24,16 @@ function command(name, args = []) {
 	}
 }
 
+/** El video real de la página. */
+function elVideo() {
+	return document.querySelector('video');
+}
+
+/** Le contesta a la app (mismo formato que el reproductor, así nuestro lado no cambia). */
+function responder(command, result) {
+	ipcRenderer.sendToHost('pelacord:movie-event', {type: 'cinesrc:response', command, result});
+}
+
 // 1) Eventos del reproductor -> app.
 window.addEventListener('message', (event) => {
 	const data = event?.data;
@@ -34,17 +44,76 @@ window.addEventListener('message', (event) => {
 		type,
 		currentTime: typeof data.currentTime === 'number' ? data.currentTime : undefined,
 		duration: typeof data.duration === 'number' ? data.duration : undefined,
+		paused: typeof data.paused === 'boolean' ? data.paused : undefined,
 		command: data.command,
 		result: data.result,
 	});
 });
 
-// 2) Comandos de la app -> reproductor.
+/**
+ * 2) Comandos de la app -> video.
+ *
+ * OJO: se aplican DIRECTO sobre el `<video>` en vez de usar el puente del reproductor. Su puente
+ * tiene un problema real: al contestar los "getters" intenta mandar una Promise por postMessage y
+ * tira `DataCloneError`, así que la respuesta nunca llega (por eso el botón de play/pausa no sabía
+ * en qué estado estaba). Manejar el video de la página es más simple y no depende de ellos.
+ */
 ipcRenderer.on('pelacord:movie-command', (_event, message) => {
-	const name = message?.command;
-	if (!name) return;
-	command(String(name), Array.isArray(message.args) ? message.args : []);
+	const name = String(message?.command || '');
+	const args = Array.isArray(message?.args) ? message.args : [];
+	const video = elVideo();
+	if (video) {
+		try {
+			if (name === 'play') void video.play();
+			else if (name === 'pause') video.pause();
+			else if (name === 'seek') video.currentTime = Math.max(0, Number(args[0]) || 0);
+			else if (name === 'setVolume') video.volume = Math.min(1, Math.max(0, Number(args[0] ?? 1)));
+			else if (name === 'setMuted') video.muted = Boolean(args[0]);
+			else if (name === 'getCurrentTime') responder('getCurrentTime', video.currentTime);
+			else if (name === 'getDuration') responder('getDuration', video.duration || 0);
+			else if (name === 'getPaused') responder('getPaused', video.paused);
+		} catch {
+			// si el video todavía no está, se ignora
+		}
+	}
+	// Igual se le avisa al reproductor, para que su interfaz quede en el mismo estado.
+	command(name, args);
 });
+
+/**
+ * 3) Los eventos del video de verdad -> app.
+ *
+ * El reproductor no manda los eventos cuando se lo carga directo en un webview (sólo postea si está
+ * dentro de un iframe), así que se engancha el `<video>` de la página: play, pausa y tiempo salen
+ * de ahí y son confiables.
+ */
+function engancharVideo() {
+	const video = elVideo();
+	if (!video || video.dataset.pelacordEnganchado === '1') return;
+	video.dataset.pelacordEnganchado = '1';
+	const avisar = (type) => () => {
+		try {
+			ipcRenderer.sendToHost('pelacord:movie-event', {
+				type,
+				currentTime: video.currentTime,
+				duration: video.duration || 0,
+				paused: video.paused,
+			});
+		} catch {
+			// se ignora
+		}
+	};
+	video.addEventListener('play', avisar('cinesrc:play'));
+	video.addEventListener('pause', avisar('cinesrc:pause'));
+	video.addEventListener('timeupdate', avisar('cinesrc:timeupdate'));
+	video.addEventListener('durationchange', avisar('cinesrc:loadedmetadata'));
+	video.addEventListener('ended', avisar('cinesrc:ended'));
+	setInterval(avisar('cinesrc:timeupdate'), 1000);
+}
+
+setInterval(engancharVideo, 1200);
+document.addEventListener('DOMContentLoaded', engancharVideo);
+window.addEventListener('load', engancharVideo);
 
 /** Deja el cuerpo sin recibir clics (los clics van a nuestro overlay, nunca al embed). */
 function bloqueaClics() {

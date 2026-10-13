@@ -54,6 +54,18 @@ export function MoviePlayer(): JSX.Element | null {
 	const [muted, setMuted] = useState(false);
 	/** Subtítulos: los elige cada uno. El botón destraba la barra del reproductor. */
 	const [subsOpen, setSubsOpen] = useState(false);
+	/** Los controles se esconden solos si no movés el mouse (como en cualquier reproductor). */
+	const [controlesVisibles, setControlesVisibles] = useState(true);
+	const hideTimer = useRef<number | null>(null);
+
+	const mostrarControles = useCallback(() => {
+		setControlesVisibles(true);
+		if (hideTimer.current) window.clearTimeout(hideTimer.current);
+		hideTimer.current = window.setTimeout(() => {
+			// Sólo se esconden si está reproduciendo: pausado se quedan a la vista.
+			if (!pausedRef.current) setControlesVisibles(false);
+		}, 3000);
+	}, []);
 	/** Para que el host pueda leer su posición real sin depender del render. */
 	const positionRef = useRef(0);
 	positionRef.current = position;
@@ -77,9 +89,16 @@ export function MoviePlayer(): JSX.Element | null {
 	/** Una acción del usuario: se aplica acá (respuesta inmediata) y se manda a la sala. */
 	const act = useCallback(
 		(command: MovieRoomCommand) => {
-			if (command.kind === 'play') send('play');
-			else if (command.kind === 'pause') send('pause');
-			else if (command.kind === 'seek') send('seek', [Math.round(command.positionMs / 1000)]);
+			if (command.kind === 'play') {
+				send('play');
+				// Optimista: el embed no siempre avisa, así el botón cambia al toque.
+				setPaused(false);
+			} else if (command.kind === 'pause') {
+				send('pause');
+				setPaused(true);
+			} else if (command.kind === 'seek') {
+				send('seek', [Math.round(command.positionMs / 1000)]);
+			}
 			movieCommand(command);
 			// El host, después de mover algo, manda su posición real para que todos queden iguales.
 			if (isHost) {
@@ -116,6 +135,7 @@ export function MoviePlayer(): JSX.Element | null {
 			const payload = (detail.args ?? [])[0] as Record<string, unknown> | undefined;
 			if (!payload) return;
 			const type = String(payload.type ?? '');
+			if (typeof payload.paused === 'boolean') setPaused(payload.paused);
 			if (typeof payload.currentTime === 'number') setPosition(payload.currentTime);
 			if (typeof payload.duration === 'number' && payload.duration > 0) setDuration(payload.duration);
 			// La duración y el tiempo también se piden con los getters (el embed no los manda siempre
@@ -124,6 +144,9 @@ export function MoviePlayer(): JSX.Element | null {
 				if (payload.command === 'getDuration' && payload.result > 0) setDuration(payload.result);
 				if (payload.command === 'getCurrentTime') setPosition(payload.result);
 			}
+			// El estado de pausa se pregunta con el getter: el embed no manda los eventos play/pause
+			// cuando se lo carga directo en un webview (sólo postea si está dentro de un iframe).
+			if (payload.command === 'getPaused' && typeof payload.result === 'boolean') setPaused(payload.result);
 			if (type === 'cinesrc:play') setPaused(false);
 			if (type === 'cinesrc:pause') setPaused(true);
 			if (type === 'cinesrc:ready' || type === 'cinesrc:loadedmetadata') setLoading(false);
@@ -188,16 +211,17 @@ export function MoviePlayer(): JSX.Element | null {
 		send('setVolume', [muted ? 0 : volume]);
 	}, [muted, volume, ready, send]);
 
-	// La duración y el tiempo se piden cada tanto: el embed no siempre los manda por eventos, y sin
-	// la duración la barra para adelantar queda inutilizable.
+	// La duración, el tiempo y el estado de pausa se piden cada tanto: el embed no siempre los manda
+	// por eventos, y sin ellos la barra para adelantar y el botón de play/pausa quedan inutilizables.
 	useEffect(() => {
 		if (!ready) return;
 		const pedir = () => {
 			send('getDuration');
 			send('getCurrentTime');
+			send('getPaused');
 		};
 		pedir();
-		const timer = setInterval(pedir, 4000);
+		const timer = setInterval(pedir, 2000);
 		return () => clearInterval(timer);
 	}, [ready, send]);
 
@@ -208,10 +232,25 @@ export function MoviePlayer(): JSX.Element | null {
 				event.preventDefault();
 				act(paused ? {kind: 'play'} : {kind: 'pause'});
 			}
+			mostrarControles();
 		};
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
-	}, [act, movieLeave, paused]);
+	}, [act, movieLeave, mostrarControles, paused]);
+
+	// Los controles se esconden si no se mueve el mouse; pausado (o con los subtítulos abiertos) se
+	// quedan siempre a la vista.
+	useEffect(() => {
+		if (paused || subsOpen) {
+			if (hideTimer.current) window.clearTimeout(hideTimer.current);
+			setControlesVisibles(true);
+			return;
+		}
+		mostrarControles();
+		return () => {
+			if (hideTimer.current) window.clearTimeout(hideTimer.current);
+		};
+	}, [paused, subsOpen, mostrarControles]);
 
 	/** Subtítulos: los elige cada uno. Destraba la barra del reproductor y abre su panel. */
 	const toggleSubtitles = useCallback(() => {
@@ -239,7 +278,7 @@ export function MoviePlayer(): JSX.Element | null {
 	}
 
 	return createPortal(
-		<div className="movie-overlay" ref={playerRef}>
+		<div className={`movie-overlay${controlesVisibles ? '' : ' is-idle'}`} ref={playerRef} onMouseMove={mostrarControles}>
 			<header className="movie-top">
 				<span className={`movie-live${isHost ? ' is-host' : ''}`} />
 				<span className="movie-top-title">{media.title}</span>
