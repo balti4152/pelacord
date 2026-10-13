@@ -69,7 +69,7 @@ const BANNER_MAX = 640;
 const AVATAR_SOURCE = 256;
 
 export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
-	const {state, updateProfile, updateSettings, setCssVariable} = useStore();
+	const {state, updateProfile, updateSettings, setCssVariable, hotkeyFailures} = useStore();
 	const me = state.me;
 	const outputVolume = useOutputVolume();
 	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'hotkeys' | 'customcss'>('account');
@@ -281,6 +281,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 						{tab === 'hotkeys' ? (
 							<HotkeysTab
 								hotkeys={state.settings.hotkeys ?? {}}
+								failures={hotkeyFailures}
 								onHotkey={(action, accelerator) =>
 									updateSettings({hotkeys: {...(state.settings.hotkeys ?? {}), [action]: accelerator ?? ''}})
 								}
@@ -807,9 +808,12 @@ function VoiceTab(props: {
 function HotkeysTab({
 	hotkeys,
 	onHotkey,
+	failures,
 }: {
 	hotkeys: Record<string, string>;
 	onHotkey: (action: string, accelerator: string | undefined) => void;
+	/** Atajos que Windows rechazó al registrarlos (otro programa los usa, o la tecla no se puede). */
+	failures: Array<{action: string; accelerator: string}>;
 }): JSX.Element {
 	const [recording, setRecording] = useState<string | null>(null);
 	const [hint, setHint] = useState<string | null>(null);
@@ -868,12 +872,20 @@ function HotkeysTab({
 							)}
 						</div>
 						<p className="settings-hint">{info.description}</p>
+						{failures.some((failure) => failure.action === info.action) ? (
+							<p className="settings-hint hotkey-failed">
+								No se pudo activar «{formatAccelerator(accelerator)}»: Windows no la acepta o la está usando otro programa.{' '}
+								{accelerator.includes('Plus')
+									? 'El «+» de la fila de arriba necesita Shift y Windows no lo deja como atajo global: usá el «+» del teclado numérico.'
+									: 'Probá con otra tecla.'}
+							</p>
+						) : null}
 					</div>
 				);
 			})}
 			<p className="settings-hint">
-				Elegí cualquier tecla o combinación: una sola (F8, -, x, …) o con Ctrl/Alt/Shift. Si alguna no responde,
-				suele ser porque otro programa ya la está usando.
+				Elegí cualquier tecla o combinación: una sola (F8, x, -, …) o con Ctrl/Alt/Shift. Si una tecla no se puede
+				usar, te lo aviso acá abajo en rojo. Ojo con el «+» de la fila de arriba: usá el del teclado numérico.
 			</p>
 			{recording ? (
 				<p className="settings-hint hotkey-hint">

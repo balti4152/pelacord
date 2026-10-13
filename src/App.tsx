@@ -7,24 +7,20 @@ import {Onboarding} from '@/components/Onboarding';
 import {FloatingStream} from '@/components/FloatingStream';
 import {Icon} from '@/components/primitives';
 import {RemoteAudio} from '@/components/RemoteMedia';
-import {ScreenSharePicker} from '@/components/ScreenSharePicker';
 import {SettingsModal} from '@/components/SettingsModal';
 import {getDesktopTransport, isDesktop} from '@/lib/desktop';
 import {hasChosenName} from '@/lib/identity';
 import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
 import {initUpdater} from '@/lib/updater';
-import {openSharePicker, subscribeSharePicker} from '@/lib/sharePicker';
+import {prepareShare} from '@/lib/screenShare';
 import {playSound} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 
 export function App(): JSX.Element {
 	const {state, dispatch} = useStore();
 	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
-
-	useEffect(() => subscribeSharePicker(() => setSharePickerOpen(true)), []);
 
 	useEffect(() => {
 		initUpdater();
@@ -149,21 +145,16 @@ export function App(): JSX.Element {
 	const sharingRef = useRef(state.voice.sharing);
 	sharingRef.current = state.voice.sharing;
 
-	/** Comparte la ventana que el usuario tenía enfocada, sin abrir el selector. */
-	async function shareFocusedWindow(): Promise<void> {
-		const transport = getDesktopTransport();
-		if (!transport) return;
-		try {
-			const sources = await transport.getDesktopSources();
-			// Chromium devuelve las ventanas por uso reciente: la primera es la que estaba adelante.
-			const target = sources.find((source) => source.kind === 'window') ?? sources[0];
-			if (!target) return;
-			transport.selectSource(target.id);
-			voiceMesh.setScreenOptions({width: 1920, height: 1080, frameRate: 60, audio: false});
+	/**
+	 * Comparte (o corta la transmisión) sin selector. `kind` decide qué se transmite:
+	 * el monitor principal o la ventana que estaba adelante.
+	 */
+	async function toggleShare(kind: 'screen' | 'window'): Promise<void> {
+		if (sharingRef.current) {
 			dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-		} catch {
-			// sin fuentes disponibles: no pasa nada
+			return;
 		}
+		if (await prepareShare(kind)) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
 	}
 
 	// Atajos globales (funcionan aunque la app esté en segundo plano).
@@ -173,18 +164,9 @@ export function App(): JSX.Element {
 		return transport.onHotkey(({action}) => {
 			if (action === 'mute') dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
 			else if (action === 'deafen') dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
-			else if (action === 'shareScreen') {
-				// Es un interruptor: si ya estás compartiendo, el mismo atajo corta la transmisión.
-				if (sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-				else {
-					// El selector tiene que verse: se trae la ventana al frente.
-					transport.showWindow();
-					openSharePicker();
-				}
-			} else if (action === 'shareFocused') {
-				if (sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-				else void shareFocusedWindow();
-			}
+			// Los dos atajos de compartir son un interruptor: el mismo atajo corta la transmisión.
+			else if (action === 'shareScreen') void toggleShare('screen');
+			else if (action === 'shareFocused') void toggleShare('window');
 		});
 		// Se registran una sola vez: el estado se lee del ref, no del render.
 	}, []);
@@ -204,17 +186,6 @@ export function App(): JSX.Element {
 			<RemoteAudio />
 			<FloatingStream />
 			{settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} /> : null}
-			{sharePickerOpen ? (
-				<ScreenSharePicker
-					onCancel={() => setSharePickerOpen(false)}
-					onPick={(sourceId, options) => {
-						setSharePickerOpen(false);
-						getDesktopTransport()?.selectSource(sourceId);
-						voiceMesh.setScreenOptions(options);
-						if (!state.voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-					}}
-				/>
-			) : null}
 			{dragging ? (
 				<div className="drop-overlay">
 					<Icon name="attach" size={44} />

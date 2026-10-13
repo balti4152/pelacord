@@ -21,12 +21,12 @@ export const HOTKEYS: HotkeyInfo[] = [
 	{
 		action: 'shareScreen',
 		label: 'Compartir pantalla',
-		description: 'Abre el selector de pantalla.',
+		description: 'Alterna la transmisión del monitor principal.',
 	},
 	{
 		action: 'shareFocused',
 		label: 'Compartir la ventana enfocada',
-		description: 'Transmite el programa que tenías adelante, sin abrir el selector.',
+		description: 'Alterna la transmisión del programa que tenías adelante.',
 	},
 ];
 
@@ -37,7 +37,14 @@ export const DEFAULT_HOTKEYS: Record<HotkeyAction, string> = {
 	shareFocused: 'Control+Shift+F',
 };
 
-/** Nombres de teclas que Electron espera. */
+/**
+ * Nombres de teclas que Electron acepta.
+ *
+ * Ojo con los signos: van con el carácter literal ('-', ',', '.'). Los nombres "lindos" como
+ * 'Minus', 'Comma' o 'Period' NO existen y Electron tira una excepción al registrarlos.
+ * La única excepción es '+', que en el formato de Electron es el separador de teclas y por eso
+ * se escribe 'Plus'.
+ */
 const NAMED_KEYS: Record<string, string> = {
 	' ': 'Space',
 	ArrowUp: 'Up',
@@ -49,13 +56,46 @@ const NAMED_KEYS: Record<string, string> = {
 	Tab: 'Tab',
 	Backspace: 'Backspace',
 	Delete: 'Delete',
+	Insert: 'Insert',
 	Home: 'Home',
 	End: 'End',
 	PageUp: 'PageUp',
 	PageDown: 'PageDown',
-	// '+' tiene que ir como "Plus": en el formato de Electron el '+' es el separador.
+	PrintScreen: 'PrintScreen',
+	ScrollLock: 'ScrollLock',
 	'+': 'Plus',
 	'-': '-',
+};
+
+/**
+ * Teclado numérico: se identifica por la POSICIÓN física (event.code), no por el carácter.
+ *
+ * Esto importa porque el '+' de la fila de arriba (en un teclado US es Shift+=) no se puede
+ * registrar como atajo global, mientras que el '+' del teclado numérico sí ('Numadd').
+ */
+const CODE_KEYS: Record<string, string> = {
+	NumpadAdd: 'Numadd',
+	NumpadSubtract: 'Numsub',
+	NumpadMultiply: 'Nummult',
+	NumpadDivide: 'Numdiv',
+	NumpadDecimal: 'Numdec',
+	NumpadEnter: 'Return',
+};
+for (let digit = 0; digit <= 9; digit += 1) CODE_KEYS[`Numpad${digit}`] = `num${digit}`;
+
+/** Nombres técnicos que se muestran con un texto más amigable. */
+const DISPLAY_NAMES: Record<string, string> = {
+	Plus: '+',
+	Numadd: '+ (num)',
+	Numsub: '- (num)',
+	Nummult: '* (num)',
+	Numdiv: '/ (num)',
+	Numdec: '. (num)',
+	Space: 'Espacio',
+	Return: 'Enter',
+	Escape: 'Esc',
+	PrintScreen: 'Impr Pant',
+	ScrollLock: 'Bloq Despl',
 };
 
 /**
@@ -73,16 +113,16 @@ export function eventToAccelerator(event: KeyboardEvent): string | null {
 	if (event.metaKey) modifiers.push('Super');
 	const key = event.key;
 	if (['Control', 'Alt', 'Shift', 'Meta'].includes(key)) return null;
-	const name = NAMED_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+	// El teclado numérico se resuelve primero: su '+' es 'Numadd' y no el '+' de la fila de arriba.
+	const name = CODE_KEYS[event.code] ?? NAMED_KEYS[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 	return [...modifiers, name].join('+');
 }
 
-/** Texto lindo para mostrar: "Ctrl + Shift + M", "+", "-". */
+/** Texto lindo para mostrar: "Ctrl + Shift + M", "+", "+ (num)". */
 export function formatAccelerator(accelerator?: string): string {
 	if (!accelerator) return 'Sin asignar';
 	return accelerator
-		.replace(/Control/g, 'Ctrl')
 		.split('+')
-		.map((part) => (part === 'Plus' ? '+' : part))
+		.map((part) => DISPLAY_NAMES[part] ?? (part === 'Control' ? 'Ctrl' : part))
 		.join(' + ');
 }

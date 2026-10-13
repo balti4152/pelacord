@@ -3,7 +3,7 @@ import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
 import {VoicePanel} from '@/components/VoicePanel';
-import {useStore} from '@/state/store';
+import {VOICE_CATEGORY, useStore} from '@/state/store';
 import type {Channel} from '@/types';
 
 function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element {
@@ -136,9 +136,31 @@ export function ChannelSidebar({
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 }): JSX.Element {
-	const {state, dispatch} = useStore();
+	const {state, dispatch, addChannel, removeChannel} = useStore();
+	/** Categoría en la que se está creando un canal (null = no hay diálogo abierto). */
+	const [creating, setCreating] = useState<Channel['type'] | null>(null);
+	const [newName, setNewName] = useState('');
+	/** Menú del clic derecho sobre un canal. */
+	const [menu, setMenu] = useState<{channelId: string; name: string; x: number; y: number} | null>(null);
+	const [deleting, setDeleting] = useState<{channelId: string; name: string} | null>(null);
 
 	const categories = Array.from(new Set(state.channels.map((c) => c.category)));
+
+	// El menú del clic derecho se cierra con un clic en cualquier lado o con Escape.
+	// Ojo: NO se cierra con `contextmenu`, porque si no, abrir el menú de otro canal no andaría.
+	useEffect(() => {
+		if (!menu) return;
+		const close = () => setMenu(null);
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key === 'Escape') setMenu(null);
+		};
+		window.addEventListener('click', close);
+		window.addEventListener('keydown', onKey);
+		return () => {
+			window.removeEventListener('click', close);
+			window.removeEventListener('keydown', onKey);
+		};
+	}, [menu]);
 
 	function openChannel(channel: Channel): void {
 		if (channel.type === 'text') {
@@ -152,6 +174,13 @@ export function ChannelSidebar({
 		}
 	}
 
+	function submitCreate(): void {
+		if (!creating || !newName.trim()) return;
+		addChannel(creating, newName);
+		setCreating(null);
+		setNewName('');
+	}
+
 	return (
 		<div className="sidebar">
 			<button type="button" className="sidebar-header">
@@ -163,7 +192,17 @@ export function ChannelSidebar({
 					<div className="channel-category" key={category} style={index === 0 ? {marginTop: 0} : undefined}>
 						<div className="channel-category-header">
 							<Icon name="chevronDown" size={12} />
-							{category}
+							<span>{category}</span>
+							<button
+								type="button"
+								className="channel-add"
+								title={category === VOICE_CATEGORY ? 'Crear canal de voz' : 'Crear canal de texto'}
+								onClick={() => {
+									setNewName('');
+									setCreating(category === VOICE_CATEGORY ? 'voice' : 'text');
+								}}>
+								<Icon name="plus" size={14} />
+							</button>
 						</div>
 						{state.channels
 							.filter((c) => c.category === category)
@@ -175,7 +214,11 @@ export function ChannelSidebar({
 										<button
 											type="button"
 											className={`channel${isActive || isConnected ? ' is-active' : ''}${state.unread[channel.id] ? ' is-unread' : ''}`}
-											onClick={() => openChannel(channel)}>
+											onClick={() => openChannel(channel)}
+											onContextMenu={(event) => {
+												event.preventDefault();
+												setMenu({channelId: channel.id, name: channel.name, x: event.clientX, y: event.clientY});
+											}}>
 											<span className="channel-icon">
 												<Icon name={channel.type === 'text' ? 'hash' : 'speaker'} size={18} />
 											</span>
@@ -191,6 +234,76 @@ export function ChannelSidebar({
 			</div>
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />
+			{menu ? (
+				<div className="context-menu" style={{left: menu.x, top: menu.y}} onClick={(event) => event.stopPropagation()}>
+					<button
+						type="button"
+						className="is-danger"
+						disabled={state.channels.length <= 1}
+						title={state.channels.length <= 1 ? 'No podés quedarte sin canales' : undefined}
+						onClick={() => {
+							setDeleting({channelId: menu.channelId, name: menu.name});
+							setMenu(null);
+						}}>
+						<Icon name="trash" size={15} />
+						Eliminar canal
+					</button>
+				</div>
+			) : null}
+			{creating ? (
+				<div className="modal-backdrop" onClick={() => setCreating(null)}>
+					<div className="dialog" onClick={(event) => event.stopPropagation()}>
+						<h2 className="dialog-title">{creating === 'voice' ? 'Crear canal de voz' : 'Crear canal de texto'}</h2>
+						<div className="dialog-field">
+							<span>Nombre del canal</span>
+							<input
+								autoFocus
+								value={newName}
+								maxLength={60}
+								placeholder={creating === 'voice' ? 'ej. Charla' : 'ej. anuncios'}
+								onChange={(event) => setNewName(event.target.value)}
+								onKeyDown={(event) => {
+									if (event.key === 'Enter') submitCreate();
+									if (event.key === 'Escape') setCreating(null);
+								}}
+							/>
+						</div>
+						<div className="dialog-actions">
+							<button type="button" className="button secondary" onClick={() => setCreating(null)}>
+								Cancelar
+							</button>
+							<button type="button" className="button primary" disabled={!newName.trim()} onClick={submitCreate}>
+								Crear canal
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
+			{deleting ? (
+				<div className="modal-backdrop" onClick={() => setDeleting(null)}>
+					<div className="dialog" onClick={(event) => event.stopPropagation()}>
+						<h2 className="dialog-title">Eliminar canal</h2>
+						<p className="dialog-text">
+							¿Seguro que querés eliminar <strong>{deleting.name}</strong>? Se borra de la lista para todos y no se puede
+							deshacer.
+						</p>
+						<div className="dialog-actions">
+							<button type="button" className="button secondary" onClick={() => setDeleting(null)}>
+								Cancelar
+							</button>
+							<button
+								type="button"
+								className="button danger"
+								onClick={() => {
+									removeChannel(deleting.channelId);
+									setDeleting(null);
+								}}>
+								Eliminar
+							</button>
+						</div>
+					</div>
+				</div>
+			) : null}
 		</div>
 	);
 }

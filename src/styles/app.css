@@ -3430,276 +3430,6 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: white;
 }
 
-/* ---------- Selector de pantalla ---------- */
-
-.share-picker {
-	flex-direction: column;
-	width: min(58rem, 92vw);
-	height: min(42rem, 88vh);
-	padding: 1.25rem;
-	position: relative;
-}
-
-.share-picker-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 1rem;
-}
-
-.share-picker-header h2 {
-	font-size: 1.125rem;
-	font-weight: 700;
-	color: var(--text-primary);
-}
-
-.share-picker-tabs {
-	display: flex;
-	gap: 0.25rem;
-	margin: 0.875rem 0;
-	flex-shrink: 0;
-}
-
-.share-picker-tabs button {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.375rem;
-	padding: 0.5rem 0.875rem;
-	border-radius: var(--radius-md);
-	font-size: 0.875rem;
-	font-weight: 600;
-	color: var(--text-tertiary);
-}
-
-.share-picker-tabs button:hover {
-	background-color: var(--background-modifier-hover);
-	color: var(--text-secondary);
-}
-
-.share-picker-tabs button.is-active {
-	background-color: var(--background-modifier-selected);
-	color: var(--text-primary);
-}
-
-.share-source {
-	position: relative;
-}
-
-.share-source-check {
-	position: absolute;
-	top: 0.5rem;
-	right: 0.5rem;
-	display: grid;
-	place-items: center;
-	width: 1.5rem;
-	height: 1.5rem;
-	border-radius: var(--radius-full);
-	background-color: var(--brand-primary);
-	color: var(--text-on-brand-primary);
-}
-
-.share-settings {
-	display: flex;
-	flex-direction: column;
-	gap: 0.625rem;
-	margin-top: 0.875rem;
-	flex-shrink: 0;
-}
-
-.share-settings-group {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-}
-
-.share-settings-group .settings-label {
-	margin: 0;
-	min-width: 7rem;
-}
-
-.share-settings-bitrate input {
-	flex: 1;
-}
-
-.share-advanced-toggle {
-	align-self: flex-start;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.25rem;
-	color: var(--text-tertiary);
-	font-size: 0.8125rem;
-	font-weight: 600;
-}
-
-.share-advanced-toggle:hover {
-	color: var(--text-secondary);
-}
-
-.share-picker-footer {
-	display: flex;
-	align-items: center;
-	gap: 1rem;
-	margin-top: 0.875rem;
-	padding-top: 0.875rem;
-	border-top: 1px solid var(--border-color);
-	flex-shrink: 0;
-}
-
-.share-picker-summary {
-	flex: 1;
-	font-size: 0.8125rem;
-	color: var(--text-tertiary);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.share-picker-grid {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-	gap: 0.75rem;
-	overflow-y: auto;
-	flex: 1;
-	padding-right: 0.25rem;
-}
-
-.share-source {
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-	padding: 0.5rem;
-	border: 1px solid var(--border-color);
-	border-radius: var(--radius-lg);
-	background-color: var(--background-secondary);
-	text-align: left;
-	overflow: hidden;
-}
-
-.share-source:hover {
-	border-color: var(--brand-primary);
-	background-color: var(--background-secondary-alt);
-}
-
-.share-source img {
-	width: 100%;
-	aspect-ratio: 16 / 9;
-	object-fit: cover;
-	border-radius: var(--radius-sm);
-	background-color: var(--background-tertiary);
-}
-
-.share-source-empty {
-	width: 100%;
-	aspect-ratio: 16 / 9;
-	display: grid;
-	place-items: center;
-	border-radius: var(--radius-sm);
-	background-color: var(--background-tertiary);
-	color: var(--text-tertiary);
-}
-
-.share-source-name {
-	display: flex;
-	align-items: center;
-	gap: 0.375rem;
-	font-size: 0.8125rem;
-	font-weight: 600;
-	color: var(--text-secondary);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.share-source-icon {
-	width: 1rem;
-	height: 1rem;
-	border-radius: var(--radius-sm);
-	flex-shrink: 0;
-}
-
-.share-picker-audio {
-	display: flex;
-	align-items: center;
-	gap: 0.5rem;
-	margin-top: 0.75rem;
-	font-size: 0.8125rem;
-	color: var(--text-secondary);
-	cursor: pointer;
-	justify-content: center;
-}
-
-.share-picker-hint {
-	margin-top: 0.75rem;
-	font-size: 0.75rem;
-	color: var(--text-tertiary);
-	text-align: center;
-}
-
-.share-source.is-selected {
-	border-color: var(--brand-primary);
-	box-shadow: 0 0 0 2px var(--brand-primary);
-}
-
-.share-picker-options {
-	margin-top: 1rem;
-	display: flex;
-	flex-direction: column;
-	gap: 0.75rem;
-	flex-shrink: 0;
-}
-
-.share-picker-streaming {
-	display: flex;
-	flex-direction: column;
-	gap: 0.125rem;
-}
-
-.share-picker-chosen {
-	font-size: 0.9375rem;
-	color: var(--text-secondary);
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-
-.share-picker-quality {
-	display: flex;
-	gap: 2rem;
-	flex-wrap: wrap;
-}
-
-.share-segments {
-	display: inline-flex;
-	gap: 0.25rem;
-	margin-top: 0.375rem;
-}
-
-.share-segments button {
-	padding: 0.25rem 0.75rem;
-	border-radius: var(--radius-md);
-	background-color: var(--background-secondary);
-	color: var(--text-tertiary);
-	font-size: 0.8125rem;
-	font-weight: 600;
-}
-
-.share-segments button:hover {
-	background-color: var(--background-secondary-alt);
-	color: var(--text-secondary);
-}
-
-.share-segments button.is-active {
-	background-color: var(--brand-primary);
-	color: var(--text-on-brand-primary);
-}
-
-.share-picker-actions {
-	display: flex;
-	justify-content: flex-end;
-	gap: 0.5rem;
-	margin-top: 0.25rem;
-}
-
 /* ---------- Medidor de micrófono ---------- */
 
 .mic-meter {
@@ -4220,4 +3950,141 @@ body.no-cosmetic-anim .avatar-effect::after {
 	display: flex;
 	justify-content: flex-end;
 	gap: 0.5rem;
+}
+
+/* ---------- Canales: crear y borrar ---------- */
+
+.channel-category-header .channel-add {
+	margin-left: auto;
+	display: grid;
+	place-items: center;
+	width: 1.125rem;
+	height: 1.125rem;
+	border-radius: var(--radius-sm);
+	color: var(--text-tertiary);
+	opacity: 0;
+	transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+
+.channel-category-header:hover .channel-add,
+.channel-category-header .channel-add:focus-visible {
+	opacity: 1;
+}
+
+.channel-category-header .channel-add:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-primary);
+}
+
+.context-menu {
+	position: fixed;
+	z-index: var(--z-modal);
+	min-width: 11rem;
+	padding: 0.375rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid var(--border-color);
+	background-color: var(--background-secondary);
+	box-shadow: var(--shadow-xl);
+}
+
+.context-menu button {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	padding: 0.375rem 0.5rem;
+	border-radius: var(--radius-sm);
+	text-align: left;
+	font-size: 0.875rem;
+	font-weight: 500;
+	color: var(--text-secondary);
+}
+
+.context-menu button:hover {
+	background-color: var(--brand-primary);
+	color: var(--text-on-brand-primary);
+}
+
+.context-menu button.is-danger {
+	color: var(--status-dnd);
+}
+
+.context-menu button.is-danger:hover {
+	background-color: var(--status-dnd);
+	color: #fff;
+}
+
+.context-menu button:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+
+.context-menu button:disabled:hover {
+	background-color: transparent;
+	color: var(--status-dnd);
+}
+
+/* ---------- Diálogos chicos (crear o borrar canal) ---------- */
+
+.dialog {
+	width: min(28rem, 92vw);
+	padding: 1.5rem;
+	border-radius: var(--radius-lg);
+	background-color: var(--background-primary);
+	box-shadow: var(--shadow-xl);
+	color: var(--text-primary);
+}
+
+.dialog-title {
+	margin-bottom: 0.5rem;
+	font-size: 1.125rem;
+	font-weight: 700;
+}
+
+.dialog-text {
+	margin-bottom: 1rem;
+	font-size: 0.9375rem;
+	line-height: 1.4;
+	color: var(--text-secondary);
+}
+
+.dialog-field {
+	display: flex;
+	flex-direction: column;
+	gap: 0.375rem;
+}
+
+.dialog-field > span {
+	font-size: 0.6875rem;
+	font-weight: 700;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	color: var(--text-tertiary);
+}
+
+.dialog-field input {
+	width: 100%;
+	padding: 0.625rem 0.75rem;
+	border-radius: var(--radius-sm);
+	border: 1px solid transparent;
+	background-color: var(--background-tertiary);
+	color: var(--text-primary);
+	font-size: 0.9375rem;
+}
+
+.dialog-field input:focus {
+	border-color: var(--brand-primary);
+	outline: none;
+}
+
+.dialog-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 1.25rem;
+}
+
+/* Atajos: aviso de una tecla que Windows no dejó registrar. */
+.hotkey-failed {
+	color: var(--status-dnd);
 }

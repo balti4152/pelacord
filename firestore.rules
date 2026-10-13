@@ -9,6 +9,10 @@ service cloud.firestore {
     match /messages/{channelId}/items/{messageId} {
       allow read, write: if true;
     }
+    // Lista de canales (nombre, tipo, categoría): compartida para que todos vean lo mismo.
+    match /channels/{channelId} {
+      allow read, write: if true;
+    }
     match /voice/{channelId}/members/{clientId} {
       allow read, write: if true;
     }

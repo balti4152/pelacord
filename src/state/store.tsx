@@ -1,14 +1,16 @@
-import {createContext, type Dispatch, type ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef} from 'react';
+import {createContext, type Dispatch, type ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick} from '@/lib/notifications';
-import {deleteMessage as deleteRemoteMessage, postMessage, subscribeMessages, updateMessage} from '@/lib/remote';
+import {deleteMessage as deleteRemoteMessage, postMessage, putChannel, removeRemoteChannel, subscribeChannels, subscribeMessages, updateMessage} from '@/lib/remote';
 import {playSound} from '@/lib/sounds';
 import type {
 	AppState,
 	Attachment,
+	Channel,
+	ChannelType,
 	Member,
 	Message,
 	Presence,
@@ -88,12 +90,15 @@ function toParticipant(member: Member, flags: Partial<VoiceParticipant> = {}): V
 	};
 }
 
-const CHANNELS = [
-	{id: 'ch-general', type: 'text' as const, name: 'general', category: 'Canales de texto', topic: 'Charla general de Pelacord'},
-	{id: 'ch-random', type: 'text' as const, name: 'random', category: 'Canales de texto', topic: 'Lo que sea'},
-	{id: 'ch-memes', type: 'text' as const, name: 'memes', category: 'Canales de texto'},
-	{id: 'ch-voice-general', type: 'voice' as const, name: 'General', category: 'Canales de voz'},
-	{id: 'ch-voice-gaming', type: 'voice' as const, name: 'Gaming', category: 'Canales de voz'},
+export const TEXT_CATEGORY = 'Canales de texto';
+export const VOICE_CATEGORY = 'Canales de voz';
+
+const CHANNELS: Channel[] = [
+	{id: 'ch-general', type: 'text', name: 'general', category: TEXT_CATEGORY, topic: 'Charla general de Pelacord'},
+	{id: 'ch-random', type: 'text', name: 'random', category: TEXT_CATEGORY, topic: 'Lo que sea'},
+	{id: 'ch-memes', type: 'text', name: 'memes', category: TEXT_CATEGORY},
+	{id: 'ch-voice-general', type: 'voice', name: 'General', category: VOICE_CATEGORY},
+	{id: 'ch-voice-gaming', type: 'voice', name: 'Gaming', category: VOICE_CATEGORY},
 ];
 
 function seedState(): AppState {
@@ -177,7 +182,10 @@ type Action =
 	| {type: 'leaveVoice'}
 	| {type: 'minimizeVoice'}
 	| {type: 'openVoiceStage'}
-	| {type: 'toggleVoiceFlag'; flag: 'muted' | 'deafened' | 'video' | 'sharing'};
+	| {type: 'toggleVoiceFlag'; flag: 'muted' | 'deafened' | 'video' | 'sharing'}
+	| {type: 'addChannel'; channel: Channel}
+	| {type: 'deleteChannel'; channelId: string}
+	| {type: 'setChannels'; channels: Channel[]};
 
 function reducer(state: AppState, action: Action): AppState {
 	switch (action.type) {
@@ -309,6 +317,41 @@ function reducer(state: AppState, action: Action): AppState {
 			}
 			return {...state, voice: {...state.voice, [action.flag]: !state.voice[action.flag]}};
 		}
+		case 'addChannel': {
+			// Un canal de texto nuevo se abre solo, como en Discord.
+			return {
+				...state,
+				channels: [...state.channels, action.channel],
+				activeChannelId: action.channel.type === 'text' ? action.channel.id : state.activeChannelId,
+			};
+		}
+		case 'deleteChannel': {
+			if (state.channels.length <= 1) return state;
+			const channels = state.channels.filter((channel) => channel.id !== action.channelId);
+			const messages = {...state.messages};
+			delete messages[action.channelId];
+			const unread = {...state.unread};
+			delete unread[action.channelId];
+			const voiceMembers = {...state.voiceMembers};
+			delete voiceMembers[action.channelId];
+			const wasInVoice = state.voice.channelId === action.channelId;
+			const nextText = channels.find((channel) => channel.type === 'text');
+			return {
+				...state,
+				channels,
+				messages,
+				unread,
+				voiceMembers,
+				mutedChannels: state.mutedChannels.filter((id) => id !== action.channelId),
+				activeChannelId:
+					state.activeChannelId === action.channelId && nextText ? nextText.id : state.activeChannelId,
+				voice: wasInVoice
+					? {channelId: null, muted: false, deafened: false, mutedBeforeDeafen: false, video: false, sharing: false, stageOpen: false, joinedAt: null}
+					: state.voice,
+			};
+		}
+		case 'setChannels':
+			return {...state, channels: action.channels};
 		default:
 			return state;
 	}
@@ -398,12 +441,20 @@ interface StoreContextValue {
 	updateProfile: (patch: Partial<Member>) => void;
 	updateSettings: (patch: Partial<Settings>) => void;
 	setCssVariable: (name: string, value: string) => void;
+	/** Crea un canal (de texto o de voz) y lo comparte con los demás. */
+	addChannel: (type: ChannelType, name: string) => void;
+	/** Borra un canal y lo saca de la lista compartida. */
+	removeChannel: (channelId: string) => void;
+	/** Atajos globales que Windows rechazó, para avisar en Ajustes. */
+	hotkeyFailures: Array<{action: string; accelerator: string}>;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
 
 export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const [state, dispatch] = useReducer(reducer, undefined, loadState);
+	/** Atajos que Windows no dejó registrar (otro programa los usa o la tecla no se puede). */
+	const [hotkeyFailures, setHotkeyFailures] = useState<Array<{action: string; accelerator: string}>>([]);
 	const meRef = useRef(state.me);
 	meRef.current = state.me;
 	const voiceRef = useRef(state.voice);
@@ -420,6 +471,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	knownMembersRef.current = state.knownMembers;
 	const mutedChannelsRef = useRef<string[]>(state.mutedChannels);
 	mutedChannelsRef.current = state.mutedChannels;
+	const channelsRef = useRef<Channel[]>(state.channels);
+	channelsRef.current = state.channels;
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
 
 	useEffect(() => {
@@ -726,14 +779,34 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => clearInterval(timer);
 	}, [presencePayload]);
 
+	// La lista de canales también se comparte: si alguien crea o borra uno, lo ven todos.
+	// La primera vez el proyecto está vacío, así que se suben los canales iniciales.
+	useEffect(() => {
+		if (!isRemoteEnabled()) return;
+		return subscribeChannels((channels, isEmpty, fromCache) => {
+			// Los datos que sólo están en la caché local no se usan: Firestore los muestra antes
+			// de confirmarlos y, si el servidor los rechaza, volvería atrás y borraría la lista.
+			if (fromCache) return;
+			if (isEmpty) {
+				for (const channel of channelsRef.current) void putChannel(channel).catch(() => {});
+				return;
+			}
+			dispatch({type: 'setChannels', channels});
+		});
+	}, []);
+
 	// Messages come from Firestore. Voice presence deliberately does NOT: it runs peer-to-peer
 	// over ZeroTier through the desktop transport, so it never touches the Firebase quota.
 	//
 	// Se escuchan TODOS los canales de texto: así llegan las notificaciones y el puntito rojo
 	// aunque estés mirando otro canal.
+	const textChannelIds = state.channels
+		.filter((channel) => channel.type === 'text')
+		.map((channel) => channel.id)
+		.join(',');
 	useEffect(() => {
 		if (!isRemoteEnabled()) return;
-		const textChannels = CHANNELS.filter((channel) => channel.type === 'text');
+		const textChannels = channelsRef.current.filter((channel) => channel.type === 'text');
 		const unsubscribe = textChannels.map((channel) =>
 			subscribeMessages(channel.id, (messages) => {
 				const previous = messageCountRef.current[channel.id];
@@ -769,7 +842,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => {
 			for (const off of unsubscribe) off();
 		};
-	}, []);
+		// textChannelIds resume los ids: la suscripción se rehace sólo cuando cambia la lista.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [textChannelIds]);
 
 	// El globito de la barra de tareas sigue el total de mensajes sin leer.
 	useEffect(() => {
@@ -790,6 +865,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	}), []);
 
 	// Atajos globales: se registran (y se vuelven a registrar) cuando cambian.
+	// Lo que Windows no acepta se guarda en `hotkeyFailures` para avisarlo en Ajustes: si no,
+	// el usuario aprieta la tecla, no pasa nada y parece que la app está rota.
 	useEffect(() => {
 		const transport = getDesktopTransport();
 		if (!transport) return;
@@ -797,11 +874,12 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		void transport
 			.setHotkeys(bindings)
 			.then((failed) => {
+				setHotkeyFailures(Array.isArray(failed) ? failed : []);
 				if (Array.isArray(failed) && failed.length > 0) {
 					console.warn('[pelacord] atajos que no se pudieron registrar (¿los usa otro programa?):', failed);
 				}
 			})
-			.catch(() => {});
+			.catch(() => setHotkeyFailures([]));
 	}, [state.settings.hotkeys]);
 
 	const sendMessage = useCallback(
@@ -863,9 +941,43 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[state.activeChannelId],
 	);
 
+	const addChannel = useCallback((type: ChannelType, name: string) => {
+		const clean = name.trim().slice(0, 60);
+		if (!clean) return;
+		const channel: Channel = {
+			id: `ch-${Date.now().toString(36)}-${Math.floor(Math.random() * 46656).toString(36)}`,
+			type,
+			name: clean,
+			category: type === 'text' ? TEXT_CATEGORY : VOICE_CATEGORY,
+		};
+		dispatch({type: 'addChannel', channel});
+		if (isRemoteEnabled()) {
+			void putChannel(channel).catch((error) => console.warn('[pelacord] no se pudo guardar el canal', error));
+		}
+	}, []);
+
+	const removeChannel = useCallback((channelId: string) => {
+		dispatch({type: 'deleteChannel', channelId});
+		if (isRemoteEnabled()) {
+			void removeRemoteChannel(channelId).catch((error) => console.warn('[pelacord] no se pudo borrar el canal', error));
+		}
+	}, []);
+
 	const value = useMemo<StoreContextValue>(
-		() => ({state, dispatch, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable}),
-		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable],
+		() => ({
+			state,
+			dispatch,
+			sendMessage,
+			editMessage,
+			removeMessage,
+			updateProfile,
+			updateSettings,
+			setCssVariable,
+			addChannel,
+			removeChannel,
+			hotkeyFailures,
+		}),
+		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, hotkeyFailures],
 	);
 
 	return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

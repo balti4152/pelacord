@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
-import {openSharePicker} from '@/lib/sharePicker';
+import {prepareShare} from '@/lib/screenShare';
 import {useStore} from '@/state/store';
 
 /**
@@ -65,10 +65,10 @@ export function VoicePanel({onOpenVoice}: {onOpenVoice: () => void}): JSX.Elemen
 				<button
 					type="button"
 					className={`voice-mini${voice.sharing ? ' is-active' : ''}`}
-					title="Compartir pantalla"
+					title={voice.sharing ? 'Dejar de compartir' : 'Compartir pantalla'}
 					onClick={() => {
 						if (voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-						else openSharePicker();
+						else void prepareShare('screen').then((ok) => { if (ok) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'}); });
 					}}>
 					<Icon name="screenShare" size={18} />
 				</button>

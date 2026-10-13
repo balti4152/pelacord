@@ -10,7 +10,7 @@ import {
 } from '@/components/RemoteMedia';
 import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
 import {voiceMesh} from '@/lib/media';
-import {openSharePicker} from '@/lib/sharePicker';
+import {prepareShare} from '@/lib/screenShare';
 import {setOutputVolume} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 import type {VoiceParticipant} from '@/types';
@@ -370,10 +370,10 @@ export function CallStage(): JSX.Element | null {
 				<button
 					type="button"
 					className={`call-control${voice.sharing ? ' is-active' : ''}`}
-					title="Compartir pantalla"
+					title={voice.sharing ? 'Dejar de compartir' : 'Compartir pantalla'}
 					onClick={() => {
 						if (voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-						else openSharePicker();
+						else void prepareShare('screen').then((ok) => { if (ok) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'}); });
 					}}>
 					<Icon name="screenShare" size={22} />
 				</button>
