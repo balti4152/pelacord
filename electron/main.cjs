@@ -788,7 +788,7 @@ function spotifyErrorMessage(status, detail = '') {
 		return 'Tu cuenta todavía no está habilitada para esta app. El dueño de la app tiene que agregarte en el panel de Spotify (Settings → Users Management → Add new user, con tu nombre real y tu email de Spotify) y después volvés a iniciar sesión.';
 	}
 	if (status === 401) return 'La sesión de Spotify venció: volvé a iniciar sesión.';
-	if (status === 403) return 'Spotify ya no deja que las apps lean las canciones de playlists que no son tuyas (ni siquiera las públicas). El único caso que sí permite es si el dueño te agrega como COLABORADOR.';
+	if (status === 403) return 'Spotify no entrega las canciones de esta playlist por API (sólo lo hace con las tuyas). Se intenta leer la página pública.';
 	if (status === 404) return 'Esa playlist ya no existe.';
 	if (status === 429) return 'Spotify está limitando los pedidos: probá de nuevo en un rato.';
 	return detail ? `Spotify respondió ${status}: ${detail}` : `Spotify respondió ${status}.`;
@@ -986,6 +986,77 @@ ipcMain.handle('pelacord:spotify-tracks', async (_event, playlistId) => {
 		url = data.next || '';
 	}
 	return {ok: true, tracks};
+});
+
+/**
+ * Lee las canciones de una playlist PÚBLICA de otra persona.
+ *
+ * Por qué así: Spotify cerró la puerta por API. El contenido de una playlist ajena no se entrega
+ * ni con el token de la cuenta ni con el de la aplicación, aunque sea pública. Lo que SÍ sigue
+ * público es el EMBED (`open.spotify.com/embed/playlist/ID`), que arma la lista con JavaScript en
+ * el navegador. Así que se carga ese embed en una ventana OCULTA y se leen las filas del DOM.
+ *
+ * Es leer una página pública, no saltarse un login (no usa cookies ni sesión). Si Spotify cambia
+ * el embed, esto deja de andar: por eso se devuelve un error claro en vez de inventar canciones.
+ */
+const SPOTIFY_EMBED_READER = `(() => {
+	const rows = [...document.querySelectorAll('li[data-testid^="tracklist-row"]')];
+	// El "E" de explícito es una etiqueta adentro del título/artista: se saca antes de leer el texto.
+	const clean = (cell) => {
+		if (!cell) return '';
+		const copy = cell.cloneNode(true);
+		copy.querySelectorAll('[data-testid="tag"]').forEach((tag) => tag.remove());
+		return (copy.textContent || '').trim();
+	};
+	return rows.map((row) => {
+		const duration = (row.querySelector('[data-testid="duration-cell"]')?.textContent || '').trim();
+		const [minutes, seconds] = duration.split(':').map((part) => Number(part) || 0);
+		return {title: clean(row.querySelector('h3')), artists: clean(row.querySelector('h4')), duration: minutes * 60 + seconds};
+	}).filter((track) => track.title);
+})()`;
+
+/** Lo ya leído de una playlist pública (para no volver a abrir la ventana cada vez). */
+const spotifyPublicCache = new Map();
+
+ipcMain.handle('pelacord:spotify-public-playlist', async (_event, playlistId) => {
+	const id = String(playlistId || '').trim();
+	if (!/^[A-Za-z0-9]{16,40}$/.test(id)) return {ok: false, error: 'Esa playlist no tiene un id válido.'};
+	const cached = spotifyPublicCache.get(id);
+	if (cached && Date.now() - cached.at < 10 * 60 * 1000) return {ok: true, tracks: cached.tracks, cached: true};
+
+	const win = new BrowserWindow({
+		show: false,
+		width: 1100,
+		height: 900,
+		webPreferences: {
+			// Ventana aislada: sin Node y con su propia partición (no toca ninguna sesión).
+			contextIsolation: true,
+			nodeIntegration: false,
+			partition: 'pelacord-spotify-public',
+			// Sin esto, Windows frena los temporizadores de una ventana oculta y la lista no se arma.
+			backgroundThrottling: false,
+		},
+	});
+	try {
+		await win.loadURL(`https://open.spotify.com/embed/playlist/${id}`);
+		for (let attempt = 0; attempt < 24; attempt++) {
+			const tracks = await win.webContents.executeJavaScript(SPOTIFY_EMBED_READER, true);
+			if (Array.isArray(tracks) && tracks.length > 0) {
+				spotifyPublicCache.set(id, {tracks, at: Date.now()});
+				return {ok: true, tracks};
+			}
+			await new Promise((resolve) => setTimeout(resolve, 500));
+		}
+		return {ok: false, error: 'La página de Spotify no devolvió las canciones (¿la playlist es privada?).'};
+	} catch (error) {
+		return {ok: false, error: `No se pudo abrir la página de Spotify: ${error.message}`};
+	} finally {
+		try {
+			win.destroy();
+		} catch {
+			// ya estaba cerrada
+		}
+	}
 });
 
 /** Cerrar sesión: se olvida el token guardado. */

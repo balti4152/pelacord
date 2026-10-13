@@ -153,17 +153,27 @@ export function SpotifyView(): JSX.Element {
 		setError('');
 	}
 
+	/**
+	 * Trae las canciones de una playlist.
+	 *
+	 * Las TUYAS van por la API de Spotify. Las de otra cuenta no: Spotify no las entrega por API ni
+	 * con el token de la aplicación (probado), así que se leen del embed público de la playlist.
+	 */
+	async function readTracks(playlist: SpotifyPlaylist): Promise<{ok: boolean; error?: string; tracks: SpotifyTrack[]}> {
+		const transport = getDesktopTransport();
+		if (!transport) return {ok: false, error: 'Spotify sólo funciona en la app de escritorio.', tracks: []};
+		return playlist.readable ? transport.spotifyTracks(playlist.id) : transport.spotifyPublicTracks(playlist.id);
+	}
+
 	/** Abre una playlist y trae sus canciones (con la portada de cada álbum). */
 	async function openPlaylist(playlist: SpotifyPlaylist): Promise<void> {
-		const transport = getDesktopTransport();
-		if (!transport) return;
 		setOpen(playlist);
 		setTracks([]);
 		setError('');
 		setNotice('');
 		setTracksLoading(true);
 		try {
-			const result = await transport.spotifyTracks(playlist.id);
+			const result = await readTracks(playlist);
 			setTracks(result.tracks ?? []);
 			if (!result.ok) setError(result.error ?? 'No se pudieron leer las canciones de esa playlist.');
 		} catch (failure) {
@@ -250,8 +260,6 @@ export function SpotifyView(): JSX.Element {
 	/** Trae las canciones de una playlist y las agrega TODAS a la cola (sin abrirla). */
 	async function addAllFromPlaylist(playlist: SpotifyPlaylist): Promise<void> {
 		if (busy) return;
-		const transport = getDesktopTransport();
-		if (!transport) return;
 		if (!inVoice) {
 			setError('Unite a un canal de voz para agregar canciones a la cola.');
 			return;
@@ -261,7 +269,7 @@ export function SpotifyView(): JSX.Element {
 		setBusy(playlist.id);
 		setProgress({done: 0, total: playlist.tracks || 0});
 		try {
-			const result = await transport.spotifyTracks(playlist.id);
+			const result = await readTracks(playlist);
 			if (!result.ok) {
 				setError(result.error ?? 'No se pudieron leer las canciones de esa playlist.');
 				return;
@@ -378,7 +386,7 @@ export function SpotifyView(): JSX.Element {
 							</span>
 							<span className="spotify-row-sub">
 								{open.owner ? `${open.owner} · ` : ''}
-								{open.readable ? `${open.tracks} ${open.tracks === 1 ? 'canción' : 'canciones'}` : 'sólo las tuyas se pueden leer'}
+								{open.readable ? `${open.tracks} ${open.tracks === 1 ? 'canción' : 'canciones'}` : `de ${open.owner || 'otra cuenta'}`}
 							</span>
 						</span>
 						<button
@@ -395,7 +403,8 @@ export function SpotifyView(): JSX.Element {
 
 					{tracksLoading ? (
 						<p className="settings-hint">
-							<Loader2 size={16} className="music-spin" /> Trayendo las canciones…
+							<Loader2 size={16} className="music-spin" />{' '}
+							{open.readable ? 'Trayendo las canciones…' : 'Leyendo la playlist pública de Spotify…'}
 						</p>
 					) : null}
 					{busy === open.id ? (
@@ -419,7 +428,11 @@ export function SpotifyView(): JSX.Element {
 						{tracks.map((track, index) => (
 							<li key={`${track.title}-${index}`} className="spotify-row">
 								<span className="music-row-index">{index + 1}</span>
-								{track.image ? <img src={track.image} alt="" loading="lazy" /> : <span className="spotify-cover" />}
+								{track.image || open.image ? (
+									<img src={track.image || open.image} alt="" loading="lazy" />
+								) : (
+									<span className="spotify-cover" />
+								)}
 								<span className="spotify-row-info">
 									<span className="spotify-row-title" title={track.title}>
 										{track.title}
@@ -483,7 +496,7 @@ export function SpotifyView(): JSX.Element {
 											{playlist.owner ? `${playlist.owner} · ` : ''}
 											{playlist.readable
 												? `${playlist.tracks} ${playlist.tracks === 1 ? 'canción' : 'canciones'}`
-												: 'sólo las tuyas se pueden leer'}
+												: 'de otra cuenta · tocá para ver las canciones'}
 										</span>
 									</span>
 									<button
