@@ -10,7 +10,7 @@ import {
 } from '@/components/RemoteMedia';
 import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
 import {voiceMesh} from '@/lib/media';
-import {prepareShare} from '@/lib/screenShare';
+import {openSharePicker} from '@/lib/sharePicker';
 import {setOutputVolume} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 import type {VoiceParticipant} from '@/types';
@@ -372,8 +372,9 @@ export function CallStage(): JSX.Element | null {
 					className={`call-control${voice.sharing ? ' is-active' : ''}`}
 					title={voice.sharing ? 'Dejar de compartir' : 'Compartir pantalla'}
 					onClick={() => {
+						// Desde la interfaz sí se elige: se abre el selector con pantallas, ventanas y calidad.
 						if (voice.sharing) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
-						else void prepareShare('screen').then((ok) => { if (ok) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'}); });
+						else openSharePicker();
 					}}>
 					<Icon name="screenShare" size={22} />
 				</button>

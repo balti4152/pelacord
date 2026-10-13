@@ -21,12 +21,12 @@ export const HOTKEYS: HotkeyInfo[] = [
 	{
 		action: 'shareScreen',
 		label: 'Compartir pantalla',
-		description: 'Alterna la transmisión del monitor principal.',
+		description: 'Comparte directo el monitor principal. Para elegir pantalla, ventana y calidad, usá el botón de la app.',
 	},
 	{
 		action: 'shareFocused',
 		label: 'Compartir la ventana enfocada',
-		description: 'Alterna la transmisión del programa que tenías adelante.',
+		description: 'Comparte directo el programa que tenías adelante.',
 	},
 ];
 

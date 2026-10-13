@@ -7,6 +7,7 @@ import {Onboarding} from '@/components/Onboarding';
 import {FloatingStream} from '@/components/FloatingStream';
 import {Icon} from '@/components/primitives';
 import {RemoteAudio} from '@/components/RemoteMedia';
+import {ScreenSharePicker} from '@/components/ScreenSharePicker';
 import {SettingsModal} from '@/components/SettingsModal';
 import {getDesktopTransport, isDesktop} from '@/lib/desktop';
 import {hasChosenName} from '@/lib/identity';
@@ -14,13 +15,18 @@ import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
 import {initUpdater} from '@/lib/updater';
 import {prepareShare} from '@/lib/screenShare';
+import {subscribeSharePicker} from '@/lib/sharePicker';
 import {playSound} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 
 export function App(): JSX.Element {
 	const {state, dispatch} = useStore();
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
+
+	// El selector de pantalla se puede abrir desde cualquier lado (botón del sidebar, llamada…).
+	useEffect(() => subscribeSharePicker(() => setSharePickerOpen(true)), []);
 
 	useEffect(() => {
 		initUpdater();
@@ -186,6 +192,17 @@ export function App(): JSX.Element {
 			<RemoteAudio />
 			<FloatingStream />
 			{settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} /> : null}
+			{sharePickerOpen ? (
+				<ScreenSharePicker
+					onCancel={() => setSharePickerOpen(false)}
+					onPick={(sourceId, options) => {
+						setSharePickerOpen(false);
+						getDesktopTransport()?.selectSource(sourceId);
+						voiceMesh.setScreenOptions(options);
+						if (!sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+					}}
+				/>
+			) : null}
 			{dragging ? (
 				<div className="drop-overlay">
 					<Icon name="attach" size={44} />
