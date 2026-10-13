@@ -864,6 +864,20 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		if (channelId) dispatch({type: 'selectChannel', channelId});
 	}), []);
 
+	// Los botones de la ventana (minimizar/maximizar/cerrar) los dibuja Windows ENCIMA del
+	// contenido, arriba a la derecha. Su ancho depende de la escala de la pantalla, así que se
+	// reserva ese espacio en las cabeceras: si no, tapan el botón de pantalla completa y compañía.
+	useEffect(() => {
+		const update = () => {
+			// Cada botón mide 46px a 100%; son tres, y escalan con la resolución de Windows.
+			const width = Math.round(46 * 3 * (window.devicePixelRatio || 1));
+			document.documentElement.style.setProperty('--window-controls-width', `${width}px`);
+		};
+		update();
+		window.addEventListener('resize', update);
+		return () => window.removeEventListener('resize', update);
+	}, []);
+
 	// Atajos globales: se registran (y se vuelven a registrar) cuando cambian.
 	// Lo que Windows no acepta se guarda en `hotkeyFailures` para avisarlo en Ajustes: si no,
 	// el usuario aprieta la tecla, no pasa nada y parece que la app está rota.

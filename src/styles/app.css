@@ -665,6 +665,24 @@
 	pointer-events: none;
 }
 
+/* Cuando lo que se ve es tu propia transmisión: fondo gris y aviso, sin reproducir la captura. */
+.floating-stream-off {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.5rem;
+	width: 100%;
+	height: 100%;
+	padding: 1rem;
+	background-color: #4b4b50;
+	color: #dcdce1;
+	text-align: center;
+	font-size: 0.75rem;
+	line-height: 1.3;
+	pointer-events: none;
+}
+
 .attachment-file {
 	display: flex;
 	align-items: center;
@@ -2119,10 +2137,12 @@
 	-webkit-app-region: drag;
 }
 
-/* Lugar para los botones de la ventana (arriba a la derecha). */
+/* Lugar para los botones de la ventana (arriba a la derecha).
+   El ancho lo calcula el renderer según la escala de Windows (--window-controls-width): a 125%
+   o 150% los botones son más anchos y, si no se reserva de más, tapan los de la app. */
 .chat-header,
 .call-stage-header {
-	padding-right: 9.5rem;
+	padding-right: calc(var(--window-controls-width, 8.625rem) + 0.75rem);
 }
 
 /* Información de la versión (Ajustes) */
@@ -2694,6 +2714,9 @@ body.no-cosmetic-anim .avatar-effect::after {
 
 .modal {
 	display: flex;
+	/* `relative` para que la X de cerrar se ubique dentro del modal y no en la esquina de la
+	   ventana, donde la tapan los botones de minimizar/maximizar/cerrar de Windows. */
+	position: relative;
 	width: min(50rem, 92vw);
 	height: min(40rem, 88vh);
 	border-radius: var(--radius-lg);

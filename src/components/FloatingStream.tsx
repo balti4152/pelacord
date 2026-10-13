@@ -1,4 +1,5 @@
 import {type PointerEvent, useEffect, useRef, useState} from 'react';
+import {Icon} from '@/components/primitives';
 import {useLocalScreen, useMeshRemotes} from '@/components/RemoteMedia';
 import {useStore} from '@/state/store';
 
@@ -18,17 +19,25 @@ export function FloatingStream(): JSX.Element | null {
 	const videoRef = useRef<HTMLVideoElement>(null);
 
 	const remote = remotes.find((entry) => entry.video && entry.video.getVideoTracks()[0]?.readyState === 'live');
-	const stream = remote?.video ?? (state.voice.sharing ? localScreen : null);
-	const visible = Boolean(state.voice.channelId && !state.voice.stageOpen && stream);
+	const remoteVideo = remote?.video ?? null;
+	// Si lo único que hay para ver es MI propia transmisión, no se reproduce acá: mostrar tu
+	// propia captura gasta GPU al pedo mientras jugás. La ventanita queda igual (se arrastra y
+	// con un click volvés a la llamada).
+	const ownShare = !remoteVideo && state.voice.sharing;
+	const stream = remoteVideo ?? (state.voice.sharing ? localScreen : null);
+	// Alcanza con estar compartiendo para mostrar el flotante: la captura local puede tardar
+	// (o no estar), pero la ventanita tiene que estar igual.
+	const visible = Boolean(state.voice.channelId && !state.voice.stageOpen && (stream || ownShare));
 
 	// Asigna el stream al <video> (todos los hooks van arriba, sin returns previos).
 	useEffect(() => {
+		if (ownShare) return;
 		if (!videoRef.current || !stream) return;
 		if (videoRef.current.srcObject !== stream) {
 			videoRef.current.srcObject = stream;
 			void videoRef.current.play().catch(() => {});
 		}
-	}, [stream, visible]);
+	}, [stream, visible, ownShare]);
 
 	if (!visible) return null;
 
@@ -71,8 +80,15 @@ export function FloatingStream(): JSX.Element | null {
 			onPointerMove={onPointerMove}
 			onPointerUp={onPointerUp}
 			title="Click para volver a la llamada">
-			<video ref={videoRef} autoPlay playsInline muted />
-			<span className="floating-stream-hint">En vivo · click para abrir</span>
+			{ownShare ? (
+				<div className="floating-stream-off">
+					<Icon name="screenShare" size={26} />
+					<span>Vista previa desactivada para ahorrar rendimiento</span>
+				</div>
+			) : (
+				<video ref={videoRef} autoPlay playsInline muted />
+			)}
+			<span className="floating-stream-hint">{ownShare ? 'Compartiendo · click para abrir' : 'En vivo · click para abrir'}</span>
 		</div>
 	);
 }
