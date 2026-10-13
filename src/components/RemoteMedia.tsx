@@ -105,6 +105,8 @@ export function RemoteAudio(): JSX.Element {
 	const volume = useOutputVolume();
 	const {state} = useStore();
 	const sinkId = state.settings.outputDeviceId;
+	// "Separado de la Jam": escucha su propia música y no la del grupo.
+	const detached = state.settings.musicDetached ?? false;
 	return (
 		<>
 			{remotes.flatMap((remote) => {
@@ -119,6 +121,18 @@ export function RemoteAudio(): JSX.Element {
 					/>
 				));
 			})}
+			{/* Música de la Jam: se reproduce aparte para poder bajarle el volumen sin tocar las voces. */}
+			{remotes.map((remote) =>
+				remote.music ? (
+					<AudioPlayer
+						key={`${remote.peerId}-music`}
+						stream={remote.music}
+						muted={deafened || detached}
+						volume={volume * voiceMesh.getMusicVolume()}
+						sinkId={sinkId}
+					/>
+				) : null,
+			)}
 		</>
 	);
 }

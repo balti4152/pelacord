@@ -1,6 +1,20 @@
 import {createContext, type Dispatch, type ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
+import {voiceMesh} from '@/lib/media';
+import {
+	EMPTY_MUSIC_STATE,
+	type MusicState,
+	type MusicTrack,
+	appendToQueue,
+	currentPositionMs,
+	isHostAlive,
+	moveInQueue,
+	removeFromQueue,
+	subscribeMusicState,
+	updateMusicState,
+} from '@/lib/musicQueue';
+import {startMusicStream, stopMusicStream} from '@/lib/musicPlayer';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
@@ -451,6 +465,18 @@ interface StoreContextValue {
 	sendPeerCommand: (peerId: string, payload: {kind: 'mute' | 'deafen' | 'disconnect'; on?: boolean}) => void;
 	/** Atajos globales que Windows rechazó, para avisar en Ajustes. */
 	hotkeyFailures: Array<{action: string; accelerator: string}>;
+	/** Música: estado compartido de la Jam. */
+	musicState: MusicState;
+	/** Pone un tema en la Jam (null = cortar). Cualquiera puede, es estilo Jam. */
+	musicPlay: (track: MusicTrack | null, startAtMs?: number) => Promise<void>;
+	musicEnqueue: (track: MusicTrack) => Promise<void>;
+	musicRemove: (index: number) => Promise<void>;
+	musicMove: (from: number, to: number) => Promise<void>;
+	musicSkip: () => Promise<void>;
+	musicTogglePause: () => Promise<void>;
+	/** Separarse de la Jam (para escuchar la propia) o volver. */
+	musicSetDetached: (detached: boolean) => void;
+	musicSetVolume: (value: number) => void;
 }
 
 const StoreContext = createContext<StoreContextValue | null>(null);
@@ -1045,6 +1071,171 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[],
 	);
 
+	// ---------- Música: la Jam (el que manda el audio es el "host") ----------
+
+	const [musicState, setMusicState] = useState<MusicState>(EMPTY_MUSIC_STATE);
+	/** Última cola escuchada, para poder modificarla sin depender del render. */
+	const musicStateRef = useRef<MusicState>(EMPTY_MUSIC_STATE);
+	musicStateRef.current = musicState;
+	/** Id del track que estoy mandando (para saber si tengo que cambiar de tema). */
+	const myMusicTrackId = useRef<string | null>(null);
+
+	useEffect(() => subscribeMusicState(setMusicState), []);
+
+	/** Pone un tema (o corta con null). Cualquiera puede: es estilo Jam. */
+	const musicPlay = useCallback(async (track: MusicTrack | null, startAtMs = 0) => {
+		await updateMusicState({
+			track,
+			startedAt: track ? Date.now() - startAtMs : 0,
+			pausedAt: null,
+			positionMs: startAtMs,
+			// El host se elige solo entre los que están en el canal.
+			hostId: null,
+			hostSeenAt: 0,
+		});
+	}, []);
+
+	const musicEnqueue = useCallback((track: MusicTrack) => {
+		return updateMusicState({queue: appendToQueue(musicStateRef.current, track)});
+	}, []);
+
+	const musicRemove = useCallback((index: number) => {
+		return updateMusicState({queue: removeFromQueue(musicStateRef.current, index)});
+	}, []);
+
+	const musicMove = useCallback((from: number, to: number) => {
+		return updateMusicState({queue: moveInQueue(musicStateRef.current, from, to)});
+	}, []);
+
+	/** Salta a lo que sigue en la cola. */
+	const musicSkip = useCallback(async () => {
+		const state = musicStateRef.current;
+		const [next, ...rest] = state.queue;
+		if (!next) {
+			await updateMusicState({track: null, queue: [], startedAt: 0, positionMs: 0, pausedAt: null, hostId: null});
+			return;
+		}
+		await updateMusicState({
+			track: next,
+			queue: rest,
+			startedAt: Date.now(),
+			positionMs: 0,
+			pausedAt: null,
+			hostId: null,
+			hostSeenAt: 0,
+		});
+	}, []);
+
+	/** Pausa o retoma (se guarda el segundo exacto para que todos sigan en el mismo lugar). */
+	const musicTogglePause = useCallback(async () => {
+		const state = musicStateRef.current;
+		if (!state.track) return;
+		if (state.pausedAt) {
+			const position = state.positionMs;
+			await updateMusicState({pausedAt: null, startedAt: Date.now() - position, positionMs: position});
+		} else {
+			await updateMusicState({pausedAt: Date.now(), positionMs: currentPositionMs(state)});
+		}
+	}, []);
+
+	/** Separarse de la Jam (para escuchar la propia) o volver. */
+	const musicSetDetached = useCallback((detached: boolean) => {
+		dispatch({type: 'updateSettings', patch: {musicDetached: detached}});
+	}, []);
+
+	const musicSetVolume = useCallback((value: number) => {
+		voiceMesh.setMusicVolume(value);
+		dispatch({type: 'updateSettings', patch: {musicVolume: value}});
+	}, []);
+
+	/**
+	 * El motor de la Jam. Corre en todos, pero sólo uno manda el audio:
+	 * - Si no hay host (o el host dejó de avisar), el primero que está en el canal lo toma.
+	 * - El host reproduce, manda el audio por la malla y avisa que sigue vivo.
+	 * - Si alguien más manda el audio, no hago nada: lo escucho por RemoteMedia.
+	 */
+	useEffect(() => {
+		const inVoice = Boolean(state.voice.channelId);
+		const track = musicState.track;
+		const hostAlive = isHostAlive(musicState);
+		const iAmHost = musicState.hostId === state.me.id;
+
+		// Sin tema, o no estoy en el canal: me aseguro de no estar mandando nada.
+		if (!track || !inVoice) {
+			if (myMusicTrackId.current) {
+				myMusicTrackId.current = null;
+				stopMusicStream();
+				void voiceMesh.setMusicStream(null);
+				voiceMesh.announceMusicStream(null);
+			}
+			if (iAmHost) void updateMusicState({hostId: null, hostSeenAt: 0});
+			return;
+		}
+
+		// Alguien más está mandando: si era yo, corto.
+		if (hostAlive && !iAmHost) {
+			if (myMusicTrackId.current) {
+				myMusicTrackId.current = null;
+				stopMusicStream();
+				void voiceMesh.setMusicStream(null);
+				voiceMesh.announceMusicStream(null);
+			}
+			return;
+		}
+
+		// Me toca a mí (nadie más lo está haciendo).
+		let cancelled = false;
+		void (async () => {
+			try {
+				// Ya estoy con este tema: sólo aviso que sigo vivo.
+				if (myMusicTrackId.current === track.id) {
+					await updateMusicState({hostId: state.me.id, hostSeenAt: Date.now()});
+					return;
+				}
+				const url = await getDesktopTransport()?.getAudioUrl(track.url || track.id);
+				if (cancelled) return;
+				if (!url) return;
+				const positionMs = currentPositionMs(musicState);
+				const handle = await startMusicStream(url, positionMs / 1000);
+				if (cancelled) {
+					stopMusicStream();
+					return;
+				}
+				myMusicTrackId.current = track.id;
+				await voiceMesh.setMusicStream(handle.stream);
+				voiceMesh.announceMusicStream(handle.stream.id);
+				await updateMusicState({hostId: state.me.id, hostSeenAt: Date.now()});
+				// Cuando termina, salta solo al siguiente.
+				handle.onEnded(() => {
+					myMusicTrackId.current = null;
+					void voiceMesh.setMusicStream(null);
+					voiceMesh.announceMusicStream(null);
+					void musicSkip();
+				});
+			} catch (error) {
+				console.warn('[pelacord] no pude arrancar la música', String(error));
+			}
+		})();
+
+		return () => {
+			cancelled = true;
+		};
+	}, [musicState, state.voice.channelId, state.me.id, musicSkip]);
+
+	// El host avisa que sigue vivo (cada 15 s: si se va, otro toma el control).
+	useEffect(() => {
+		if (musicState.hostId !== state.me.id || !musicState.track) return;
+		const timer = setInterval(() => {
+			void updateMusicState({hostId: state.me.id, hostSeenAt: Date.now()});
+		}, 15000);
+		return () => clearInterval(timer);
+	}, [musicState.hostId, musicState.track, state.me.id]);
+
+	// Volumen guardado de la música.
+	useEffect(() => {
+		voiceMesh.setMusicVolume(state.settings.musicVolume ?? 0.8);
+	}, [state.settings.musicVolume]);
+
 	const value = useMemo<StoreContextValue>(
 		() => ({
 			state,
@@ -1060,8 +1251,39 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			moveMember,
 			sendPeerCommand,
 			hotkeyFailures,
+			musicState,
+			musicPlay,
+			musicEnqueue,
+			musicRemove,
+			musicMove,
+			musicSkip,
+			musicTogglePause,
+			musicSetDetached,
+			musicSetVolume,
 		}),
-		[state, sendMessage, editMessage, removeMessage, updateProfile, updateSettings, setCssVariable, addChannel, removeChannel, moveMember, sendPeerCommand, hotkeyFailures],
+		[
+			state,
+			sendMessage,
+			editMessage,
+			removeMessage,
+			updateProfile,
+			updateSettings,
+			setCssVariable,
+			addChannel,
+			removeChannel,
+			moveMember,
+			sendPeerCommand,
+			hotkeyFailures,
+			musicState,
+			musicPlay,
+			musicEnqueue,
+			musicRemove,
+			musicMove,
+			musicSkip,
+			musicTogglePause,
+			musicSetDetached,
+			musicSetVolume,
+		],
 	);
 
 	return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;

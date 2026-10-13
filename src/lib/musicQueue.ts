@@ -53,7 +53,7 @@ export const EMPTY_MUSIC_STATE: MusicState = {
 };
 
 /** Cuánto puede estar callado el host antes de considerarlo ido (ms). */
-export const HOST_TIMEOUT_MS = 20000;
+export const HOST_TIMEOUT_MS = 45000;
 
 function musicDoc() {
 	const db = getDb();

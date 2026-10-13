@@ -313,6 +313,18 @@ class VoiceMesh {
 	/** Id del stream de música que anunció cada peer (para saber cuál audio es la música). */
 	private remoteMusicIds = new Map<string, string>();
 
+	/** Volumen de la música de la Jam (0 a 1). Es una preferencia de cada uno. */
+	private musicVolume = 0.8;
+
+	getMusicVolume(): number {
+		return this.musicVolume;
+	}
+
+	setMusicVolume(value: number): void {
+		this.musicVolume = Math.min(1, Math.max(0, value));
+		this.emit();
+	}
+
 	/**
 	 * Avisa a todos qué stream es la música de la Jam.
 	 * Sin esto, el otro lado no puede distinguir la música de la voz y no se le podría bajar el
