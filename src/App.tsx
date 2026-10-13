@@ -3,6 +3,7 @@ import {CallStage} from '@/components/CallStage';
 import {ChannelSidebar} from '@/components/ChannelSidebar';
 import {ChatView} from '@/components/ChatView';
 import {MemberList} from '@/components/MemberList';
+import {MusicView} from '@/components/MusicView';
 import {Onboarding} from '@/components/Onboarding';
 import {FloatingStream} from '@/components/FloatingStream';
 import {Icon} from '@/components/primitives';
@@ -22,6 +23,7 @@ import {useStore} from '@/state/store';
 export function App(): JSX.Element {
 	const {state, dispatch} = useStore();
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [musicOpen, setMusicOpen] = useState(false);
 	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
 
@@ -191,8 +193,9 @@ export function App(): JSX.Element {
 				<ChannelSidebar
 					onOpenSettings={() => setSettingsOpen(true)}
 					onOpenVoice={() => dispatch({type: 'openVoiceStage'})}
+					onOpenMusic={() => setMusicOpen(true)}
 				/>
-				{showStage ? <CallStage /> : <ChatView />}
+				{musicOpen ? <MusicView onClose={() => setMusicOpen(false)} /> : showStage ? <CallStage /> : <ChatView />}
 				{showMembers ? <MemberList /> : null}
 			</div>
 			<RemoteAudio />

@@ -1,0 +1,228 @@
+import {useEffect, useState} from 'react';
+import {ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Volume2, X} from 'lucide-react';
+import {type TrackResult, getDesktopTransport} from '@/lib/desktop';
+import {type MusicTrack} from '@/lib/musicQueue';
+import {useStore} from '@/state/store';
+
+/** Convierte un resultado de búsqueda en un tema de la cola. */
+function toMusicTrack(track: TrackResult, addedBy: string): MusicTrack {
+	return {
+		id: track.id,
+		title: track.title,
+		duration: track.duration,
+		thumbnail: track.thumbnail,
+		author: track.author,
+		url: track.url,
+		addedBy,
+	};
+}
+
+/** "3:45" */
+function formatDuration(seconds: number): string {
+	if (!Number.isFinite(seconds) || seconds <= 0) return '--:--';
+	const total = Math.floor(seconds);
+	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/**
+ * Música: la Jam del grupo.
+ *
+ * El layout sigue a Spotify (lista central + barra de reproducción abajo), pero con los colores y
+ * el estilo de Pelacord. Los íconos son de `lucide-react`.
+ */
+export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
+	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicSkip, musicTogglePause, musicSetDetached, musicSetVolume} =
+		useStore();
+	const [query, setQuery] = useState('');
+	const [results, setResults] = useState<TrackResult[]>([]);
+	const [loading, setLoading] = useState(false);
+	const [tab, setTab] = useState<'search' | 'queue'>('search');
+	const detached = state.settings.musicDetached ?? false;
+	const volume = state.settings.musicVolume ?? 0.8;
+
+	// Busca con un pequeño retraso, para no pedir en cada tecla.
+	useEffect(() => {
+		const clean = query.trim();
+		if (!clean) {
+			setResults([]);
+			setLoading(false);
+			return;
+		}
+		setLoading(true);
+		const timer = setTimeout(() => {
+			void getDesktopTransport()
+				?.searchYouTube(clean, 15)
+				.then((list) => setResults(list ?? []))
+				.catch(() => setResults([]))
+				.finally(() => setLoading(false));
+		}, 450);
+		return () => clearTimeout(timer);
+	}, [query]);
+
+	const current = musicState.track;
+
+	return (
+		<div className="music-view">
+			<header className="music-header">
+				<span className="music-brand">
+					<ListMusic size={20} /> Música
+				</span>
+				<nav className="music-tabs">
+					<button type="button" className={tab === 'search' ? 'is-active' : ''} onClick={() => setTab('search')}>
+						<Search size={15} /> Buscar
+					</button>
+					<button type="button" className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}>
+						<ListMusic size={15} /> Cola
+						{musicState.queue.length > 0 ? <span className="music-badge">{musicState.queue.length}</span> : null}
+					</button>
+				</nav>
+				<button type="button" className="music-close" onClick={onClose} title="Cerrar">
+					<X size={18} />
+				</button>
+			</header>
+
+			<div className="music-body">
+				{tab === 'search' ? (
+					<>
+						<div className="music-search">
+							<Search size={16} />
+							<input
+								className="input"
+								placeholder="Buscar una canción, artista o tema…"
+								value={query}
+								autoFocus
+								onChange={(event) => setQuery(event.target.value)}
+							/>
+							{loading ? <Loader2 size={16} className="music-spin" /> : null}
+						</div>
+						{!query.trim() ? (
+							<p className="settings-hint">
+								Buscá algo y dale play: se reproduce para <strong>todos</strong> los que estén en el canal.
+							</p>
+						) : null}
+						{!loading && query.trim() && results.length === 0 ? (
+							<p className="settings-hint">No encontré nada con eso.</p>
+						) : null}
+						<ul className="music-list">
+							{results.map((track) => (
+								<li key={track.id} className="music-row">
+									<img src={track.thumbnail} alt="" loading="lazy" />
+									<span className="music-row-info">
+										<span className="music-row-title" title={track.title}>
+											{track.title}
+										</span>
+										<span className="music-row-sub">
+											{track.author} · {formatDuration(track.duration)}
+										</span>
+									</span>
+									<button
+										type="button"
+										className="music-row-action"
+										title="Reproducir para todos"
+										onClick={() => void musicPlay(toMusicTrack(track, state.me.name))}>
+										<Play size={16} />
+									</button>
+									<button
+										type="button"
+										className="music-row-action"
+										title="Agregar a la cola"
+										onClick={() => void musicEnqueue(toMusicTrack(track, state.me.name))}>
+										<Plus size={16} />
+									</button>
+								</li>
+							))}
+						</ul>
+					</>
+				) : (
+					<>
+						{current ? (
+							<div className="music-now">
+								<span className="music-now-label">Suena ahora para todos</span>
+								<span className="music-now-title">{current.title}</span>
+								<span className="music-now-sub">
+									{current.author} · la puso {current.addedBy}
+								</span>
+							</div>
+						) : (
+							<p className="settings-hint">No hay nada sonando. Buscá algo y dale play.</p>
+						)}
+						<ul className="music-list">
+							{musicState.queue.map((track, index) => (
+								<li key={`${track.id}-${index}`} className="music-row">
+									<span className="music-row-index">{index + 1}</span>
+									<img src={track.thumbnail} alt="" loading="lazy" />
+									<span className="music-row-info">
+										<span className="music-row-title" title={track.title}>
+											{track.title}
+										</span>
+										<span className="music-row-sub">
+											{track.author} · la puso {track.addedBy}
+										</span>
+									</span>
+									<button
+										type="button"
+										className="music-row-action"
+										title="Sacar de la cola"
+										onClick={() => void musicRemove(index)}>
+										<X size={16} />
+									</button>
+								</li>
+							))}
+						</ul>
+					</>
+				)}
+			</div>
+
+			{/* Barra de reproducción, como la de Spotify. */}
+			<footer className="music-bar">
+				<div className="music-bar-track">
+					{current ? (
+						<>
+							<img src={current.thumbnail} alt="" />
+							<span className="music-bar-info">
+								<span className="music-bar-title" title={current.title}>
+									{current.title}
+								</span>
+								<span className="music-bar-sub">{current.author}</span>
+							</span>
+						</>
+					) : (
+						<span className="music-bar-sub">Nada sonando</span>
+					)}
+				</div>
+				<div className="music-bar-controls">
+					<button
+						type="button"
+						className="music-play"
+						title={musicState.pausedAt ? 'Reanudar' : 'Pausar'}
+						disabled={!current}
+						onClick={() => void musicTogglePause()}>
+						{musicState.pausedAt ? <Play size={18} /> : <Pause size={18} />}
+					</button>
+					<button type="button" className="music-skip" title="Siguiente" onClick={() => void musicSkip()}>
+						<SkipForward size={18} />
+					</button>
+				</div>
+				<div className="music-bar-volume">
+					<button
+						type="button"
+						className={`music-detach${detached ? ' is-active' : ''}`}
+						title={detached ? 'Volver a la Jam' : 'Separarme de la Jam (escuchar mi música)'}
+						onClick={() => musicSetDetached(!detached)}>
+						{detached ? 'Volver a la Jam' : 'Separarme de la Jam'}
+					</button>
+					<Volume2 size={16} />
+					<input
+						type="range"
+						min={0}
+						max={1}
+						step={0.05}
+						value={volume}
+						disabled={detached}
+						onChange={(event) => musicSetVolume(Number(event.target.value))}
+					/>
+				</div>
+			</footer>
+		</div>
+	);
+}

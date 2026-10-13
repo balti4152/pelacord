@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {ListMusic} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
@@ -182,9 +183,11 @@ function UpdateBanner(): JSX.Element | null {
 export function ChannelSidebar({
 	onOpenSettings,
 	onOpenVoice,
+	onOpenMusic,
 }: {
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
+	onOpenMusic: () => void;
 }): JSX.Element {
 	const {state, dispatch, addChannel, removeChannel, moveMember} = useStore();
 	/** Canal sobre el que se está arrastrando a alguien (para marcarlo). */
@@ -308,6 +311,11 @@ export function ChannelSidebar({
 					</div>
 				))}
 			</div>
+			{/* Música: la Jam del grupo. Va abajo de los canales, como pidió el usuario. */}
+			<button type="button" className="music-button" onClick={onOpenMusic}>
+				<ListMusic size={18} />
+				<span>Música</span>
+			</button>
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />
 			{menu ? (
