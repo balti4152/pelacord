@@ -1293,81 +1293,22 @@ ipcMain.handle('pelacord:tmdb-movie', async (_event, id, mediaType = 'movie') =>
 });
 
 /**
- * Pone los subtítulos en español en un reproductor de películas.
+ * Subtítulos: se muestran a pedido (los elige cada persona).
  *
- * Detalle importante que costó descubrir: el reproductor IGNORA los clics sintéticos
- * (`element.click()`); sólo responde a eventos de mouse de verdad. Así que esto se hace desde acá,
- * con `sendInputEvent` (indistinguible de un clic humano) y con las coordenadas que se sacan de la
- * propia página del reproductor.
- *
- * El flujo: se muestra su barra (hace falta para poder tocarla), se hace clic en su botón de
- * subtítulos, se elige "Spanish" y, si aparece un submenú con las pistas, se elige la primera. Al
- * final se vuelve a esconder su barra y se cierra el panel.
+ * El video NO recibe clics a propósito (así no salta publicidad), pero su panel de subtítulos
+ * necesita clics de verdad. Así que esto hace el ida y vuelta: cuando se pide, muestra su barra y
+ * le devuelve los clics al reproductor para que la persona elija; cuando se apaga, lo vuelve a
+ * dejar cerrado y sin clics.
  */
-ipcMain.handle('pelacord:movie-subtitles', async (_event, viewId) => {
+ipcMain.handle('pelacord:movie-subtitles', async (_event, viewId, enable) => {
 	const guest = webContents.fromId(Number(viewId) || 0);
 	if (!guest || guest.getType() !== 'webview') return {ok: false, error: 'No encontré el reproductor.'};
 	const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 	const js = (code) => guest.executeJavaScript(code).catch(() => null);
-	const cajaDe = (selector) =>
-		js(`(() => {
-			const el = ${selector};
-			if (!el) return null;
-			const r = el.getBoundingClientRect();
-			if (r.width < 2 || r.height < 2) return null;
-			return {x: r.left + r.width / 2, y: r.top + r.height / 2};
-		})()`);
-	const clicReal = async (caja) => {
-		if (!caja) return false;
-		const punto = {x: Math.round(caja.x), y: Math.round(caja.y)};
-		guest.sendInputEvent({type: 'mouseMove', x: punto.x, y: punto.y});
-		await wait(100);
-		guest.sendInputEvent({type: 'mouseDown', x: punto.x, y: punto.y, button: 'left', clickCount: 1});
-		await wait(70);
-		guest.sendInputEvent({type: 'mouseUp', x: punto.x, y: punto.y, button: 'left', clickCount: 1});
-		return true;
-	};
-	/** ¿Ya hay una pista en español? */
-	const yaEsta = () =>
-		js(`(() => {
-			const video = document.querySelector('video');
-			if (!video || !video.textTracks) return false;
-			return [...video.textTracks].some((t) => /spanish|espa|(^|[^a-z])es([^a-z]|$)/i.test((t.language || '') + ' ' + (t.label || '')));
-		})()`);
 
-	await js("document.getElementById('pelacord-movie-css')?.remove(); true");
-	await wait(700);
-	try {
-		for (let intento = 0; intento < 6; intento++) {
-			if (await yaEsta()) return {ok: true};
-			const boton = await cajaDe(
-				`[...document.querySelectorAll('button')].find((el) => /subtitle settings/i.test(el.getAttribute('aria-label') || ''))`,
-			);
-			if (!(await clicReal(boton))) {
-				await wait(900);
-				continue;
-			}
-			await wait(1800);
-			const spanish = await cajaDe(`[...document.querySelectorAll('button')].find((el) => /^spanish/i.test((el.textContent || '').trim()))`);
-			if (!spanish) {
-				await wait(900);
-				continue;
-			}
-			await clicReal(spanish);
-			await wait(2500);
-			// Si Spanish abre un submenú con las pistas, se elige la primera.
-			const pista = await cajaDe(
-				`[...document.querySelectorAll('button, [role="option"], [role="menuitem"]')].find((el) => { const t = (el.textContent || '').trim(); return t.length > 0 && t.length < 26 && /^(default|forzad|pista|\\d+)$/i.test(t); })`,
-			);
-			if (pista) {
-				await clicReal(pista);
-				await wait(2500);
-			}
-			if (await yaEsta()) return {ok: true};
-		}
-		return {ok: false, error: 'No se pudieron activar los subtítulos en español.'};
-	} finally {
-		// Se cierra el panel y se vuelve a esconder su barra.
+	if (!enable) {
+		await js('window.__pelacordClicsPermitidos = false; true');
+		await js("document.body.style.pointerEvents = 'none'; document.body.style.userSelect = 'none'; true");
 		await js("document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})); true");
 		await js(`(() => {
 			if (document.getElementById('pelacord-movie-css')) return true;
@@ -1377,7 +1318,32 @@ ipcMain.handle('pelacord:movie-subtitles', async (_event, viewId) => {
 			document.head.appendChild(style);
 			return true;
 		})()`);
+		return {ok: true};
 	}
+
+	// Se muestra su barra y se devuelven los clics, para poder elegir los subtítulos.
+	await js("document.getElementById('pelacord-movie-css')?.remove(); true");
+	await js('window.__pelacordClicsPermitidos = true; true');
+	await js("document.body.style.pointerEvents = 'auto'; document.body.style.userSelect = 'auto'; true");
+	await wait(600);
+	// Y se abre su panel de subtítulos con un clic de verdad (los sintéticos los ignora).
+	const caja = await js(`(() => {
+		const el = [...document.querySelectorAll('button')].find((b) => /subtitle settings/i.test(b.getAttribute('aria-label') || ''));
+		if (!el) return null;
+		const r = el.getBoundingClientRect();
+		if (r.width < 2 || r.height < 2) return null;
+		return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+	})()`);
+	if (caja) {
+		const x = Math.round(caja.x);
+		const y = Math.round(caja.y);
+		guest.sendInputEvent({type: 'mouseMove', x, y});
+		await wait(100);
+		guest.sendInputEvent({type: 'mouseDown', x, y, button: 'left', clickCount: 1});
+		await wait(70);
+		guest.sendInputEvent({type: 'mouseUp', x, y, button: 'left', clickCount: 1});
+	}
+	return {ok: true};
 });
 
 // ---------- Preview de links (se baja acá porque en el renderer lo bloquea el CORS) ----------

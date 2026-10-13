@@ -1595,10 +1595,17 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		});
 	}, []);
 
-	// Mi propia sala también vive en el mapa: la interfaz la trata igual que las demás.
+	// Mi propia sala también vive en el mapa: la interfaz la trata igual que las demás. Al dejar de
+	// compartir se saca, si no quedaba una "sala fantasma" en la lista conmigo adentro.
 	useEffect(() => {
-		if (!myMovieRoom) return;
-		setMovieRooms((rooms) => ({...rooms, [myMovieRoom.id]: myMovieRoom}));
+		setMovieRooms((rooms) => {
+			if (myMovieRoom) return {...rooms, [myMovieRoom.id]: myMovieRoom};
+			const mine = meRef.current.id;
+			if (!rooms[mine]) return rooms;
+			const next = {...rooms};
+			delete next[mine];
+			return next;
+		});
 	}, [myMovieRoom]);
 
 	// Se escucha lo que difunden los hosts.

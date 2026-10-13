@@ -90,8 +90,8 @@ interface DesktopTransport {
 	tmdbRows(): Promise<{ok: boolean; rows: TmdbRow[]; hero: TmdbMovie | null}>;
 	tmdbSearch(query: string): Promise<{ok: boolean; movies: TmdbMovie[]}>;
 	tmdbMovie(id: number, mediaType?: 'movie' | 'tv'): Promise<{ok: boolean; movie: TmdbMovie | null}>;
-	/** Películas: pone los subtítulos en español en el reproductor. */
-	movieSubtitles(viewId: number): Promise<{ok: boolean; error?: string}>;
+	/** Películas: destraba o traba la barra de subtítulos del reproductor (los elige cada uno). */
+	movieSubtitles(viewId: number, enable: boolean): Promise<{ok: boolean; error?: string}>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;

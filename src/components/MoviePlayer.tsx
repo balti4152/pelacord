@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from 'react';
-import {Loader2, Maximize, Pause, Play, RotateCcw, Users, Volume2, VolumeX, X} from 'lucide-react';
+import {createPortal} from 'react-dom';
+import {Captions, Loader2, Maximize, Pause, Play, RotateCcw, Users, Volume2, VolumeX, X} from 'lucide-react';
 import {getDesktopTransport} from '@/lib/desktop';
 import {MOVIE_DRIFT_TOLERANCE_MS, type MovieRoomCommand, positionOf} from '@/lib/movieRooms';
 import {useStore} from '@/state/store';
@@ -40,6 +41,8 @@ export function MoviePlayer(): JSX.Element | null {
 
 	const hostRef = useRef<HTMLDivElement | null>(null);
 	const viewRef = useRef<MovieView | null>(null);
+	/** El id del reproductor de adentro: lo usa el proceso principal para destrabar los subtítulos. */
+	const viewIdRef = useRef(0);
 	const playerRef = useRef<HTMLDivElement | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [ready, setReady] = useState(false);
@@ -49,7 +52,8 @@ export function MoviePlayer(): JSX.Element | null {
 	const [duration, setDuration] = useState(0);
 	const [volume, setVolume] = useState(1);
 	const [muted, setMuted] = useState(false);
-	const [subsOk, setSubsOk] = useState<boolean | null>(null);
+	/** Subtítulos: los elige cada uno. El botón destraba la barra del reproductor. */
+	const [subsOpen, setSubsOpen] = useState(false);
 	/** Para que el host pueda leer su posición real sin depender del render. */
 	const positionRef = useRef(0);
 	positionRef.current = position;
@@ -91,7 +95,7 @@ export function MoviePlayer(): JSX.Element | null {
 		if (!host || !media || !room) return;
 		setLoading(true);
 		setError('');
-		setSubsOk(null);
+		setSubsOpen(false);
 		const startSeconds = Math.max(0, Math.floor(positionOf(room) / 1000));
 		setPosition(startSeconds);
 		const view = document.createElement('webview') as MovieView;
@@ -114,6 +118,12 @@ export function MoviePlayer(): JSX.Element | null {
 			const type = String(payload.type ?? '');
 			if (typeof payload.currentTime === 'number') setPosition(payload.currentTime);
 			if (typeof payload.duration === 'number' && payload.duration > 0) setDuration(payload.duration);
+			// La duración y el tiempo también se piden con los getters (el embed no los manda siempre
+			// por eventos, y sin la duración la barra para adelantar no sirve).
+			if (typeof payload.result === 'number') {
+				if (payload.command === 'getDuration' && payload.result > 0) setDuration(payload.result);
+				if (payload.command === 'getCurrentTime') setPosition(payload.result);
+			}
 			if (type === 'cinesrc:play') setPaused(false);
 			if (type === 'cinesrc:pause') setPaused(true);
 			if (type === 'cinesrc:ready' || type === 'cinesrc:loadedmetadata') setLoading(false);
@@ -125,14 +135,7 @@ export function MoviePlayer(): JSX.Element | null {
 		const onReady = () => {
 			setLoading(false);
 			setReady(true);
-			// Subtítulos en español: los pone el proceso principal, porque el reproductor sólo acepta
-			// clics de verdad.
-			const viewId = typeof view.getWebContentsId === 'function' ? view.getWebContentsId() : 0;
-			if (!viewId) return;
-			void getDesktopTransport()
-				?.movieSubtitles(viewId)
-				.then((result) => setSubsOk(Boolean(result?.ok)))
-				.catch(() => setSubsOk(false));
+			viewIdRef.current = typeof view.getWebContentsId === 'function' ? view.getWebContentsId() : 0;
 		};
 		view.addEventListener('ipc-message', onIpc);
 		view.addEventListener('dom-ready', onReady);
@@ -140,13 +143,17 @@ export function MoviePlayer(): JSX.Element | null {
 		return () => {
 			view.removeEventListener('ipc-message', onIpc);
 			view.removeEventListener('dom-ready', onReady);
+			// Se vuelve a trabar el reproductor (barra escondida y sin clics).
+			if (viewIdRef.current) void getDesktopTransport()?.movieSubtitles(viewIdRef.current, false).catch(() => {});
 			try {
 				view.remove();
 			} catch {
 				// ya estaba afuera
 			}
 			viewRef.current = null;
+			viewIdRef.current = 0;
 			setReady(false);
+			setSubsOpen(false);
 		};
 		// Se rearma sólo si cambia la película.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,7 +171,9 @@ export function MoviePlayer(): JSX.Element | null {
 		if (Math.abs(drift) > MOVIE_DRIFT_TOLERANCE_MS) {
 			send('seek', [Math.round(expected / 1000)]);
 		}
-	}, [isHost, room, room?.updatedAt, room?.paused, room?.positionMs, send]);
+		// `ready` va en las dependencias: si el estado de la sala llega antes de que el reproductor
+		// esté listo, el comando se perdería y el invitado quedaría pausado para siempre.
+	}, [isHost, room, room?.updatedAt, room?.paused, room?.positionMs, send, ready]);
 
 	// El host reafirma su posición cada 4 s (así el que entra tarde se sincroniza enseguida).
 	useEffect(() => {
@@ -179,6 +188,19 @@ export function MoviePlayer(): JSX.Element | null {
 		send('setVolume', [muted ? 0 : volume]);
 	}, [muted, volume, ready, send]);
 
+	// La duración y el tiempo se piden cada tanto: el embed no siempre los manda por eventos, y sin
+	// la duración la barra para adelantar queda inutilizable.
+	useEffect(() => {
+		if (!ready) return;
+		const pedir = () => {
+			send('getDuration');
+			send('getCurrentTime');
+		};
+		pedir();
+		const timer = setInterval(pedir, 4000);
+		return () => clearInterval(timer);
+	}, [ready, send]);
+
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key === 'Escape') movieLeave();
@@ -190,6 +212,19 @@ export function MoviePlayer(): JSX.Element | null {
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
 	}, [act, movieLeave, paused]);
+
+	/** Subtítulos: los elige cada uno. Destraba la barra del reproductor y abre su panel. */
+	const toggleSubtitles = useCallback(() => {
+		setSubsOpen((open) => {
+			const next = !open;
+			if (viewIdRef.current) {
+				void getDesktopTransport()
+					?.movieSubtitles(viewIdRef.current, next)
+					.catch(() => {});
+			}
+			return next;
+		});
+	}, []);
 
 	if (!room || !media) return null;
 
@@ -203,7 +238,7 @@ export function MoviePlayer(): JSX.Element | null {
 		}
 	}
 
-	return (
+	return createPortal(
 		<div className="movie-overlay" ref={playerRef}>
 			<header className="movie-top">
 				<span className={`movie-live${isHost ? ' is-host' : ''}`} />
@@ -213,13 +248,13 @@ export function MoviePlayer(): JSX.Element | null {
 				<span className="movie-viewers" title={viewers === 1 ? 'Estás mirando solo' : `${viewers} mirando`}>
 					<Users size={14} /> {viewers}
 				</span>
-				<button type="button" className="movie-icon-button" title="Salir" onClick={movieLeave}>
+				<button type="button" className="movie-icon-button" title="Salir (Esc)" onClick={movieLeave}>
 					<X size={18} />
 				</button>
 			</header>
 
 			<div className="movie-stage" ref={hostRef}>
-				{!paused ? null : (
+				{!paused || subsOpen ? null : (
 					<button
 						type="button"
 						className="movie-click-shield"
@@ -290,11 +325,22 @@ export function MoviePlayer(): JSX.Element | null {
 				<button type="button" className="movie-icon-button" title="Pantalla completa" onClick={() => void fullscreen()}>
 					<Maximize size={18} />
 				</button>
+				<button
+					type="button"
+					className={`movie-icon-button${subsOpen ? ' is-active' : ''}`}
+					title={subsOpen ? 'Listo, ya elegí los subtítulos' : 'Subtítulos'}
+					onClick={toggleSubtitles}>
+					<Captions size={18} />
+				</button>
 			</footer>
 
-			{subsOk === false ? (
-				<p className="movie-hint">No se pudieron activar los subtítulos en español; probá desde el menú del reproductor.</p>
+			{subsOpen ? (
+				<p className="movie-hint">
+					Elegí los subtítulos en la barra del reproductor (abajo). Cuando termines, apretá el botón de
+					subtítulos otra vez.
+				</p>
 			) : null}
-		</div>
+		</div>,
+		document.body,
 	);
 }

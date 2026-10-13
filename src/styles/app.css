@@ -5370,10 +5370,16 @@ body.no-cosmetic-anim .avatar-effect::after {
 .movie-overlay {
 	position: fixed;
 	inset: 0;
-	z-index: 80;
+	z-index: 2000;
 	display: flex;
 	flex-direction: column;
 	background-color: #000000;
+	/* Nada de la ventana se arrastra acá: si no, los clics de los controles no llegan. */
+	-webkit-app-region: no-drag;
+}
+
+.movie-overlay * {
+	-webkit-app-region: no-drag;
 }
 
 .movie-top {
@@ -5516,6 +5522,11 @@ body.no-cosmetic-anim .avatar-effect::after {
 .movie-icon-button:disabled {
 	opacity: 0.45;
 	cursor: default;
+}
+
+.movie-icon-button.is-active {
+	background-color: var(--brand-primary);
+	color: var(--text-on-brand-primary, #ffffff);
 }
 
 .movie-time {

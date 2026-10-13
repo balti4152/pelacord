@@ -72,8 +72,8 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	tmdbRows: () => ipcRenderer.invoke('pelacord:tmdb-rows'),
 	tmdbSearch: (query) => ipcRenderer.invoke('pelacord:tmdb-search', query),
 	tmdbMovie: (id) => ipcRenderer.invoke('pelacord:tmdb-movie', id),
-	/** Películas: pone los subtítulos en español en el reproductor (con clics reales). */
-	movieSubtitles: (viewId) => ipcRenderer.invoke('pelacord:movie-subtitles', viewId),
+	/** Películas: destraba o traba la barra de subtítulos del reproductor. */
+	movieSubtitles: (viewId, enable) => ipcRenderer.invoke('pelacord:movie-subtitles', viewId, enable),
 	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),

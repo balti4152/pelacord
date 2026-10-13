@@ -51,9 +51,11 @@ function bloqueaClics() {
 	if (!document.body) return;
 	document.body.style.pointerEvents = 'none';
 	document.body.style.userSelect = 'none';
-	// Por si el reproductor vuelve a habilitarlo al entrar o salir de pantalla completa.
+	// Por si el reproductor vuelve a habilitarlo al entrar o salir de pantalla completa. Si la
+	// persona pidió los subtítulos a mano (nuestro botón), se dejan los clics habilitados un rato.
 	setInterval(() => {
-		if (document.body && document.body.style.pointerEvents !== 'none') {
+		if (!document.body || window.__pelacordClicsPermitidos) return;
+		if (document.body.style.pointerEvents !== 'none') {
 			document.body.style.pointerEvents = 'none';
 		}
 	}, 2000);
