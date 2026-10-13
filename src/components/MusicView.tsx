@@ -41,6 +41,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const [tab, setTab] = useState<'search' | 'queue'>('search');
 	const muted = state.settings.musicMuted ?? false;
 	const volume = state.settings.musicVolume ?? 0.8;
+	/** Para controlar la Jam hay que estar en un canal de voz: si no, no hay dónde sonar. */
+	const inVoice = Boolean(state.voice.channelId);
 
 	// Pausa larga: si dejás de escribir, busca igual (sin lanzar uno por tecla).
 	useEffect(() => {
@@ -119,7 +121,13 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						</div>
 						{!query.trim() ? (
 							<p className="settings-hint">
-								Buscá algo y dale play: se reproduce para <strong>todos</strong> los que estén en el canal.
+								{inVoice ? (
+									<>
+										Buscá algo y dale play: se reproduce para <strong>todos</strong> los que estén en el canal.
+									</>
+								) : (
+									<>Unite a un canal de voz para escuchar y controlar la música con el grupo.</>
+								)}
 							</p>
 						) : null}
 						{!loading && query.trim() && results.length === 0 ? (
@@ -216,12 +224,17 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 					<button
 						type="button"
 						className="music-play"
-						title={musicState.pausedAt ? 'Reanudar' : 'Pausar'}
-						disabled={!current}
+						title={!inVoice ? 'Unite a un canal de voz para controlar la música' : musicState.pausedAt ? 'Reanudar' : 'Pausar'}
+						disabled={!current || !inVoice}
 						onClick={() => void musicTogglePause()}>
 						{musicState.pausedAt ? <Play size={18} /> : <Pause size={18} />}
 					</button>
-					<button type="button" className="music-skip" title="Siguiente" onClick={() => void musicSkip()}>
+					<button
+						type="button"
+						className="music-skip"
+						title={!inVoice ? 'Unite a un canal de voz para controlar la música' : 'Siguiente'}
+						disabled={!inVoice}
+						onClick={() => void musicSkip()}>
 						<SkipForward size={18} />
 					</button>
 				</div>

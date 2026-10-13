@@ -1198,7 +1198,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				void voiceMesh.setMusicStream(null);
 				voiceMesh.announceMusicStream(null);
 			}
-			if (musicState.hostId === state.me.id) void updateMusicState(channelId ?? '', {hostId: null, hostSeenAt: 0});
+			if (channelId && musicState.hostId === state.me.id) {
+				void updateMusicState(channelId, {hostId: null, hostSeenAt: 0});
+			}
 			return;
 		}
 
@@ -1217,7 +1219,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		let cancelled = false;
 		void (async () => {
 			try {
-				// Ya estoy con este tema: sigo, respeto la pausa y aviso que estoy vivo.
+				// Ya estoy con este tema: sigo, respeto la pausa y no escribo nada (el estado lo
+				// cambia quien toca los botones: si escribiera acá se armaría un bucle de escrituras).
 				if (myMusicTrackId.current === track.id) {
 					const audio = currentMusicAudio();
 					if (audio) {
@@ -1229,7 +1232,6 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 							void audio.play().catch(() => {});
 						}
 					}
-					await updateMusicState(channelId, {hostId: state.me.id, hostSeenAt: Date.now()});
 					return;
 				}
 				const url = await getDesktopTransport()?.getAudioUrl(track.url || track.id);
@@ -1264,6 +1266,23 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// musicParticipantsKey resume quiénes están en el canal (para reelegir host si entra o sale alguien).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [musicState, jamChannelId, state.me.id, musicSkip, musicParticipantsKey]);
+
+	// Si se van TODOS del canal, la Jam se limpia: no queda una cola vieja sonando cuando vuelvan.
+	const lastJamChannel = useRef<string | null>(null);
+	const lastOthersInChannel = useRef(0);
+	useEffect(() => {
+		const channelId = state.voice.channelId;
+		const others = channelId
+			? (state.voiceMembers[channelId] ?? []).filter((participant) => participant.id !== state.me.id).length
+			: 0;
+		const previous = lastJamChannel.current;
+		// Me fui de un canal y no quedaba nadie más: se borra la música de ese canal.
+		if (previous && previous !== channelId && lastOthersInChannel.current === 0) {
+			void updateMusicState(previous, {...EMPTY_MUSIC_STATE});
+		}
+		lastJamChannel.current = channelId;
+		lastOthersInChannel.current = others;
+	}, [state.voice.channelId, state.voiceMembers, state.me.id]);
 
 	// El host deja anotado quién manda (para mostrarlo y como respaldo si la lista cambia).
 	useEffect(() => {
