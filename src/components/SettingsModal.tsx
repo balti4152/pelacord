@@ -8,7 +8,7 @@ import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {APP_VERSION, formatBuildFull} from '@/lib/build';
-import {DEFAULT_HOTKEYS, HOTKEYS, type HotkeyAction, eventToAccelerator, formatAccelerator} from '@/lib/hotkeys';
+import {DEFAULT_HOTKEYS, HOTKEYS, type HotkeyAction, eventToAccelerator, formatAccelerator, isRiskyAlone} from '@/lib/hotkeys';
 import {useStore} from '@/state/store';
 import type {AvatarCrop, Member, Presence, ProfileEffect, ThemeName} from '@/types';
 
@@ -826,11 +826,8 @@ function HotkeysTab({
 				return;
 			}
 			const accelerator = eventToAccelerator(event);
-			if (!accelerator) {
-				// Se avisa por qué no sirve: si no, parecería que no detecta la tecla.
-				setHint(`"${event.key}" no sirve sola: usá Ctrl/Alt/Shift, o una tecla F1-F24 (ej. F8).`);
-				return;
-			}
+			// Sólo se ignora si apretó modificadores sueltos (Ctrl, Alt…).
+			if (!accelerator) return;
 			onHotkey(recording, accelerator);
 			setRecording(null);
 			setHint(null);
@@ -871,6 +868,12 @@ function HotkeysTab({
 							)}
 						</div>
 						<p className="settings-hint">{info.description}</p>
+						{isRiskyAlone(accelerator) ? (
+							<p className="settings-hint hotkey-warn">
+								Ojo: «{formatAccelerator(accelerator)}» sola se usa en TODOS los programas. Si esa tecla la necesitás para
+								escribir (letras, números, signos como - o +), no la vas a poder usar normalmente.
+							</p>
+						) : null}
 					</div>
 				);
 			})}
@@ -879,7 +882,7 @@ function HotkeysTab({
 			</p>
 			{recording ? (
 				<p className="settings-hint hotkey-hint">
-					{hint ?? 'Apretá la combinación. Podés usar Ctrl/Alt/Shift + una tecla, o una tecla F1-F24 sola (ej. F8).'}
+					{hint ?? 'Apretá la tecla o combinación que quieras (Esc cancela). Podés usar una sola, ej. F8 o -.'}
 				</p>
 			) : null}
 		</>

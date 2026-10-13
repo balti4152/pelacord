@@ -2165,6 +2165,10 @@
 	color: var(--text-link);
 }
 
+.hotkey-warn {
+	color: var(--status-dnd);
+}
+
 /* ---------- Overlay animado del perfil ---------- */
 
 .profile-overlay {
