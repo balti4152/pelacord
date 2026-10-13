@@ -36,6 +36,10 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	getFileEndpoint: () => ipcRenderer.invoke('pelacord:file-endpoint'),
 	/** Preview de un link (título, descripción, imagen). */
 	getLinkPreview: (url) => ipcRenderer.invoke('pelacord:link-preview', url),
+	/** Música: versión de yt-dlp, búsqueda y URL de audio para streamear. */
+	getYtDlpVersion: () => ipcRenderer.invoke('pelacord:ytdlp-version'),
+	searchYouTube: (query, limit) => ipcRenderer.invoke('pelacord:yt-search', query, limit),
+	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
 	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),
 	shareAvatar: (payload) => ipcRenderer.invoke('pelacord:share-avatar', payload),

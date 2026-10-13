@@ -60,6 +60,12 @@ interface DesktopTransport {
 	getFileEndpoint(): Promise<{host: string; port: number}>;
 	/** Preview de un link (título, descripción, imagen). Se baja desde el proceso principal. */
 	getLinkPreview(url: string): Promise<LinkPreviewData | null>;
+	/** Música: versión de yt-dlp instalada (para mostrarla en Ajustes). */
+	getYtDlpVersion(): Promise<string | null>;
+	/** Música: busca en YouTube (título, duración, miniatura, autor). */
+	searchYouTube(query: string, limit?: number): Promise<TrackResult[]>;
+	/** Música: URL directa del audio, para streamear sin descargar. */
+	getAudioUrl(target: string): Promise<string | null>;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
 	/** Guarda un asset del perfil (avatar o banner, incluido GIF animado) y lo sirve por P2P. */
@@ -94,6 +100,18 @@ interface DesktopTransport {
 	checkUpdate(): Promise<{ok: boolean; error?: string}>;
 	installUpdate(): Promise<boolean>;
 	onUpdateStatus(callback: (status: {state: string; percent?: number; version?: string; error?: string}) => void): () => void;
+}
+
+/** Un tema de música (viene de la búsqueda de YouTube o de una playlist de Spotify). */
+export interface TrackResult {
+	id: string;
+	title: string;
+	/** Segundos. 0 si no se sabe. */
+	duration: number;
+	thumbnail: string;
+	author: string;
+	/** Link del video (para volver a sacarle el audio cuando haga falta). */
+	url: string;
 }
 
 /** Lo que devuelve el preview de un link. */

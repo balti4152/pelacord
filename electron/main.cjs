@@ -497,6 +497,54 @@ ipcMain.handle('pelacord:ytdlp-version', async () => {
 });
 
 /**
+ * Busca en YouTube y devuelve la lista (título, duración, miniatura, autor).
+ * Es la búsqueda del reproductor: lo que el usuario escribe o el tema de una playlist de Spotify.
+ */
+ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
+	const clean = String(query || '').trim();
+	if (!clean) return [];
+	const count = Math.min(25, Math.max(1, Number(limit) || 15));
+	// "flat-playlist" trae sólo los datos de la lista: rápido, no toca cada video.
+	const result = await runYtDlp(
+		['--dump-single-json', '--flat-playlist', '--no-warnings', `ytsearch${count}:${clean}`],
+		90000,
+	);
+	if (!result.ok) return [];
+	try {
+		const parsed = JSON.parse(result.output);
+		const entries = parsed.entries || [];
+		return entries.map((entry) => ({
+			id: String(entry.id || ''),
+			title: String(entry.title || ''),
+			duration: Number(entry.duration) || 0,
+			thumbnail: String(entry.thumbnails?.[entry.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${entry.id}/mqdefault.jpg`),
+			author: String(entry.uploader || entry.channel || ''),
+			url: String(entry.url || `https://www.youtube.com/watch?v=${entry.id}`),
+		}));
+	} catch (error) {
+		console.warn('[pelacord] búsqueda de YouTube ilegible:', String(error));
+		return [];
+	}
+});
+
+/**
+ * Devuelve la URL directa del audio (para streamear, sin descargar el archivo).
+ * Se pide en el momento de reproducir: esas URLs vencen, así que no se cachean.
+ */
+ipcMain.handle('pelacord:yt-audio-url', async (_event, target) => {
+	const value = String(target || '').trim();
+	if (!value) return null;
+	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
+	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 90000);
+	if (!result.ok) {
+		console.warn('[pelacord] no se pudo sacar el audio:', result.error);
+		return null;
+	}
+	// Puede devolver varias líneas (audio + video): se usa la primera.
+	return result.output.split('\n')[0].trim() || null;
+});
+
+/**
  * Se actualiza solo, en el canal NIGHTLY (sale build casi todos los días): YouTube cambia
  * seguido y así siempre tenemos lo último. Se corre al arrancar y cada 6 h, sin molestar:
  * si falla, se sigue con la versión que hay.
