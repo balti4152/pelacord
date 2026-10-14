@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: menú de usuario (silenciar sí, des-silenciar no)</title>
+	</head>
+	<body>
+		<div id="root"></div>
+		<script type="module">
+			import React from 'react';
+			import ReactDOM from 'react-dom/client';
+			import {UserContextMenu} from '/src/components/UserMenu.tsx';
+
+			const usuario = {id: 'chubi', name: 'Chubi', color: 'hsl(200, 70%, 55%)'};
+			const clicks = [];
+			const casos = [];
+
+			function montar(props) {
+				const raiz = document.createElement('div');
+				document.body.appendChild(raiz);
+				ReactDOM.createRoot(raiz).render(
+					React.createElement(UserContextMenu, {
+						user: usuario,
+						x: 10,
+						y: 10,
+						canVolume: true,
+						onClose: () => {},
+						onViewProfile: () => {},
+						...props,
+					}),
+				);
+				return raiz;
+			}
+
+			/** Busca el botón del menú por su texto. */
+			function boton(raiz, texto) {
+				return [...raiz.querySelectorAll('.call-menu-item')].find((b) => (b.textContent || '').includes(texto));
+			}
+
+			const esperar = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+			async function correr() {
+				// 1) Alguien NO silenciado: el ítem está activo y dice "Silenciar".
+				const a = montar({
+					voice: {muted: false, deafened: false},
+					onMute: () => clicks.push('mute'),
+					onDeafen: () => clicks.push('deafen'),
+				});
+				await esperar(150);
+				const silenciar = boton(a, 'Silenciar');
+				casos.push({nombre: '1) sin silenciar: el ítem existe', ok: Boolean(silenciar)});
+				casos.push({nombre: '2) sin silenciar: está habilitado', ok: silenciar ? !silenciar.disabled : false});
+				silenciar?.click();
+				casos.push({nombre: '3) al tocarlo manda el silencio', ok: clicks.includes('mute')});
+				a.remove();
+
+				// 2) Alguien YA silenciado (por otro): el ítem queda deshabilitado y NO dice "Activar".
+				clicks.length = 0;
+				const b = montar({
+					voice: {muted: true, deafened: false},
+					muteLocked: true,
+					onMute: () => clicks.push('mute'),
+					onDeafen: () => clicks.push('deafen'),
+				});
+				await esperar(150);
+				const bloqueado = boton(b, 'Ya está silenciado');
+				casos.push({nombre: '4) ya silenciado: el ítem existe (no se esconde)', ok: Boolean(bloqueado)});
+				casos.push({nombre: '5) ya silenciado: queda DESHABILITADO', ok: bloqueado ? Boolean(bloqueado.disabled) : false});
+				casos.push({nombre: '6) ya silenciado: no ofrece "Activar micrófono"', ok: !boton(b, 'Activar micrófono')});
+				bloqueado?.click();
+				casos.push({nombre: '7) al tocarlo NO manda nada', ok: clicks.length === 0});
+				b.remove();
+
+				// 3) Uno mismo silenciado: SÍ puede activarse el micrófono (interruptor propio).
+				const c = montar({
+					voice: {muted: true, deafened: false},
+					onMute: () => clicks.push('mute'),
+					onDeafen: () => clicks.push('deafen'),
+				});
+				await esperar(150);
+				const propio = boton(c, 'Activar micrófono');
+				casos.push({nombre: '8) uno mismo silenciado: SÍ puede activarse', ok: Boolean(propio) && !propio.disabled});
+				c.remove();
+
+				const ok = casos.every((caso) => caso.ok);
+				window.__resultado = {ok, casos};
+			}
+
+			void correr();
+		</script>
+	</body>
+</html>

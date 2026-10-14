@@ -1042,13 +1042,17 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				dispatch({type: 'joinVoice', channelId: command.channelId});
 				return;
 			}
-			// Micrófono y audio: los aplica el que los recibe (no se puede tocar el micrófono de
-			// otra máquina desde afuera). Se usa el mismo interruptor de siempre.
-			if (command.kind === 'mute' && voiceRef.current.muted !== Boolean(command.on)) {
+			// Silenciar y audio: los aplica el que los recibe (no se puede tocar el micrófono de
+			// otra máquina desde afuera).
+			//
+			// OJO: SOLO se APLICA el silencio/ensordecido, nunca se saca. Devolverse el micrófono o
+			// el audio lo hace la propia persona (como en Discord): si acá se aceptara "on: false",
+			// cualquiera podría des-silenciar a otro, incluso desde un cliente viejo.
+			if (command.kind === 'mute' && command.on && !voiceRef.current.muted) {
 				dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
 				return;
 			}
-			if (command.kind === 'deafen' && voiceRef.current.deafened !== Boolean(command.on)) {
+			if (command.kind === 'deafen' && command.on && !voiceRef.current.deafened) {
 				dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
 				return;
 			}
@@ -1331,10 +1335,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const sendPeerCommand = useCallback(
 		(peerId: string, payload: {kind: 'mute' | 'deafen' | 'disconnect'; on?: boolean}) => {
 			if (peerId === meRef.current.id) {
-				// A uno mismo se le aplica local, sin dar la vuelta por la malla.
-				if (payload.kind === 'mute') dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
-				else if (payload.kind === 'deafen') dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
-				else dispatch({type: 'leaveVoice'});
+				// A uno mismo se le aplica local, sin dar la vuelta por la malla (acá SÍ vale el
+				// interruptor: uno puede activarse su propio micrófono).
+				if (payload.kind === 'mute' && voiceRef.current.muted !== Boolean(payload.on)) {
+					dispatch({type: 'toggleVoiceFlag', flag: 'muted'});
+				} else if (payload.kind === 'deafen' && voiceRef.current.deafened !== Boolean(payload.on)) {
+					dispatch({type: 'toggleVoiceFlag', flag: 'deafened'});
+				} else if (payload.kind === 'disconnect') {
+					dispatch({type: 'leaveVoice'});
+				}
 				return;
 			}
 			getDesktopTransport()?.sendCommand(peerId, payload);

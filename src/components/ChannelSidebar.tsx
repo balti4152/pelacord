@@ -98,10 +98,24 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 					y={menu.y}
 					canVolume
 					voice={{muted: menu.participant.muted, deafened: menu.participant.deafened}}
+					// A OTROS sólo se les puede APLICAR el silencio: devolverle el micrófono o el audio
+					// lo hace esa persona (como en Discord). A uno mismo sí se le permite el interruptor.
+					muteLocked={menu.participant.id !== state.me.id && menu.participant.muted}
+					deafenLocked={menu.participant.id !== state.me.id && menu.participant.deafened}
 					onClose={() => setMenu(null)}
 					onViewProfile={() => setProfile(userFromParticipant(menu.participant, state.members))}
-					onMute={() => sendPeerCommand(menu.participant.id, {kind: 'mute', on: !menu.participant.muted})}
-					onDeafen={() => sendPeerCommand(menu.participant.id, {kind: 'deafen', on: !menu.participant.deafened})}
+					onMute={() =>
+						sendPeerCommand(menu.participant.id, {
+							kind: 'mute',
+							on: menu.participant.id === state.me.id ? !menu.participant.muted : true,
+						})
+					}
+					onDeafen={() =>
+						sendPeerCommand(menu.participant.id, {
+							kind: 'deafen',
+							on: menu.participant.id === state.me.id ? !menu.participant.deafened : true,
+						})
+					}
 					onDisconnect={() => sendPeerCommand(menu.participant.id, {kind: 'disconnect'})}
 				/>
 			) : null}

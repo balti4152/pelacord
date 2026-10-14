@@ -128,6 +128,8 @@ export function UserContextMenu({
 	onClose,
 	onViewProfile,
 	voice,
+	muteLocked,
+	deafenLocked,
 	onMute,
 	onDeafen,
 	onDisconnect,
@@ -140,6 +142,14 @@ export function UserContextMenu({
 	onViewProfile: () => void;
 	/** Estado del participante en la llamada (para mostrar "Silenciar" o "Activar micrófono"). */
 	voice?: {muted: boolean; deafened: boolean};
+	/**
+	 * Ya está silenciado/ensordecido y NO lo puede revertir otro (como en Discord: se puede
+	 * silenciar a alguien, pero devolverle el micrófono sólo lo puede hacer esa persona).
+	 * Cuando está bloqueado, el ítem se muestra deshabilitado en vez de esconderse: así se entiende
+	 * que existe pero no está en tus manos.
+	 */
+	muteLocked?: boolean;
+	deafenLocked?: boolean;
 	onMute?: () => void;
 	onDeafen?: () => void;
 	onDisconnect?: () => void;
@@ -172,24 +182,28 @@ export function UserContextMenu({
 					<button
 						type="button"
 						className="call-menu-item"
+						disabled={Boolean(muteLocked)}
+						title={muteLocked ? 'Ya está silenciado: sólo esa persona puede activarse el micrófono' : 'Silenciar su micrófono'}
 						onClick={() => {
 							onMute();
 							onClose();
 						}}>
-						<Icon name={voice?.muted ? 'micOff' : 'mic'} size={16} />
-						<span>{voice?.muted ? 'Activar micrófono' : 'Silenciar'}</span>
+						<Icon name={voice?.muted || muteLocked ? 'micOff' : 'mic'} size={16} />
+						<span>{muteLocked ? 'Ya está silenciado' : voice?.muted ? 'Activar micrófono' : 'Silenciar'}</span>
 					</button>
 				) : null}
 				{onDeafen ? (
 					<button
 						type="button"
 						className="call-menu-item"
+						disabled={Boolean(deafenLocked)}
+						title={deafenLocked ? 'Ya está ensordecido: sólo esa persona puede activarse el audio' : 'Ensordecerlo (no escucha a nadie)'}
 						onClick={() => {
 							onDeafen();
 							onClose();
 						}}>
-						<Icon name={voice?.deafened ? 'headphonesOff' : 'headphones'} size={16} />
-						<span>{voice?.deafened ? 'Activar audio' : 'Ensordecer'}</span>
+						<Icon name={voice?.deafened || deafenLocked ? 'headphonesOff' : 'headphones'} size={16} />
+						<span>{deafenLocked ? 'Ya está ensordecido' : voice?.deafened ? 'Activar audio' : 'Ensordecer'}</span>
 					</button>
 				) : null}
 				{onDisconnect ? (

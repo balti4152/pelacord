@@ -4126,6 +4126,18 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: var(--text-on-brand-primary);
 }
 
+/* Ítem que existe pero no está en tus manos (por ejemplo, ya está silenciado y sólo él puede
+   activarse el micrófono). Se muestra deshabilitado, como en Discord. */
+.call-menu-item:disabled {
+	color: var(--text-tertiary);
+	cursor: not-allowed;
+}
+
+.call-menu-item:disabled:hover {
+	background-color: transparent;
+	color: var(--text-tertiary);
+}
+
 .call-menu-item.is-danger {
 	color: var(--status-dnd);
 }

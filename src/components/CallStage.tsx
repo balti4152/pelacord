@@ -164,7 +164,7 @@ function VolumeMenu({presenter}: {presenter: {id: string; name: string} | null})
 }
 
 export function CallStage(): JSX.Element | null {
-	const {state, dispatch} = useStore();
+	const {state, dispatch, sendPeerCommand} = useStore();
 	const {voice} = state;
 	const remotes = useMeshRemotes();
 	const meshStates = useMeshStates();
@@ -373,8 +373,25 @@ export function CallStage(): JSX.Element | null {
 					x={menu.x}
 					y={menu.y}
 					canVolume={menu.id !== state.me.id}
+					voice={{muted: menuParticipant.muted, deafened: menuParticipant.deafened}}
+					// Igual que en la barra: a otros sólo se les puede APLICAR el silencio; devolverse el
+					// micrófono o el audio lo hace esa persona. A uno mismo sí se le permite el interruptor.
+					muteLocked={menuParticipant.id !== state.me.id && menuParticipant.muted}
+					deafenLocked={menuParticipant.id !== state.me.id && menuParticipant.deafened}
 					onClose={() => setMenu(null)}
 					onViewProfile={() => setProfile(userFromParticipant(menuParticipant, state.members))}
+					onMute={() =>
+						sendPeerCommand(menuParticipant.id, {
+							kind: 'mute',
+							on: menuParticipant.id === state.me.id ? !menuParticipant.muted : true,
+						})
+					}
+					onDeafen={() =>
+						sendPeerCommand(menuParticipant.id, {
+							kind: 'deafen',
+							on: menuParticipant.id === state.me.id ? !menuParticipant.deafened : true,
+						})
+					}
 				/>
 			) : null}
 			{profile ? <ProfilePopover user={profile} canVolume onClose={() => setProfile(null)} /> : null}
