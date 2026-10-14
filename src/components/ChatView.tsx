@@ -4,6 +4,7 @@ import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
 import {resolveMember, splitMentions, useStore} from '@/state/store';
 import {findMediaLinks, stripMediaUrls, type MediaLink} from '@/lib/mediaLinks';
+import {attachmentFileUrl} from '@/lib/attachmentUrl';
 import {fetchLinkPreview, findPreviewLinks, youtubeId, type LinkPreview} from '@/lib/linkPreview';
 import type {AppState, Attachment, Message} from '@/types';
 
@@ -323,12 +324,9 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	const [textFailed, setTextFailed] = useState(false);
 	const [copiado, setCopiado] = useState(false);
 	// El que comparte el archivo puede haber cambiado de puerto o de IP: se usa lo que informa
-	// AHORA (si está online) y, si no, lo que quedó guardado en el mensaje. Sin esto, los archivos
-	// viejos quedaban en 404 para siempre.
-	const dueno = attachment.ownerId ? state.members.find((member) => member.id === attachment.ownerId) : undefined;
-	const host = dueno?.fileHost ?? attachment.ownerHost;
-	const port = dueno?.filePort ?? attachment.ownerPort;
-	const url = host && port ? `http://${host}:${port}/file/${attachment.id}` : attachment.url;
+	// AHORA (si está online) y, si no, lo que quedó guardado en el mensaje. El cuidado con el
+	// puerto 0 está en attachmentFileUrl (si no, la imagen se mostraba como "descargar").
+	const url = attachmentFileUrl(attachment, state.members);
 
 	useEffect(() => {
 		if (attachment.kind !== 'text' || !url) return;

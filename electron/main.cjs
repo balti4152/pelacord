@@ -1677,7 +1677,15 @@ function startFileServer() {
 	server.listen(7789, '0.0.0.0', onListening);
 }
 
-ipcMain.handle('pelacord:file-endpoint', () => ({host: localAddress(), port: fileServerPort}));
+ipcMain.handle('pelacord:file-endpoint', async () => {
+	// OJO: si el servidor de archivos todavía no terminó de escuchar, el puerto es 0. Devolver 0
+	// hacía que las fotos y los adjuntos de este equipo NO cargaran para los demás (la URL quedaba
+	// sin puerto y el navegador caía en "descargar" en vez de mostrar la imagen). Se espera un toque.
+	for (let intento = 0; intento < 60 && !fileServerPort; intento++) {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+	}
+	return {host: localAddress(), port: fileServerPort};
+});
 
 ipcMain.handle('pelacord:share-file', (_event, payload) => {
 	const {filePath, name, mime, size} = payload ?? {};

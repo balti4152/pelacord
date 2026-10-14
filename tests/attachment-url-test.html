@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: URL de un adjunto</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script type="module">
+			import {attachmentFileUrl} from '/src/lib/attachmentUrl.ts';
+
+			const mensaje = (extra) => ({
+				id: 'abc123',
+				name: 'foto.png',
+				size: 1000,
+				mime: 'image/png',
+				kind: 'image',
+				url: '',
+				ownerId: 'chubi',
+				ownerHost: '10.243.87.243',
+				ownerPort: 7789,
+				...extra,
+			});
+			const miembro = (extra) => ({id: 'chubi', name: 'Chubi', tag: '0000', presence: 'online', avatarColor: '#fff', accentColor: '#fff', ...extra});
+
+			const casos = [
+				{
+					nombre: '1) peer online con datos validos: se usa lo que informa ahora',
+					adjunto: mensaje({}),
+					members: [miembro({fileHost: '10.243.33.108', filePort: 7789})],
+					esperado: 'http://10.243.33.108:7789/file/abc123',
+				},
+				{
+					nombre: '2) peer online con PUERTO 0 (el bug): cae al puerto del mensaje, no rompe',
+					adjunto: mensaje({}),
+					members: [miembro({fileHost: '10.243.33.108', filePort: 0})],
+					esperado: 'http://10.243.33.108:7789/file/abc123',
+				},
+				{
+					nombre: '3) peer online sin puerto: cae al del mensaje',
+					adjunto: mensaje({}),
+					members: [miembro({fileHost: '10.243.33.108'})],
+					esperado: 'http://10.243.33.108:7789/file/abc123',
+				},
+				{
+					nombre: '4) peer desconectado: se usa lo guardado en el mensaje',
+					adjunto: mensaje({}),
+					members: [],
+					esperado: 'http://10.243.87.243:7789/file/abc123',
+				},
+				{
+					nombre: '5) mensaje sin host ni puerto: devuelve el url del adjunto',
+					adjunto: mensaje({ownerHost: undefined, ownerPort: undefined, url: 'blob:local'}),
+					members: [],
+					esperado: 'blob:local',
+				},
+				{
+					nombre: '6) mi propio adjunto: la presencia mia no trae fileHost, usa el del mensaje',
+					adjunto: mensaje({ownerId: 'yo'}),
+					members: [miembro({id: 'yo', fileHost: undefined, filePort: undefined})],
+					esperado: 'http://10.243.87.243:7789/file/abc123',
+				},
+			];
+
+			const resultados = casos.map((caso) => ({
+				nombre: caso.nombre,
+				esperado: caso.esperado,
+				obtenido: attachmentFileUrl(caso.adjunto, caso.members),
+				ok: attachmentFileUrl(caso.adjunto, caso.members) === caso.esperado,
+			}));
+			const ok = resultados.every((r) => r.ok);
+			window.__resultado = {ok, resultados};
+			document.getElementById('root').textContent = ok ? 'OK' : 'FALLO';
+		</script>
+	</body>
+</html>
