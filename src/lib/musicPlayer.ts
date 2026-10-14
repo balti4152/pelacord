@@ -14,6 +14,7 @@
 
 let audio: HTMLAudioElement | null = null;
 let endedCallback: (() => void) | null = null;
+let errorCallback: (() => void) | null = null;
 /** Volumen y silencio actuales: se aplican en el momento, sin reiniciar la reproducción. */
 let volume = 0.8;
 let muted = false;
@@ -26,6 +27,16 @@ export function currentMusicAudio(): HTMLAudioElement | null {
 /** Avisa cuando el tema termina (para saltar al siguiente). */
 export function onMusicEnded(callback: (() => void) | null): void {
 	endedCallback = callback;
+}
+
+/**
+ * Avisa si el audio falla (por ejemplo, si la URL se venció a mitad del tema).
+ *
+ * OJO: no se avisa cuando la cortamos nosotros (ahí se limpia `audio` ANTES de vaciar el src, así
+ * el error de la limpieza no cuenta).
+ */
+export function onMusicError(callback: (() => void) | null): void {
+	errorCallback = callback;
 }
 
 /** Volumen (0 a 1) y silencio de MI música. */
@@ -67,6 +78,9 @@ export async function playMusic(url: string, startAtSeconds = 0): Promise<HTMLAu
 		},
 		{once: true},
 	);
+	element.addEventListener('error', () => {
+		if (audio === element) errorCallback?.();
+	});
 	audio = element;
 	await seek(element, startAtSeconds);
 	await element.play();

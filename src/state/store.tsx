@@ -9,6 +9,7 @@ import {
 	type MusicState,
 	type MusicTrack,
 	MUSIC_DRIFT_TOLERANCE_MS,
+	currentPositionMs,
 	electHost,
 	expectedJamPositionMs,
 	musicSnapshot,
@@ -23,7 +24,7 @@ import {
 	isStale,
 	sortRooms,
 } from '@/lib/movieRooms';
-import {currentMusicAudio, onMusicEnded, playMusic, setMusicOutput, stopMusic} from '@/lib/musicPlayer';
+import {currentMusicAudio, onMusicEnded, onMusicError, playMusic, setMusicOutput, stopMusic} from '@/lib/musicPlayer';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
@@ -1363,6 +1364,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	}, []);
 	/** Id del tema que estoy reproduciendo LOCALMENTE (para saber si tengo que cambiar de tema). */
 	const playingTrackId = useRef<string | null>(null);
+	/** Reintentos del tema actual (si el audio se corta solo) y un contador para forzar el reinicio. */
+	const musicRetries = useRef(0);
+	const [musicTick, setMusicTick] = useState(0);
 
 	/** Los que están en mi canal de voz: de esta lista sale el host (el id más chico). */
 	const musicParticipants = useMemo(() => {
@@ -1538,11 +1542,20 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				}
 				playingTrackId.current = track.id;
 				if (musicState.pausedAt) audio.pause();
+				musicRetries.current = 0;
 				// Cuando termina, salta al siguiente. Lo pide SÓLO el host: si lo pidieran todos
 				// (cada uno termina a su hora), la cola avanzaría varios temas de golpe.
 				onMusicEnded(() => {
 					playingTrackId.current = null;
 					if (currentJamHost() === meRef.current.id) void musicSkip();
+				});
+				// Si el audio se corta solo (por ejemplo, porque la URL del tema venció a mitad), se
+				// vuelve a pedir y arrancar en el segundo en que va la Jam. Hasta 2 intentos por tema.
+				onMusicError(() => {
+					if (musicRetries.current >= 2) return;
+					musicRetries.current += 1;
+					playingTrackId.current = null;
+					setMusicTick((tick) => tick + 1);
 				});
 			} catch (error) {
 				console.warn('[pelacord] no pude arrancar la música', String(error));
@@ -1556,7 +1569,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// vez que alguien entra o sale se re-ejecutaría y CANCELARÍA el arranque (que tarda 1-3 s en
 		// pedir el audio) → la música nunca arrancaba.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, musicSkip]);
+	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, musicSkip, musicTick]);
 
 	// Cuándo me llegó la versión actual de la Jam. Sólo se refresca cuando la Jam cambia DE VERDAD
 	// (tema, arranque, pausa o salto): las reafirmaciones traen el mismo estado y no reinician el
@@ -1590,8 +1603,12 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		}, 3000);
 		return () => clearInterval(timer);
 	}, [jamChannelId]);
-	// Si me voy de un canal en el que NO quedaba nadie más, se limpia la Jam DE ESE canal.
-	// (Se limpia el canal que dejo, no el que abro: por eso antes, al volver, se borraba todo.)
+	// Al salir de un canal, la Jam NO se borra.
+	//
+	// OJO: antes se borraba ("para que no quede una cola vieja") y el usuario reportó el problema
+	// real: si te ibas y volvías, la cola aparecía VACÍA y no sonaba nada hasta que el host volviera
+	// a difundir el estado. Ahora cada uno guarda la Jam de cada canal y, si te vas siendo el
+	// último, se deja EN PAUSA: al volver está la cola y no sigue a mitad de una canción vieja.
 	const lastJamChannel = useRef<string | null>(null);
 	const othersByChannel = useRef<Record<string, number>>({});
 	useEffect(() => {
@@ -1602,7 +1619,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		if (channelId) othersByChannel.current[channelId] = others;
 		const previous = lastJamChannel.current;
 		if (previous && previous !== channelId && (othersByChannel.current[previous] ?? 0) === 0) {
-			setMusicByChannel((prev) => ({...prev, [previous]: EMPTY_MUSIC_STATE}));
+			setMusicByChannel((prev) => {
+				const jam = prev[previous];
+				if (!jam?.track || jam.pausedAt) return prev;
+				return {...prev, [previous]: {...jam, pausedAt: Date.now(), positionMs: currentPositionMs(jam)}};
+			});
 		}
 		lastJamChannel.current = channelId;
 	}, [state.voice.channelId, state.voiceMembers, state.me.id]);

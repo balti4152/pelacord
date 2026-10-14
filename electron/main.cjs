@@ -94,6 +94,18 @@ function dropSocket(socket) {
 	sendToRenderer('pelacord:peer-left', {id});
 }
 
+// ---------- Red de seguridad del proceso principal ----------
+//
+// Un error inesperado acá (por ejemplo, un manejador de HTTP que tira) mostraba la ventana
+// "A JavaScript error occurred in the main process" y asustaba al usuario. Se registra y se sigue:
+// la app no se cierra y el problema queda en la consola para poder mirarlo.
+process.on('uncaughtException', (error) => {
+	console.error('[pelacord] excepción no capturada en el proceso principal:', error);
+});
+process.on('unhandledRejection', (reason) => {
+	console.error('[pelacord] promesa rechazada sin manejar en el proceso principal:', reason);
+});
+
 // ---------- Interfaces de red (ZeroTier primero) ----------
 
 function localInterfaces() {
@@ -1592,31 +1604,50 @@ function pipeAudio(url, req, res, onStatus) {
 
 /** Sirve el audio de un tema. Si la URL venció, la resuelve de nuevo y reintenta una vez. */
 async function serveAudio(token, req, res) {
-	const entry = audioStreams.get(token);
-	if (!entry) {
-		res.writeHead(404);
-		res.end();
-		return;
-	}
-	let status = 0;
-	const ok = await pipeAudio(entry.url, req, res, (code) => {
-		status = code;
-	});
-	if (ok) return;
-	console.warn(`[pelacord] el audio respondió ${status}: se resuelve de nuevo`);
-	const fresh = await resolveAudioUrl(entry.target);
-	if (!fresh) {
-		if (!res.headersSent) {
+	try {
+		const entry = audioStreams.get(token);
+		if (!entry) {
+			res.writeHead(404);
+			res.end();
+			return;
+		}
+		let status = 0;
+		const ok = await pipeAudio(entry.url, req, res, (code) => {
+			status = code;
+		});
+		if (ok) return;
+		console.warn(`[pelacord] el audio respondió ${status}: se resuelve de nuevo`);
+		// OJO: si ya se mandaron las cabeceras NO se puede reintentar (tiraría
+		// "Cannot write headers after they are sent" y eso ROMPE EL PROCESO PRINCIPAL: salía la
+		// ventana de "A JavaScript error occurred in the main process"). Se corta y listo: el
+		// reproductor se da cuenta del error y vuelve a pedir el audio (ver el reintento en la app).
+		if (res.headersSent) {
+			res.end();
+			return;
+		}
+		const fresh = await resolveAudioUrl(entry.target);
+		if (!fresh) {
+			if (!res.headersSent) {
+				res.writeHead(502);
+				res.end();
+			}
+			return;
+		}
+		entry.url = fresh;
+		const retry = await pipeAudio(fresh, req, res, () => {});
+		if (!retry && !res.headersSent) {
 			res.writeHead(502);
 			res.end();
 		}
-		return;
-	}
-	entry.url = fresh;
-	const retry = await pipeAudio(fresh, req, res, () => {});
-	if (!retry && !res.headersSent) {
-		res.writeHead(502);
-		res.end();
+	} catch (error) {
+		// Un manejador de HTTP NUNCA puede tirar: si tira, se cae la app entera.
+		console.error('[pelacord] error sirviendo audio', String(error));
+		try {
+			if (!res.headersSent) res.writeHead(500);
+			res.end();
+		} catch {
+			// ya estaba cerrada
+		}
 	}
 }
 
