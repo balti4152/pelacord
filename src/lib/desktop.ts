@@ -27,6 +27,14 @@ export interface PeerPresence {
 	particleLife?: number;
 	/** Sube cuando el usuario cambia algo de su perfil (para refrescar las imágenes guardadas). */
 	profileVersion?: number;
+	/**
+	 * Número de orden de esta presencia (lo sube el que la manda).
+	 *
+	 * La malla puede entregar una presencia VIEJA después de una nueva (el mensaje puede venir
+	 * directo o reenviado por un tercero, por caminos distintos). Sin este número, el peer
+	 * "desaparecía" un instante y la llamada entraba en un bucle de desconectar/conectar.
+	 */
+	seq?: number;
 	/** En qué sala de Pelaflix está mirando (null = ninguna). */
 	movieRoomId?: string | null;
 	channelId: string | null;

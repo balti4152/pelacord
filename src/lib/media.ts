@@ -65,6 +65,14 @@ export class VoiceMesh {
 	 */
 	private rebuilds = new Map<string, number>();
 	private rebuildAt = new Map<string, number>();
+	/**
+	 * Reinicios de ICE agendados (uno por peer).
+	 *
+	 * OJO: hay que CANCELARLOS cuando la conexión se arregla sola. Si no, el reinicio agendado cae
+	 * sobre una conexión sana, la corta un segundo y la vuelve a levantar: eso era el "me desconecta
+	 * de la llamada pasados un segundo" (un corte de ~1 s cada vez, en bucle).
+	 */
+	private restartTimers = new Map<string, ReturnType<typeof setTimeout>>();
 	private watchdog: ReturnType<typeof setInterval> | null = null;
 	private myId = '';
 	private muted = false;
@@ -177,6 +185,8 @@ export class VoiceMesh {
 		this.connectingAt.clear();
 		this.rebuilds.clear();
 		this.rebuildAt.clear();
+		for (const timer of this.restartTimers.values()) clearTimeout(timer);
+		this.restartTimers.clear();
 		this.senders.clear();
 		for (const pc of this.pcs.values()) pc.close();
 		this.pcs.clear();
@@ -434,12 +444,13 @@ export class VoiceMesh {
 				return;
 			}
 			if (pc.connectionState === 'connected') {
-				// Se conectó: se olvida todo lo anterior (reintentos y rearmes).
+				// Se conectó: se olvida todo lo anterior (reintentos, rearmes y reinicios agendados).
 				this.iceRestarts.set(peerId, 0);
 				this.disconnectedAt.delete(peerId);
 				this.connectingAt.delete(peerId);
 				this.rebuilds.delete(peerId);
 				this.rebuildAt.delete(peerId);
+				this.cancelRestart(peerId);
 			}
 			// Reaplicar el bitrate cuando la conexión está lista (los encodings ya existen).
 			if (pc.connectionState === 'connected') {
@@ -530,6 +541,7 @@ export class VoiceMesh {
 	}
 
 	private drop(peerId: string): void {
+		this.cancelRestart(peerId);
 		this.pcs.get(peerId)?.close();
 		this.pcs.delete(peerId);
 		this.remotes.delete(peerId);
@@ -566,7 +578,10 @@ export class VoiceMesh {
 			return;
 		}
 		const espera = Math.min(45000, 8000 * attempts);
-		setTimeout(() => {
+		// Se cancela cualquier reinicio que ya estuviera agendado para este peer (si no, se acumulan).
+		this.cancelRestart(peerId);
+		const timer = setTimeout(() => {
+			this.restartTimers.delete(peerId);
 			// Si ya no es esta conexión (se rearmó), no se toca.
 			if (this.pcs.get(peerId) !== pc) return;
 			try {
@@ -575,6 +590,15 @@ export class VoiceMesh {
 				this.drop(peerId);
 			}
 		}, espera);
+		this.restartTimers.set(peerId, timer);
+	}
+
+	/** Cancela el reinicio de ICE agendado de un peer (cuando la conexión ya se arregló). */
+	private cancelRestart(peerId: string): void {
+		const timer = this.restartTimers.get(peerId);
+		if (!timer) return;
+		clearTimeout(timer);
+		this.restartTimers.delete(peerId);
 	}
 
 	/** Rearma toda la malla: corta y vuelve a empezar (lo usa el botón "Reconectar" de la llamada). */

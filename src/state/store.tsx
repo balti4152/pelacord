@@ -550,6 +550,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	voiceRef.current = state.voice;
 	const peersRef = useRef<Record<string, PeerPresence>>({});
 	const lastSeenRef = useRef<Record<string, number>>({});
+	/** Número de orden de MI presencia: sube en cada una (los demás ignoran las atrasadas). */
+	const presenceSeq = useRef(0);
 	const sharingRef = useRef<Record<string, boolean>>({});
 	const activeChannelRef = useRef(state.activeChannelId);
 	activeChannelRef.current = state.activeChannelId;
@@ -743,6 +745,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return {
 			id: me.id,
 			name: me.name,
+			// Número de orden: cada presencia que mando sube. Los demás ignoran una que llegue
+			// atrasada (por el camino reenviado de la malla), así no "desaparezco" por un instante.
+			seq: (presenceSeq.current += 1),
 			color: me.avatarColor,
 			avatarUrl: me.avatarUrl,
 			avatarCrop: me.avatarCrop,
@@ -959,6 +964,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return transport.onPresence(({from, payload}) => {
 			// Nunca contarse a uno mismo (evita el duplicado por el eco de la malla).
 			if (from === meRef.current.id || payload.id === meRef.current.id) return;
+			// Una presencia VIEJA que llegó tarde se ignora: si no, el peer "vuelve" un instante a
+			// otro canal (o a desconectado) y la llamada entra en un bucle de desconectar/conectar.
+			const previous = peersRef.current[from];
+			const seq = typeof payload.seq === 'number' ? payload.seq : 0;
+			if (previous && seq > 0 && seq <= (previous.seq ?? 0)) return;
 			peersRef.current = {...peersRef.current, [from]: payload};
 			lastSeenRef.current[from] = Date.now();
 			applyPresence();

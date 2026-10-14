@@ -91,11 +91,29 @@ export function App(): JSX.Element {
 	const peersKey = peersInChannel.join(',');
 
 	// Conecta con quien está en el canal y corta con quien se fue.
+	//
+	// El corte tiene TOLERANCIA (8 s): una presencia perdida o atrasada no puede cortar la llamada.
+	// Antes se cortaba al instante y la llamada entraba en un bucle de desconectar/conectar
+	// ("me desconecta a cada rato").
+	const pendingDisconnects = useRef(new Map<string, number>());
 	useEffect(() => {
 		if (!isDesktop() || !state.voice.channelId) return;
-		for (const id of peersInChannel) void voiceMesh.connect(id);
+		for (const id of peersInChannel) {
+			const timer = pendingDisconnects.current.get(id);
+			if (timer) {
+				window.clearTimeout(timer);
+				pendingDisconnects.current.delete(id);
+			}
+			void voiceMesh.connect(id);
+		}
 		for (const remote of voiceMesh.getRemotes()) {
-			if (!peersInChannel.includes(remote.peerId)) voiceMesh.disconnect(remote.peerId);
+			if (peersInChannel.includes(remote.peerId)) continue;
+			if (pendingDisconnects.current.has(remote.peerId)) continue;
+			const timer = window.setTimeout(() => {
+				pendingDisconnects.current.delete(remote.peerId);
+				voiceMesh.disconnect(remote.peerId);
+			}, 8000);
+			pendingDisconnects.current.set(remote.peerId, timer);
 		}
 		// peersKey resume peersInChannel; no se incluye el array para no reejecutar en cada render.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
