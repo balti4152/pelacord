@@ -25,6 +25,7 @@ import {
 	sortRooms,
 } from '@/lib/movieRooms';
 import {currentMusicAudio, onMusicEnded, onMusicError, playMusic, setMusicOutput, stopMusic} from '@/lib/musicPlayer';
+import {migrateProfileAssets} from '@/lib/profileAssets';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
@@ -713,26 +714,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			.then((endpoint) => {
 				fileEndpointRef.current = endpoint;
 				if (!endpoint.host || !endpoint.port) return;
-				// Los assets propios servidos por P2P cambian de puerto en cada arranque:
-				// se reconstruyen las URLs para que sigan funcionando.
-				const me = meRef.current;
-				const patch: Partial<Member> = {};
-				if (me.avatarP2P) {
-					const url = `http://${endpoint.host}:${endpoint.port}/file/avatar`;
-					if (me.avatarUrl !== url) patch.avatarUrl = url;
-				}
-				if (me.bannerP2P) {
-					const url = `http://${endpoint.host}:${endpoint.port}/file/banner`;
-					if (me.bannerUrl !== url) patch.bannerUrl = url;
-				}
-				if (me.customParticleP2P) {
-					const url = `http://${endpoint.host}:${endpoint.port}/file/particle`;
-					if (me.customParticle !== url) patch.customParticle = url;
-				}
-				if (me.customDecoP2P) {
-					const url = `http://${endpoint.host}:${endpoint.port}/file/deco`;
-					if (me.customDeco !== url) patch.customDeco = url;
-				}
+				// Los assets del perfil (avatar, banner, marco, partículas) se sirven por P2P: acá se
+				// reconstruyen con el host:puerto de AHORA y, de paso, se migran los que quedaron como
+				// data:/blob: (perfiles viejos). Eso último era el "a un amigo no le aparece mi foto":
+				// un blob: sólo existe en esta máquina y un data: gigante no viaja bien en la presencia.
+				const patch = migrateProfileAssets(meRef.current, `http://${endpoint.host}:${endpoint.port}`);
 				if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
 			})
 			.catch(() => {});

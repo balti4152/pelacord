@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: migración de los assets del perfil a P2P</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script type="module">
+			import {migrateProfileAssets} from '/src/lib/profileAssets.ts';
+
+			const base = 'http://10.243.87.243:7789';
+			const yo = (extra) => ({id: 'yo', name: 'Balti', tag: '0000', presence: 'online', avatarColor: '#fff', accentColor: '#fff', ...extra});
+
+			const casos = [];
+			const anotar = (nombre, esperado, obtenido) => casos.push({nombre, esperado, obtenido, ok: obtenido === esperado});
+
+			// 1) EL CASO REPORTADO: el avatar quedó como data: (perfil viejo) -> se pasa a P2P.
+			const conData = migrateProfileAssets(yo({avatarUrl: 'data:image/gif;base64,R0lGOD...'}), base);
+			anotar('1) avatar data: -> URL P2P', `${base}/file/avatar`, conData.avatarUrl);
+			anotar('2) y queda marcado como P2P', true, conData.avatarP2P);
+
+			// 2) El banner igual (el amigo veía el banner azul de respaldo).
+			const conBlob = migrateProfileAssets(yo({bannerUrl: 'blob:file:///abc-123'}), base);
+			anotar('3) banner blob: -> URL P2P', `${base}/file/banner`, conBlob.bannerUrl);
+
+			// 3) URL P2P con host viejo: se reconstruye con el de ahora.
+			const viejo = migrateProfileAssets(yo({avatarUrl: 'http://192.168.0.100:7789/file/avatar', avatarP2P: true}), base);
+			anotar('4) URL P2P vieja -> host de ahora', `${base}/file/avatar`, viejo.avatarUrl);
+
+			// 4) Ya está perfecto: no se toca nada.
+			const ok = migrateProfileAssets(yo({avatarUrl: `${base}/file/avatar`, avatarP2P: true}), base);
+			anotar('5) ya está bien -> no se toca', 0, Object.keys(ok).length);
+
+			// 5) Sin avatar: no se inventa nada.
+			const vacio = migrateProfileAssets(yo({}), base);
+			anotar('6) sin avatar -> nada', 0, Object.keys(vacio).length);
+
+			// 6) Un id de partícula INCLUIDA no se toca (no es una URL).
+			const particula = migrateProfileAssets(yo({decoImage: 'star', customDeco: 'star'}), base);
+			anotar('7) id de partícula incluida -> no se toca', 0, Object.keys(particula).length);
+
+			// 7) Las 4 cosas a la vez.
+			const todas = migrateProfileAssets(
+				yo({avatarUrl: 'data:a', bannerUrl: 'data:b', customParticle: 'blob:c', customDeco: 'data:d'}),
+				base,
+			);
+			anotar('8) migra las 4', 'http://10.243.87.243:7789/file/deco', todas.customDeco);
+
+			const okTotal = casos.every((caso) => caso.ok);
+			window.__resultado = {ok: okTotal, casos};
+			document.getElementById('root').textContent = okTotal ? 'OK' : 'FALLO';
+		</script>
+	</body>
+</html>
