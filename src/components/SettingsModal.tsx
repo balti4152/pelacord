@@ -4,7 +4,7 @@ import {CosmeticsTab} from '@/components/CosmeticsTab';
 import {Avatar, ColorAvatar, Icon} from '@/components/primitives';
 import {useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
 import {getDesktopTransport} from '@/lib/desktop';
-import {fileToDataUrl, fileToRawDataUrl} from '@/lib/image';
+import {fileToDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
 import {checkUpdates, installUpdate, useUpdater} from '@/lib/updater';
 import {APP_VERSION, formatBuildFull} from '@/lib/build';
@@ -118,8 +118,14 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 			}
 		}
 
-		const dataUrl = animated ? await fileToRawDataUrl(file) : await fileToDataUrl(file, AVATAR_SOURCE, 0.9);
-		updateProfile({avatarUrl: dataUrl, avatarCrop: crop, avatarP2P: false, avatarPoster: undefined});
+		// Respaldo: un CUADRO FIJO reducido, nunca el GIF crudo.
+		//
+		// OJO (esto era el bug del perfil que no se veía): el GIF crudo como data URL son varios MB
+		// de texto que viajan dentro del mensaje de PRESENCIA. Eso rompe el mensaje entero (los demás
+		// no ven ni la foto ni el banner) y encima cacheAvatar no puede bajarlo (sólo acepta http), así
+		// que las listas se quedaban con la copia vieja. Con un cuadro fijo chico, se ve siempre.
+		const respaldo = await fileToDataUrl(file, AVATAR_SOURCE, 0.9).catch(() => undefined);
+		updateProfile({avatarUrl: respaldo, avatarCrop: crop, avatarP2P: false, avatarPoster: undefined});
 	}
 
 	/**
@@ -149,8 +155,10 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 				// cae al data URL
 			}
 		}
-		const dataUrl = animated ? await fileToRawDataUrl(file) : await fileToDataUrl(file, BANNER_MAX, 0.8);
-		updateProfile({bannerUrl: dataUrl, bannerColor: undefined, bannerP2P: false});
+		// Respaldo: un cuadro fijo reducido, nunca el GIF crudo (ver la nota en saveAvatar: el data URL
+		// gigante rompe el mensaje de presencia y los demás no ven nada).
+		const respaldo = await fileToDataUrl(file, BANNER_MAX, 0.8).catch(() => undefined);
+		updateProfile({bannerUrl: respaldo, bannerColor: undefined, bannerP2P: false});
 	}
 
 	const bannerStyle = me.bannerUrl
