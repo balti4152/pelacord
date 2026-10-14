@@ -19,7 +19,7 @@ export interface MeshTransport {
 }
 
 type SignalPayload = {
-	kind: 'offer' | 'answer' | 'candidate';
+	kind: 'offer' | 'answer' | 'candidate' | 'reset';
 	sdp?: RTCSessionDescriptionInit;
 	candidate?: RTCIceCandidateInit;
 };
@@ -569,11 +569,13 @@ export class VoiceMesh {
 		const attempts = (this.iceRestarts.get(peerId) ?? 0) + 1;
 		this.iceRestarts.set(peerId, attempts);
 		if (attempts > 3) {
-			// Se rearma de cero, pero espaciando cada vez más.
+			// Se rearma de cero, pero espaciando cada vez más. Y se le avisa al otro para que rearme
+			// también: si no, su conexión quedaría con los canales viejos y rechazaría la oferta nueva.
 			const rearmes = (this.rebuilds.get(peerId) ?? 0) + 1;
 			this.rebuilds.set(peerId, rearmes);
 			this.rebuildAt.set(peerId, Date.now() + Math.min(60000, 10000 * rearmes));
 			console.warn(`[pelacord-media] ${peerId}: se rearma la conexión (intento ${rearmes})`);
+			this.send(peerId, {kind: 'reset'});
 			this.drop(peerId);
 			return;
 		}
@@ -601,10 +603,28 @@ export class VoiceMesh {
 		this.restartTimers.delete(peerId);
 	}
 
+	/**
+	 * Rearma la conexión de las DOS puntas.
+	 *
+	 * Por qué avisar al otro: cada conexión tiene sus "m-lines" (canales). Si uno rearma su lado y
+	 * el otro no, la oferta nueva trae menos canales que los que el otro ya tiene y WebRTC la
+	 * RECHAZA ("The order of m-lines in subsequent offer doesn't match order from previous
+	 * offer/answer") → la llamada se cae. Pasaba al compartir pantalla y después rearmar: el canal
+	 * de video queda (a propósito, para no renegociar), así que un lado tenía 2 canales y el otro 1.
+	 */
+	private async rebuild(peerId: string): Promise<void> {
+		this.send(peerId, {kind: 'reset'});
+		this.drop(peerId);
+		if (this.desired.has(peerId)) await this.pcFor(peerId);
+	}
+
 	/** Rearma toda la malla: corta y vuelve a empezar (lo usa el botón "Reconectar" de la llamada). */
 	async reconnect(): Promise<void> {
 		const myId = this.myId;
 		const peers = [...this.desired];
+		// Se les avisa a todos para que rearmen también (si no, sus conexiones quedan con los canales
+		// viejos y rechazan la oferta nueva: la llamada se caía).
+		for (const peerId of peers) this.send(peerId, {kind: 'reset'});
 		this.stop();
 		await this.start(myId);
 		for (const peerId of peers) await this.connect(peerId);
@@ -683,6 +703,16 @@ export class VoiceMesh {
 		// ya se fue puede rearmar la conexión y armar una guerra de reconexiones.
 		if (!this.desired.has(from) && !this.pcs.has(from)) return;
 
+		// El otro rearmó su conexión y pide que rearmemos la nuestra: se hace de cero, así los dos
+		// quedan con los mismos canales. Si no, su oferta nueva traería menos canales que los que
+		// tenemos y WebRTC la rechazaría (la llamada se caía al compartir pantalla y rearmar).
+		if (payload.kind === 'reset') {
+			console.log(`[pelacord-media] ${from}: pidió rearmar la conexión`);
+			this.drop(from);
+			if (this.desired.has(from)) await this.pcFor(from);
+			return;
+		}
+
 		const pc = await this.pcFor(from);
 		const polite = this.myId > from;
 
@@ -710,6 +740,10 @@ export class VoiceMesh {
 				console.warn(
 					`[pelacord-media] ${from}: no pude aplicar la oferta (${String(error)}) · su oferta: [${suyos}] · mis canales: [${mios}]`,
 				);
+				// Si fue porque los canales quedaron desalineados (pasa al compartir pantalla y después
+				// rearmar una sola punta), se rearma la conexión de los DOS: si no, esta conexión queda
+				// muerta y la llamada se cae.
+				if (String(error).includes('m-lines')) void this.rebuild(from);
 				return;
 			}
 			this.remoteReady.add(from);

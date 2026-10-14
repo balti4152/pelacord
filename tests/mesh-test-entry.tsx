@@ -119,6 +119,11 @@ async function correr(): Promise<void> {
 	transportes.repetir(false);
 
 	// Reconectar de cero (lo que hace el vigilante cuando una conexión se cae).
+	//
+	// ESTE ERA EL CASO QUE ROMPÍA LA LLAMADA: al rearmar UNA sola punta, su oferta traía menos
+	// canales que los que el otro ya tenía (el canal de video queda aunque se deje de compartir) y
+	// WebRTC la rechazaba ("The order of m-lines...") → la conexión quedaba muerta. Ahora se detecta
+	// y se rearma la conexión de los DOS.
 	mallaA.disconnect('bbb');
 	await esperar(200);
 	await mallaA.connect('bbb');
@@ -127,7 +132,16 @@ async function correr(): Promise<void> {
 		await esperar(250);
 		reconectado = mallaA.getStates()['bbb'];
 	}
-	anotar(`6) tras reconectar: a->b=${reconectado}`);
+	anotar(`6) tras rearmar una sola punta: a->b=${reconectado}`);
+
+	// Y el botón "Reconectar" (rearma las dos puntas avisándose entre ellas).
+	await Promise.all([mallaA.reconnect(), mallaB.reconnect()]);
+	let trasBoton = await estadosFinales();
+	for (let intento = 0; intento < 60 && (trasBoton.a !== 'connected' || trasBoton.b !== 'connected'); intento++) {
+		await esperar(250);
+		trasBoton = await estadosFinales();
+	}
+	anotar(`7) tras el botón Reconectar: a->b=${trasBoton.a} · b->a=${trasBoton.b}`);
 
 	const errores = (window.__errores as string[]) ?? [];
 	const esperados = new Map<string, string | undefined>([
@@ -140,6 +154,7 @@ async function correr(): Promise<void> {
 		['cortado', 'true'],
 		['repetidas', 'connected'],
 		['reconectado', 'connected'],
+		['boton', 'connected'],
 	]);
 	const medido = new Map<string, string | undefined>([
 		['a->b', estados.a],
@@ -151,6 +166,7 @@ async function correr(): Promise<void> {
 		['cortado', String(videoTrasCortar)],
 		['repetidas', tras.b],
 		['reconectado', reconectado],
+		['boton', trasBoton.b],
 	]);
 	const ok = [...esperados].every(([clave, valor]) => medido.get(clave) === valor) && errores.length === 0;
 	// Se deja todo a la vista para poder mirar la ICE y los canales si algo no conecta.

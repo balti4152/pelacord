@@ -1,6 +1,6 @@
 import {type PointerEvent, useEffect, useRef, useState} from 'react';
 import {Icon} from '@/components/primitives';
-import {useLocalScreen, useMeshRemotes} from '@/components/RemoteMedia';
+import {useLocalScreen, useRemoteVideo} from '@/components/RemoteMedia';
 import {useStore} from '@/state/store';
 
 const WIDTH = 320;
@@ -9,7 +9,6 @@ const HEIGHT = 200;
 /** Ventanita flotante con la transmisión cuando salís de la grilla de la llamada. */
 export function FloatingStream(): JSX.Element | null {
 	const {state, dispatch} = useStore();
-	const remotes = useMeshRemotes();
 	const localScreen = useLocalScreen();
 	const [position, setPosition] = useState(() => ({
 		x: Math.max(8, window.innerWidth - WIDTH - 20),
@@ -18,8 +17,7 @@ export function FloatingStream(): JSX.Element | null {
 	const drag = useRef<{offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean} | null>(null);
 	const videoRef = useRef<HTMLVideoElement>(null);
 
-	const remote = remotes.find((entry) => entry.video && entry.video.getVideoTracks()[0]?.readyState === 'live');
-	const remoteVideo = remote?.video ?? null;
+	const remoteVideo = useRemoteVideo();
 	// Si lo único que hay para ver es MI propia transmisión, no se reproduce acá: mostrar tu
 	// propia captura gasta GPU al pedo mientras jugás. La ventanita queda igual (se arrastra y
 	// con un click volvés a la llamada).
@@ -27,7 +25,14 @@ export function FloatingStream(): JSX.Element | null {
 	const stream = remoteVideo ?? (state.voice.sharing ? localScreen : null);
 	// Alcanza con estar compartiendo para mostrar el flotante: la captura local puede tardar
 	// (o no estar), pero la ventanita tiene que estar igual.
-	const visible = Boolean(state.voice.channelId && !state.voice.stageOpen && (stream || ownShare));
+	//
+	// Se puede CERRAR (antes no había forma): se vuelve a mostrar cuando empieza OTRA transmisión,
+	// porque ahí cambia el stream.
+	const [closed, setClosed] = useState(false);
+	useEffect(() => {
+		if (stream) setClosed(false);
+	}, [stream]);
+	const visible = Boolean(!closed && state.voice.channelId && !state.voice.stageOpen && (stream || ownShare));
 
 	// Asigna el stream al <video> (todos los hooks van arriba, sin returns previos).
 	useEffect(() => {
@@ -89,6 +94,17 @@ export function FloatingStream(): JSX.Element | null {
 				<video ref={videoRef} autoPlay playsInline muted />
 			)}
 			<span className="floating-stream-hint">{ownShare ? 'Compartiendo · click para abrir' : 'En vivo · click para abrir'}</span>
+			<button
+				type="button"
+				className="floating-stream-close"
+				title="Cerrar la ventanita"
+				onPointerDown={(event) => event.stopPropagation()}
+				onClick={(event) => {
+					event.stopPropagation();
+					setClosed(true);
+				}}>
+				<Icon name="x" size={14} />
+			</button>
 		</div>
 	);
 }

@@ -126,6 +126,19 @@ export function App(): JSX.Element {
 		else voiceMesh.stopScreen();
 	}, [state.voice.sharing]);
 
+	// Si la captura termina SOLA (el usuario aprieta "Dejar de compartir" en la barra del sistema, o
+	// cierra la ventana que estaba compartiendo), la app tiene que enterarse. Si no, queda para
+	// siempre el estado "estoy compartiendo" y la ventanita flotante no se va más (y no se podía
+	// cerrar). Se mira cada vez que la malla avisa algo.
+	useEffect(() => {
+		if (!isDesktop() || !state.voice.sharing) return;
+		const revisar = () => {
+			const track = voiceMesh.getScreen()?.getVideoTracks()[0];
+			if (!track || track.readyState !== 'live') dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+		};
+		return voiceMesh.subscribe(revisar);
+	}, [state.voice.sharing]);
+
 	// Silenciar y ensordecer de verdad.
 	useEffect(() => {
 		if (!isDesktop()) return;

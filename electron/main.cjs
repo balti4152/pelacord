@@ -1555,13 +1555,24 @@ async function resolveAudioUrl(target) {
 	const value = String(target || '').trim();
 	if (!value) return null;
 	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
-	const result = await runYtDlp(['-f', 'bestaudio[ext=m4a]/bestaudio', '--get-url', '--no-playlist', '--no-warnings', url], 40000);
-	if (!result.ok) {
-		console.warn('[pelacord] no se pudo sacar el audio:', result.error);
-		return null;
+	const base = ['-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url', '--no-playlist', '--no-warnings', url];
+	// Primero con el cliente por defecto. Si YouTube lo rechaza (pasa cuando cambian las reglas y
+	// sale 403), se prueba con el cliente "android_vr", que es el que quedó funcionando cuando el
+	// otro falla (verificado a mano: web_safari, tv y web_embedded NO sirven, piden tokens extra).
+	// Antes, si fallaba la primera, el reproductor recibía un 502 y la música no arrancaba.
+	const intentos = [base, [...base, '--extractor-args', 'youtube:player_client=android_vr']];
+	let ultimoError = '';
+	for (const args of intentos) {
+		const result = await runYtDlp(args, 30000);
+		if (result.ok) {
+			const encontrado = result.output.split('\n')[0].trim();
+			if (encontrado) return encontrado;
+			continue;
+		}
+		ultimoError = result.error || '';
 	}
-	// Puede devolver varias líneas (audio + video): se usa la primera.
-	return result.output.split('\n')[0].trim() || null;
+	console.warn('[pelacord] no se pudo sacar el audio:', ultimoError || 'sin URL');
+	return null;
 }
 
 const AUDIO_USER_AGENT =
