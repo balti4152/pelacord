@@ -15,6 +15,7 @@
 				musicDriftMs,
 				musicSnapshot,
 				musicStamp,
+				musicSyncAction,
 			} from '/src/lib/musicQueue.ts';
 
 			const tema = {id: 'abc', title: 'Tema', duration: 200, thumbnail: '', author: 'X', url: 'https://youtu.be/abc', addedBy: 'Balti'};
@@ -59,6 +60,13 @@
 			//     para siempre y no podía escuchar bien.
 			const fotoRara = {...foto, startedAt: foto.startedAt - 900_000};
 			anotar('10) un reloj del host desfasado no cambia nada', 70_000, expectedJamPositionMs(fotoRara, meLlego, meLlego + 10_000));
+
+			// 11) QUÉ HACER SEGÚN EL DESVÍO: alineado no se toca; desviado poco se corrige con la
+			//     VELOCIDAD (sin cortar el tema); desviado mucho se salta.
+			anotar('11) alineado: no se toca', 'ok', musicSyncAction(400).kind);
+			anotar('12) atrasado 2 s: se corrige con la velocidad (acelera)', '1.05', String(musicSyncAction(-2000).rate));
+			anotar('13) adelantado 2 s: se corrige con la velocidad (frena)', '0.95', String(musicSyncAction(2000).rate));
+			anotar('14) desviado 20 s: se salta', 'seek', musicSyncAction(-20000).kind);
 
 			const ok = casos.every((caso) => caso.ok);
 			window.__resultado = {ok, casos};

@@ -8,12 +8,12 @@ import {
 	applyMusicCommand,
 	type MusicState,
 	type MusicTrack,
-	MUSIC_DRIFT_TOLERANCE_MS,
 	currentPositionMs,
 	electHost,
 	expectedJamPositionMs,
 	musicSnapshot,
 	musicStamp,
+	musicSyncAction,
 } from '@/lib/musicQueue';
 import {
 	type MovieMedia,
@@ -1534,6 +1534,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					console.warn('[pelacord] no pude sacar el audio de', track.title);
 					return;
 				}
+				// La posición se calcula DESPUÉS de resolver el audio (resolver tarda 1-3 s): si se
+				// calculara antes, el tema arrancaría esos segundos atrasado y el vigilante lo
+				// corregiría con un salto. Eso era el "se adelantó en la mitad de la canción".
 				const positionMs = expectedJamPositionMs(musicState, jamArrivedAt.current);
 				const audio = await playMusic(url, positionMs / 1000);
 				if (cancelled) {
@@ -1541,6 +1544,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					return;
 				}
 				playingTrackId.current = track.id;
+				// Y una última alineación: entre resolver el audio y que el reproductor esté listo
+				// (metadata) también pasa tiempo, así que se vuelve a mirar dónde va la Jam.
+				audio.currentTime = expectedJamPositionMs(musicStateRef.current, jamArrivedAt.current) / 1000;
 				if (musicState.pausedAt) audio.pause();
 				musicRetries.current = 0;
 				// Cuando termina, salta al siguiente. Lo pide SÓLO el host: si lo pidieran todos
@@ -1586,8 +1592,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	/**
 	 * Vigilante de sincronía: cada 3 s se fija que MI audio vaya por donde va la Jam.
 	 *
-	 * Es lo que mantiene a todos en el mismo segundo sin depender de la red: si alguno se desvió
-	 * más de lo tolerable (MUSIC_DRIFT_TOLERANCE_MS), se lo corrige con un salto.
+	 * Si la diferencia es chica, se corrige con la VELOCIDAD (se acelera o frena un 5% hasta
+	 * alinearse, sin que se note). Si es grande, se salta. Antes se saltaba siempre y se sentía
+	 * como un corte en el medio del tema ("se adelantó en la mitad de la canción").
 	 */
 	useEffect(() => {
 		if (!jamChannelId) return;
@@ -1596,10 +1603,17 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			const state = musicStateRef.current;
 			if (!audio || !state.track || state.pausedAt) return;
 			const expected = expectedJamPositionMs(state, jamArrivedAt.current);
-			const local = audio.currentTime * 1000;
-			if (Math.abs(local - expected) > MUSIC_DRIFT_TOLERANCE_MS) {
-				audio.currentTime = expected / 1000;
+			const action = musicSyncAction(audio.currentTime * 1000 - expected);
+			if (action.kind === 'ok') {
+				if (audio.playbackRate !== 1) audio.playbackRate = 1;
+				return;
 			}
+			if (action.kind === 'nudge') {
+				audio.playbackRate = action.rate;
+				return;
+			}
+			audio.playbackRate = 1;
+			audio.currentTime = expected / 1000;
 		}, 3000);
 		return () => clearInterval(timer);
 	}, [jamChannelId]);

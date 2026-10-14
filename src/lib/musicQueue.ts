@@ -134,6 +134,32 @@ export function musicSnapshot(state: MusicState, now = Date.now()): MusicState {
 	return {...state, positionMs: currentPositionMs(state, now), startedAt: now};
 }
 
+/**
+ * Hasta acá se corrige con la VELOCIDAD (sin saltar): más allá, se salta.
+ *
+ * Un salto en el medio de un tema se escucha como un corte; con la velocidad se llega al mismo
+ * lugar sin que se note (el tono no cambia: Chromium mantiene el pitch).
+ */
+export const MUSIC_NUDGE_LIMIT_MS = 5000;
+
+/** Qué hacer con mi audio según cuánto se desvió de la Jam. */
+export type MusicSyncAction = {kind: 'ok'} | {kind: 'nudge'; rate: number} | {kind: 'seek'};
+
+/**
+ * Decide si el audio local está bien, si hay que ajustarlo con la velocidad o si hay que saltar.
+ *
+ * Atrasado (drift negativo) → se acelera un poco; adelantado → se frena un poco.
+ */
+export function musicSyncAction(
+	driftMs: number,
+	toleranceMs = MUSIC_DRIFT_TOLERANCE_MS,
+	nudgeLimitMs = MUSIC_NUDGE_LIMIT_MS,
+): MusicSyncAction {
+	if (Math.abs(driftMs) <= toleranceMs) return {kind: 'ok'};
+	if (Math.abs(driftMs) <= nudgeLimitMs) return {kind: 'nudge', rate: driftMs < 0 ? 1.05 : 0.95};
+	return {kind: 'seek'};
+}
+
 /** Agrega un tema al final de la cola. */
 export function appendToQueue(state: MusicState, track: MusicTrack): MusicTrack[] {
 	return [...state.queue, track];
