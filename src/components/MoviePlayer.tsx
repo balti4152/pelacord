@@ -2,7 +2,7 @@ import {useCallback, useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {Captions, Loader2, Maximize, Pause, Play, RotateCcw, Users, Volume2, VolumeX, X} from 'lucide-react';
 import {getDesktopTransport} from '@/lib/desktop';
-import {MOVIE_DRIFT_TOLERANCE_MS, type MovieRoomCommand, positionOf} from '@/lib/movieRooms';
+import {MOVIE_DRIFT_TOLERANCE_MS, type MovieRoomCommand, expectedPositionMs, positionOf} from '@/lib/movieRooms';
 import {useStore} from '@/state/store';
 
 /**
@@ -71,6 +71,9 @@ export function MoviePlayer(): JSX.Element | null {
 	positionRef.current = position;
 	const pausedRef = useRef(true);
 	pausedRef.current = paused;
+	/** Cuándo me llegó la versión actual de la sala, y con qué `updatedAt` (ver el efecto de seguimiento). */
+	const roomArrivedAt = useRef(Date.now());
+	const roomStampRef = useRef(0);
 
 	/** Le manda un comando al reproductor de adentro (sólo cuando el <webview> ya está listo). */
 	const send = useCallback(
@@ -101,8 +104,11 @@ export function MoviePlayer(): JSX.Element | null {
 			}
 			movieCommand(command);
 			// El host, después de mover algo, manda su posición real para que todos queden iguales.
+			// OJO: `positionRef` está en SEGUNDOS (viene de `currentTime`), y la sala guarda
+			// MILISEGUNDOS: sin el *1000 la sala decía "60 ms" con el video en el segundo 60 y el
+			// invitado quedaba clavado al principio.
 			if (isHost) {
-				setTimeout(() => movieHostSync(positionRef.current, pausedRef.current), 400);
+				setTimeout(() => movieHostSync(positionRef.current * 1000, pausedRef.current), 400);
 			}
 		},
 		[isHost, movieCommand, movieHostSync, send],
@@ -185,7 +191,9 @@ export function MoviePlayer(): JSX.Element | null {
 	// Los que NO son host siguen al host: si se desviaron mucho, se corrigen.
 	useEffect(() => {
 		if (!room || isHost) return;
-		const expected = positionOf(room);
+		// Por dónde va la sala, calculado con MI reloj desde que me llegó esta versión (ver
+		// expectedPositionMs): así un desfase de relojes entre las máquinas no lo corre para siempre.
+		const expected = expectedPositionMs(room, roomArrivedAt.current);
 		const drift = positionRef.current * 1000 - expected;
 		if (room.paused !== pausedRef.current) {
 			send(room.paused ? 'pause' : 'play');
@@ -198,10 +206,21 @@ export function MoviePlayer(): JSX.Element | null {
 		// esté listo, el comando se perdería y el invitado quedaría pausado para siempre.
 	}, [isHost, room, room?.updatedAt, room?.paused, room?.positionMs, send, ready]);
 
+	// Cuándo me llegó la versión actual de la sala (para calcular el tiempo sin depender del reloj
+	// del host). Sólo se refresca cuando la sala CAMBIA: las reafirmaciones cada 4 s traen el mismo
+	// `updatedAt`, así el tiempo sigue corriendo solo.
+	useEffect(() => {
+		if (!room) return;
+		if (room.updatedAt === roomStampRef.current) return;
+		roomStampRef.current = room.updatedAt;
+		roomArrivedAt.current = Date.now();
+	}, [room]);
+
 	// El host reafirma su posición cada 4 s (así el que entra tarde se sincroniza enseguida).
 	useEffect(() => {
 		if (!isHost) return;
-		const timer = setInterval(() => movieHostSync(positionRef.current, pausedRef.current), 4000);
+		// `positionRef` en SEGUNDOS → la sala en MILISEGUNDOS (ver la nota en `act`).
+		const timer = setInterval(() => movieHostSync(positionRef.current * 1000, pausedRef.current), 4000);
 		return () => clearInterval(timer);
 	}, [isHost, movieHostSync]);
 

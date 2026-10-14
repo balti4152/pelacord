@@ -82,6 +82,39 @@ export function applyMovieCommand(room: MovieRoom, command: MovieRoomCommand, no
 	return room;
 }
 
+/**
+ * La sala del host, con su posición REAL.
+ *
+ * OJO CON LAS UNIDADES: `positionMs` va en MILISEGUNDOS. El video de adentro informa SEGUNDOS
+ * (`currentTime`), así que quien llama tiene que multiplicar por 1000.
+ *
+ * Cuando acá se guardaban segundos como si fueran milisegundos, la sala decía "60 ms" con el video
+ * en el segundo 60: el invitado calculaba que la película iba por el segundo 0 y lo devolvía al
+ * principio cada 4 segundos. Se veía como "se traba a los 4 o 7 segundos" y no había forma de ver
+ * nada. Por eso esto es una función pura y con test.
+ */
+export function hostSync(room: MovieRoom, positionMs: number, paused: boolean, now = Date.now()): MovieRoom {
+	return {
+		...room,
+		positionMs: Math.max(0, Math.round(positionMs)),
+		paused,
+		startedAt: now,
+		updatedAt: now,
+	};
+}
+
+/**
+ * Por dónde va la sala, medido con MI reloj desde que me llegó esta versión.
+ *
+ * Se usa `arrivedAt` (cuándo me llegó) y no el `startedAt` del host a propósito: mezclar el reloj
+ * del host con el mío convierte cualquier desfase de relojes en un error de posición permanente
+ * (el invitado se corregiría para siempre y no podría ver nada).
+ */
+export function expectedPositionMs(room: MovieRoom, arrivedAt: number, now = Date.now()): number {
+	if (room.paused) return Math.max(0, room.positionMs);
+	return Math.max(0, room.positionMs + (now - arrivedAt));
+}
+
 /** Cuánto se desvía el video local respecto de la sala (en milisegundos). */
 export function driftMs(room: MovieRoom, localPositionMs: number, now = Date.now()): number {
 	return localPositionMs - positionOf(room, now);

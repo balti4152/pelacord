@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: sincronización de Pelaflix</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script type="module">
+			import {
+				MOVIE_DRIFT_TOLERANCE_MS,
+				applyMovieCommand,
+				driftMs,
+				expectedPositionMs,
+				hostSync,
+				positionOf,
+			} from '/src/lib/movieRooms.ts';
+
+			const sala = (extra) => ({
+				id: 'host',
+				hostId: 'host',
+				hostName: 'Balti',
+				media: {tmdbId: 1, mediaType: 'movie', title: 'Peli', poster: '', year: '2026'},
+				positionMs: 0,
+				paused: true,
+				startedAt: 0,
+				createdAt: 0,
+				updatedAt: 0,
+				...extra,
+			});
+
+			const casos = [];
+			const anotar = (nombre, esperado, obtenido) => casos.push({nombre, esperado, obtenido, ok: obtenido === esperado});
+
+			// 1) EL BUG REPORTADO: el host va por el segundo 60 y sincroniza.
+			//    Si se pasa la posición en MILISEGUNDOS (como corresponde), la sala va por el 60.
+			const ahora = 1_000_000;
+			const conMs = hostSync(sala(), 60 * 1000, false, ahora);
+			anotar('1) el host en el segundo 60 deja la sala en 60 s (no en 60 ms)', 60_000, conMs.positionMs);
+
+			// 2) El invitado que va por el mismo segundo NO se corrige (no se traba).
+			const invitadoEn = 60 * 1000;
+			anotar('2) el invitado alineado no se corrige', true, Math.abs(driftMs(conMs, invitadoEn, ahora)) < MOVIE_DRIFT_TOLERANCE_MS);
+
+			// 3) Y a los 4 segundos de reproducir, sigue alineado (antes acá se trababa).
+			anotar(
+				'3) 4 s después sigue alineado (no lo devuelve al principio)',
+				true,
+				Math.abs(driftMs(conMs, invitadoEn + 4000, ahora + 4000)) < MOVIE_DRIFT_TOLERANCE_MS,
+			);
+
+			// 4) EL BUG VIEJO, documentado: pasar SEGUNDOS como si fueran milisegundos deja la sala en 60 ms
+			//    y el invitado queda a casi un minuto de distancia: por eso lo devolvía al segundo 0.
+			const conSegundos = hostSync(sala(), 60, false, ahora);
+			anotar('4) el bug viejo (segundos): la sala quedaba en 60 ms', 60, conSegundos.positionMs);
+			anotar(
+				'5) el bug viejo: el invitado se desviaba ~1 minuto (se trababa)',
+				true,
+				Math.abs(driftMs(conSegundos, invitadoEn, ahora)) > MOVIE_DRIFT_TOLERANCE_MS,
+			);
+
+			// 6) Cuando el host adelanta, la sala queda en el segundo nuevo y el invitado se alinea ahí
+			//    (y NO vuelve atrás: no hay ninguna versión con la posición vieja).
+			const trasSeek = applyMovieCommand(conMs, {kind: 'seek', positionMs: 120 * 1000}, ahora + 5000);
+			anotar('6) al adelantar, la sala queda en 120 s', 120_000, trasSeek.positionMs);
+			anotar(
+				'7) el invitado que salta a 120 s queda alineado',
+				true,
+				Math.abs(driftMs(trasSeek, 120 * 1000, ahora + 5000)) < MOVIE_DRIFT_TOLERANCE_MS,
+			);
+			anotar('8) y a los 4 s sigue en 120 s + 4 s (no vuelve)', 124_000, positionOf(trasSeek, ahora + 9000));
+
+			// 9) RELOJES DESFASADOS: el invitado calcula con SU reloj desde que le llegó la sala.
+			//    El host dice que empezó en "ahora" pero el reloj del invitado va 30 s adelantado:
+			//    aun así, a los 5 s de haberle llegado, la sala va por positionMs + 5 s.
+			const desfasado = expectedPositionMs(conMs, ahora, ahora + 5000);
+			anotar('9) con relojes desfasados, el tiempo se mide igual (5 s después: 65 s)', 65_000, desfasado);
+
+			// 10) Pausado: la posición no avanza.
+			const pausada = hostSync(conMs, 90 * 1000, true, ahora);
+			anotar('10) pausado, la posición queda fija', 90_000, expectedPositionMs(pausada, ahora, ahora + 8000));
+
+			const ok = casos.every((caso) => caso.ok);
+			window.__resultado = {ok, casos};
+			document.getElementById('root').textContent = ok ? 'OK' : 'FALLO';
+		</script>
+	</body>
+</html>

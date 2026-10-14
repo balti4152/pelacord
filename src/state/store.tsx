@@ -17,6 +17,7 @@ import {
 	type MovieRoom,
 	type MovieRoomCommand,
 	applyMovieCommand,
+	hostSync,
 	isStale,
 	sortRooms,
 } from '@/lib/movieRooms';
@@ -1764,14 +1765,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		(positionMs: number, paused: boolean) => {
 			const mine = myMovieRoomRef.current;
 			if (!mine) return;
-			const now = Date.now();
-			const next: MovieRoom = {
-				...mine,
-				positionMs: Math.max(0, Math.round(positionMs)),
-				paused,
-				startedAt: now,
-				updatedAt: now,
-			};
+			const next = hostSync(mine, positionMs, paused);
 			setMyMovieRoom(next);
 			broadcastMovieRoom(next);
 		},
