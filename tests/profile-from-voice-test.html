@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: perfil de alguien en la llamada</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script type="module">
+			import {userFromParticipant} from '/src/components/UserMenu.tsx';
+
+			// Lo que viaja por la VOZ: sólo nombre, color, foto y marco.
+			const participante = {
+				id: 'chubi',
+				name: 'Chubi',
+				color: 'hsl(200, 70%, 55%)',
+				avatarUrl: 'http://10.0.0.5:7789/file/avatar',
+				avatarCrop: {zoom: 1.2, x: 3, y: -2},
+				decoration: 'ring',
+				muted: false,
+				deafened: false,
+				sharing: false,
+			};
+			// Lo que llega por la PRESENCIA: el perfil entero.
+			const miembro = {
+				id: 'chubi',
+				name: 'Chubi',
+				tag: '4821',
+				presence: 'online',
+				avatarColor: 'hsl(200, 70%, 55%)',
+				avatarUrl: 'http://10.0.0.5:7789/file/avatar',
+				bannerUrl: 'http://10.0.0.5:7789/file/banner',
+				bannerColor: 'hsl(280, 60%, 40%)',
+				effect: 'glow',
+				decoration: 'ring',
+				decorationColor: 'hsl(50, 90%, 60%)',
+				customDeco: 'http://10.0.0.5:7789/file/deco',
+				decoSize: 1.4,
+				profileEffect: 'particles',
+				profileEffectColor: 'hsl(320, 80%, 60%)',
+				customParticle: 'http://10.0.0.5:7789/file/particle',
+				particleSize: 1.1,
+				particleCount: 20,
+				particleSpeed: 1.2,
+				particleLife: 0.8,
+				bio: 'hola',
+				status: 'escuchando musica',
+				accentColor: 'hsl(242, 70%, 55%)',
+			};
+
+			const conMiembro = userFromParticipant(participante, [miembro]);
+			const sinMiembro = userFromParticipant(participante, []);
+
+			const casos = [
+				{nombre: 'banner presente', esperado: 'http://10.0.0.5:7789/file/banner', obtenido: conMiembro.bannerUrl},
+				{nombre: 'color de banner', esperado: 'hsl(280, 60%, 40%)', obtenido: conMiembro.bannerColor},
+				{nombre: 'efecto de perfil', esperado: 'glow', obtenido: conMiembro.effect},
+				{nombre: 'overlay de perfil', esperado: 'particles', obtenido: conMiembro.profileEffect},
+				{nombre: 'color del overlay', esperado: 'hsl(320, 80%, 60%)', obtenido: conMiembro.profileEffectColor},
+				{nombre: 'marco personalizado', esperado: 'http://10.0.0.5:7789/file/deco', obtenido: conMiembro.customDeco},
+				{nombre: 'particula personalizada', esperado: 'http://10.0.0.5:7789/file/particle', obtenido: conMiembro.customParticle},
+				{nombre: 'bio', esperado: 'hola', obtenido: conMiembro.bio},
+				{nombre: 'estado', esperado: 'escuchando musica', obtenido: conMiembro.status},
+				{nombre: 'etiqueta real (no 0001)', esperado: '4821', obtenido: conMiembro.tag},
+				{nombre: 'cantidad de particulas', esperado: 20, obtenido: conMiembro.particleCount},
+				{nombre: 'la voz pisa la foto (la mas nueva)', esperado: 'http://10.0.0.5:7789/file/avatar', obtenido: conMiembro.avatarUrl},
+				{nombre: 'sin presencia: no rompe y no inventa banner', esperado: undefined, obtenido: sinMiembro.bannerUrl},
+				{nombre: 'sin presencia: queda la foto', esperado: 'http://10.0.0.5:7789/file/avatar', obtenido: sinMiembro.avatarUrl},
+			].map((caso) => ({...caso, ok: caso.obtenido === caso.esperado}));
+
+			const ok = casos.every((caso) => caso.ok);
+			window.__resultado = {ok, casos};
+			document.getElementById('root').textContent = ok ? 'OK' : 'FALLO';
+		</script>
+	</body>
+</html>

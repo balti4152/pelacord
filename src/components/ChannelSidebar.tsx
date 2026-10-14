@@ -5,7 +5,7 @@ import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
 import {VoicePanel} from '@/components/VoicePanel';
 import {TEXT_CATEGORY, VOICE_CATEGORY, useStore} from '@/state/store';
-import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
+import {ProfilePopover, UserContextMenu, type UserLike, userFromParticipant} from '@/components/UserMenu';
 import type {Channel, VoiceParticipant} from '@/types';
 
 function UserPanel({onOpenSettings}: {onOpenSettings: () => void}): JSX.Element {
@@ -52,25 +52,6 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 	const participants = state.voiceMembers[channelId] ?? [];
 	if (participants.length === 0) return null;
 
-	/** Lo mínimo para el menú y el perfil, a partir de lo que sabemos del participante. */
-	function toUser(participant: VoiceParticipant): UserLike {
-		return {
-			id: participant.id,
-			name: participant.name,
-			tag: '0001',
-			color: participant.color,
-			avatarUrl: participant.avatarUrl,
-			avatarCrop: participant.avatarCrop,
-			decoration: participant.decoration,
-			decorationColor: participant.decorationColor,
-			customDeco: participant.customDeco,
-			decoImage: participant.decoImage,
-			decoSize: participant.decoSize,
-			particleOriginal: participant.original,
-			presence: 'online',
-		};
-	}
-
 	return (
 		<div className="voice-members">
 			{participants.map((participant) => {
@@ -112,13 +93,13 @@ function VoiceChannelMembers({channelId}: {channelId: string}): JSX.Element | nu
 			})}
 			{menu ? (
 				<UserContextMenu
-					user={toUser(menu.participant)}
+					user={userFromParticipant(menu.participant, state.members)}
 					x={menu.x}
 					y={menu.y}
 					canVolume
 					voice={{muted: menu.participant.muted, deafened: menu.participant.deafened}}
 					onClose={() => setMenu(null)}
-					onViewProfile={() => setProfile(toUser(menu.participant))}
+					onViewProfile={() => setProfile(userFromParticipant(menu.participant, state.members))}
 					onMute={() => sendPeerCommand(menu.participant.id, {kind: 'mute', on: !menu.participant.muted})}
 					onDeafen={() => sendPeerCommand(menu.participant.id, {kind: 'deafen', on: !menu.participant.deafened})}
 					onDisconnect={() => sendPeerCommand(menu.participant.id, {kind: 'disconnect'})}

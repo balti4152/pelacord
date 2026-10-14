@@ -1,41 +1,7 @@
 import {useState} from 'react';
 import {Avatar, Icon} from '@/components/primitives';
-import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
+import {ProfilePopover, UserContextMenu, type UserLike, userFromMember} from '@/components/UserMenu';
 import {useStore} from '@/state/store';
-import type {Member} from '@/types';
-
-function toUser(member: Member): UserLike {
-	return {
-		id: member.id,
-		name: member.name,
-		tag: member.tag,
-		color: member.avatarColor,
-		avatarUrl: member.avatarUrl,
-		avatarCrop: member.avatarCrop,
-		bannerUrl: member.bannerUrl,
-		bannerColor: member.bannerColor,
-		effect: member.effect,
-		decoration: member.decoration,
-		decorationColor: member.decorationColor,
-		customDeco: member.customDeco,
-		decoImage: member.decoImage,
-		decoSize: member.decoSize,
-		original: member.particleOriginal,
-		customParticle: member.customParticle,
-		particleImage: member.particleImage,
-		particleDirection: member.particleDirection,
-		particleOriginal: member.particleOriginal,
-		particleSpeed: member.particleSpeed,
-		particleLife: member.particleLife,
-		particleSize: member.particleSize,
-		particleCount: member.particleCount,
-		profileEffect: member.profileEffect,
-		profileEffectColor: member.profileEffectColor,
-		presence: member.presence,
-		bio: member.bio,
-		status: member.status,
-	};
-}
 
 export function MemberList(): JSX.Element {
 	const {state} = useStore();
@@ -68,10 +34,10 @@ export function MemberList(): JSX.Element {
 									className={`member${member.presence === 'offline' ? ' is-offline' : ''}`}
 									role="button"
 									tabIndex={0}
-									onClick={() => setProfile(toUser(member))}
+									onClick={() => setProfile(userFromMember(member))}
 									onContextMenu={(event) => {
 										event.preventDefault();
-										setMenu({user: toUser(member), x: event.clientX, y: event.clientY});
+										setMenu({user: userFromMember(member), x: event.clientX, y: event.clientY});
 									}}>
 									<Avatar member={member} size={32} showStatus statusBorderColor="var(--background-secondary)" />
 									<div className="member-info">

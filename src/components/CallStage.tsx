@@ -8,7 +8,7 @@ import {
 	usePeerVolume,
 	useSpeakingIds,
 } from '@/components/RemoteMedia';
-import {ProfilePopover, UserContextMenu, type UserLike} from '@/components/UserMenu';
+import {ProfilePopover, UserContextMenu, type UserLike, userFromParticipant} from '@/components/UserMenu';
 import {voiceMesh} from '@/lib/media';
 import {openSharePicker} from '@/lib/sharePicker';
 import {setOutputVolume} from '@/lib/sounds';
@@ -211,41 +211,6 @@ export function CallStage(): JSX.Element | null {
 	// El volumen de quien comparte solo se controla si es otra persona.
 	const presenter = expanded && expanded.id !== state.me.id ? {id: expanded.id, name: expanded.name} : null;
 
-	/** Perfil completo de un participante (incluye banner y bio, que no viajan en la voz). */
-	function userFor(participant: VoiceParticipant): UserLike {
-		const member = state.members.find((entry) => entry.id === participant.id);
-		return {
-			id: participant.id,
-			name: participant.name,
-			tag: member?.tag,
-			color: participant.color,
-			avatarUrl: participant.avatarUrl,
-			avatarCrop: participant.avatarCrop,
-			bannerUrl: member?.bannerUrl,
-			bannerColor: member?.bannerColor,
-			effect: member?.effect,
-			decoration: member?.decoration,
-			decorationColor: member?.decorationColor,
-			customDeco: member?.customDeco,
-			decoImage: member?.decoImage,
-			decoSize: member?.decoSize,
-			original: member?.particleOriginal,
-			customParticle: member?.customParticle,
-			particleImage: member?.particleImage,
-			particleDirection: member?.particleDirection,
-			particleOriginal: member?.particleOriginal,
-			particleSpeed: member?.particleSpeed,
-			particleLife: member?.particleLife,
-			particleSize: member?.particleSize,
-			particleCount: member?.particleCount,
-			profileEffect: member?.profileEffect,
-			profileEffectColor: member?.profileEffectColor,
-			presence: member?.presence,
-			bio: member?.bio,
-			status: member?.status,
-		};
-	}
-
 	function toggleFullscreen(): void {
 		const element = stageRef.current ?? document.documentElement;
 		if (document.fullscreenElement) void document.exitFullscreen();
@@ -396,12 +361,12 @@ export function CallStage(): JSX.Element | null {
 
 			{menu && menuParticipant ? (
 				<UserContextMenu
-					user={userFor(menuParticipant)}
+					user={userFromParticipant(menuParticipant, state.members)}
 					x={menu.x}
 					y={menu.y}
 					canVolume={menu.id !== state.me.id}
 					onClose={() => setMenu(null)}
-					onViewProfile={() => setProfile(userFor(menuParticipant))}
+					onViewProfile={() => setProfile(userFromParticipant(menuParticipant, state.members))}
 				/>
 			) : null}
 			{profile ? <ProfilePopover user={profile} canVolume onClose={() => setProfile(null)} /> : null}

@@ -3,7 +3,7 @@ import {ColorAvatar, Icon} from '@/components/primitives';
 import {ProfileOverlay} from '@/components/ProfileOverlay';
 import {usePeerVolume} from '@/components/RemoteMedia';
 import {voiceMesh} from '@/lib/media';
-import type {AvatarCrop, ParticleDirection, Presence} from '@/types';
+import type {AvatarCrop, Member, ParticleDirection, Presence, VoiceParticipant} from '@/types';
 
 export interface UserLike {
 	id: string;
@@ -34,6 +34,82 @@ export interface UserLike {
 	presence?: Presence;
 	bio?: string;
 	status?: string;
+}
+
+/**
+ * Perfil completo a partir de un miembro (lista de amigos, miembros del servidor).
+ *
+ * Es el mapeo ÚNICO de miembro a perfil: si se agrega un campo de perfil nuevo, se agrega acá y
+ * queda para todos los lugares que abren un perfil.
+ */
+export function userFromMember(member: Member): UserLike {
+	return {
+		id: member.id,
+		name: member.name,
+		tag: member.tag,
+		color: member.avatarColor,
+		avatarUrl: member.avatarUrl,
+		avatarCrop: member.avatarCrop,
+		bannerUrl: member.bannerUrl,
+		bannerColor: member.bannerColor,
+		effect: member.effect,
+		decoration: member.decoration,
+		decorationColor: member.decorationColor,
+		customDeco: member.customDeco,
+		decoImage: member.decoImage,
+		decoSize: member.decoSize,
+		original: member.particleOriginal,
+		customParticle: member.customParticle,
+		particleImage: member.particleImage,
+		particleDirection: member.particleDirection,
+		particleOriginal: member.particleOriginal,
+		particleSpeed: member.particleSpeed,
+		particleLife: member.particleLife,
+		particleSize: member.particleSize,
+		particleCount: member.particleCount,
+		profileEffect: member.profileEffect,
+		profileEffectColor: member.profileEffectColor,
+		presence: member.presence,
+		bio: member.bio,
+		status: member.status,
+	};
+}
+
+/**
+ * Perfil de alguien que está en un canal de voz (clic derecho en la llamada o en la barra).
+ *
+ * OJO: lo que viaja por la VOZ (VoiceParticipant) lleva SÓLO nombre, color, foto y marco. El
+ * banner, los efectos y la bio NO viajan por ahí: viven en la presencia. Si el perfil se armaba
+ * sólo con el participante, se abría incompleto — salía nada más que la foto y el nombre.
+ * Por eso se completa con el miembro (que tiene el perfil entero) y la voz sólo pisa lo que sí
+ * lleva, para que la foto sea la más nueva.
+ */
+export function userFromParticipant(participant: VoiceParticipant, members: Member[]): UserLike {
+	const member = members.find((entry) => entry.id === participant.id);
+	if (!member) {
+		// Todavía no llegó su presencia: se muestra lo que hay (mejor que un perfil vacío).
+		return {
+			id: participant.id,
+			name: participant.name,
+			color: participant.color,
+			avatarUrl: participant.avatarUrl,
+			avatarCrop: participant.avatarCrop,
+			decoration: participant.decoration,
+			decorationColor: participant.decorationColor,
+			customDeco: participant.customDeco,
+			decoImage: participant.decoImage,
+			decoSize: participant.decoSize,
+			original: participant.original,
+			presence: 'online',
+		};
+	}
+	return {
+		...userFromMember(member),
+		name: participant.name || member.name,
+		color: participant.color || member.avatarColor,
+		avatarUrl: participant.avatarUrl ?? member.avatarUrl,
+		avatarCrop: participant.avatarCrop ?? member.avatarCrop,
+	};
 }
 
 function clampPosition(x: number, y: number, width: number, height: number): {left: number; top: number} {
