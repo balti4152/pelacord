@@ -4,8 +4,6 @@ export interface MeshRemote {
 	peerId: string;
 	audios: MediaStream[];
 	video: MediaStream | null;
-	/** Audio de la música de la Jam de ese peer (va aparte para poder tener volumen propio). */
-	music: MediaStream | null;
 }
 
 /**
@@ -21,11 +19,9 @@ export interface MeshTransport {
 }
 
 type SignalPayload = {
-	kind: 'offer' | 'answer' | 'candidate' | 'music';
+	kind: 'offer' | 'answer' | 'candidate';
 	sdp?: RTCSessionDescriptionInit;
 	candidate?: RTCIceCandidateInit;
-	/** Id del stream de música, para que el otro sepa cuál es (va aparte de la voz). */
-	streamId?: string | null;
 };
 
 /** El SDP tiene que ir como objeto plano: RTCSessionDescription no sobrevive al IPC de Electron. */
@@ -238,60 +234,27 @@ export class VoiceMesh {
 		};
 	}
 
-	/** Stream de música de la Jam (lo manda el host). */
-	private music: MediaStream | null = null;
 	/**
-	 * Los "senders" de cada conexión, por rol: voz, música y pantalla.
+	 * Los "senders" de cada conexión, por rol: voz y pantalla.
 	 *
 	 * Se llenan con `addTrack` la primera vez que hace falta y después sólo se les cambia la pista
-	 * con `replaceTrack` (así no se agregan canales de más ni se renegocia al cambiar de tema).
+	 * con `replaceTrack` (así no se agregan canales de más ni se renegocia al empezar a compartir).
 	 *
 	 * IMPORTANTE: se usa `addTrack` y NO `addTransceiver`. La diferencia no es cosmética: cuando
-	 * los dos lados agregan una pista al mismo tiempo (los dos ponen música, o comparten pantalla),
-	 * WebRTC REUTILIZA el canal creado con `addTrack` pero NO el creado con `addTransceiver`: con
-	 * `addTransceiver` cada lado terminaba con los suyos y los del otro (6 canales en vez de 3) y la
-	 * negociación se rompía con "The order of m-lines in subsequent offer doesn't match order from
-	 * previous offer/answer" — la conexión quedaba MUDA (dos no se escuchaban y el tercero sí).
-	 * Ese error lo encontramos midiendo, y antes se perdía en un catch vacío.
+	 * los dos lados agregan una pista al mismo tiempo, WebRTC REUTILIZA el canal creado con
+	 * `addTrack` pero NO el creado con `addTransceiver`: con `addTransceiver` cada lado terminaba
+	 * con los suyos y los del otro (6 canales en vez de 3) y la negociación se rompía con
+	 * "The order of m-lines in subsequent offer doesn't match order from previous offer/answer" —
+	 * la conexión quedaba MUDA (dos no se escuchaban y el tercero sí). Ese error lo encontramos
+	 * midiendo, y antes se perdía en un catch vacío.
 	 */
-	private senders = new Map<string, {voice?: RTCRtpSender; music?: RTCRtpSender; screen?: RTCRtpSender}>();
+	private senders = new Map<string, {voice?: RTCRtpSender; screen?: RTCRtpSender}>();
 
 	/** Cambia la pista de un rol (si ese canal todavía no existe, no hace nada). */
-	private async replace(peerId: string, kind: 'voice' | 'music' | 'screen', track: MediaStreamTrack | null): Promise<void> {
+	private async replace(peerId: string, kind: 'voice' | 'screen', track: MediaStreamTrack | null): Promise<void> {
 		const sender = this.senders.get(peerId)?.[kind];
 		if (!sender) return;
 		await sender.replaceTrack(track).catch(() => {});
-	}
-
-	/**
-	 * Manda (o corta) el audio de la música a todos los peers.
-	 * Si el canal de música todavía no existe, se crea con addTrack (una sola vez).
-	 */
-	async setMusicStream(stream: MediaStream | null): Promise<void> {
-		const nextTrack = stream?.getAudioTracks()[0] ?? null;
-		const previous = this.music?.getAudioTracks()[0] ?? null;
-		this.music = stream;
-		// El aviso de "esto es la música" va ANTES de agregar la pista: si llega después, el otro
-		// la toma como voz y no se le puede bajar el volumen por separado.
-		if (nextTrack) this.announceMusicStream(stream?.id ?? null);
-		for (const [peerId, pc] of this.pcs) {
-			const roles = this.senders.get(peerId) ?? {};
-			if (nextTrack) {
-				if (roles.music) await roles.music.replaceTrack(nextTrack).catch(() => {});
-				else roles.music = pc.addTrack(nextTrack, stream as MediaStream);
-			} else if (roles.music) {
-				await roles.music.replaceTrack(null).catch(() => {});
-			}
-			this.senders.set(peerId, roles);
-		}
-		if (!nextTrack) this.announceMusicStream(null);
-		if (previous && previous !== nextTrack) previous.stop();
-		this.emit();
-	}
-
-	/** El stream de música que está mandando este peer (null si no hay). */
-	getMusicStream(): MediaStream | null {
-		return this.music;
 	}
 
 	getInputDeviceId(): string {
@@ -381,39 +344,12 @@ export class VoiceMesh {
 		this.getTransport()?.sendSignal(to, payload);
 	}
 
-	/** Id del stream de música que anunció cada peer (para saber cuál audio es la música). */
-	private remoteMusicIds = new Map<string, string>();
-
-	/** Volumen de la música de la Jam (0 a 1). Es una preferencia de cada uno. */
-	private musicVolume = 0.8;
-
-	getMusicVolume(): number {
-		return this.musicVolume;
-	}
-
-	setMusicVolume(value: number): void {
-		this.musicVolume = Math.min(1, Math.max(0, value));
-		this.emit();
-	}
-
-	/**
-	 * Avisa a todos qué stream es la música de la Jam.
-	 * Sin esto, el otro lado no puede distinguir la música de la voz y no se le podría bajar el
-	 * volumen por separado.
-	 */
-	announceMusicStream(streamId: string | null): void {
-		for (const peerId of this.pcs.keys()) this.send(peerId, {kind: 'music', streamId});
-	}
-
 	private async pcFor(peerId: string): Promise<RTCPeerConnection> {
 		const existing = this.pcs.get(peerId);
 		if (existing) return existing;
 		const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
 		this.pcs.set(peerId, pc);
-		this.remotes.set(peerId, {peerId, audios: [], video: null, music: null});
-		// Si ya estoy mandando música, se lo aviso a este peer nuevo: si no, cuando alguien se
-		// va y vuelve al canal, recibiría el audio pero no sabría que es la música de la Jam.
-		if (this.music) this.send(peerId, {kind: 'music', streamId: this.music.id});
+		this.remotes.set(peerId, {peerId, audios: [], video: null});
 		this.states.set(peerId, 'new');
 		this.diagnostics.set(peerId, {sent: 0, received: 0, ice: 'new'});
 
@@ -444,25 +380,16 @@ export class VoiceMesh {
 			if (!remote) return;
 			const stream = event.streams[0] ?? new MediaStream([event.track]);
 			if (event.track.kind === 'audio') {
-				// ¿Es la música de la Jam de ese peer? Se reconoce por el aviso del host (el id del
-				// stream) y, si el aviso todavía no llegó, porque es un canal de audio por el que
-				// NOSOTROS no mandamos nada (la voz va por uno en el que mandamos nuestro micrófono).
-				const esMusica =
-					this.remoteMusicIds.get(peerId) === stream.id || (event.transceiver.sender.track === null && remote.audios.length > 0);
-				if (esMusica) {
-					remote.music = stream;
-				} else if (!remote.audios.includes(stream)) {
+				if (!remote.audios.includes(stream)) {
 					remote.audios.push(stream);
 					if (!this.analysers.has(peerId)) this.attachAnalyser(peerId, stream);
 				}
 			} else {
-				// La pantalla se corta con "mute" (se deja de mandar sin renegociar), así que hay que
-				// reflejarlo: si no, quedaba una pantalla congelada.
-				const refrescar = () => {
-					remote.video = event.track.muted ? null : stream;
-					this.emit();
-				};
-				remote.video = event.track.muted ? null : stream;
+				// La pantalla se corta con "mute" (se deja de mandar sin renegociar). Acá se guarda el
+				// stream igual y la INTERFAZ decide (useRemoteVideo mira `muted`): si acá se pusiera en
+				// null mientras la pista arranca muteada, no se vería nunca la pantalla.
+				remote.video = stream;
+				const refrescar = () => this.emit();
 				event.track.addEventListener('mute', refrescar);
 				event.track.addEventListener('unmute', refrescar);
 				event.track.addEventListener('ended', refrescar);
@@ -526,11 +453,6 @@ export class VoiceMesh {
 		if (voiceTrack && this.local) {
 			if (roles.voice) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
 			else roles.voice = pc.addTrack(voiceTrack, this.local);
-		}
-		const musicTrack = this.music?.getAudioTracks()[0] ?? null;
-		if (musicTrack && this.music) {
-			if (roles.music) await roles.music.replaceTrack(musicTrack).catch(() => {});
-			else roles.music = pc.addTrack(musicTrack, this.music);
 		}
 		const screenTrack = this.screen?.getVideoTracks()[0] ?? null;
 		if (screenTrack && this.screen) {
@@ -675,31 +597,6 @@ export class VoiceMesh {
 		const payload = message.payload as SignalPayload;
 		if (!payload || !payload.kind) return;
 		const from = message.from;
-
-		// Aviso de "este stream es la música": no es una señal de WebRTC, se guarda y listo.
-		// (Va antes de tocar la conexión: si no, crearía una conexión por un mensaje que no lo es.)
-		if (payload.kind === 'music') {
-			const remote = this.remotes.get(from);
-			if (payload.streamId) {
-				this.remoteMusicIds.set(from, payload.streamId);
-				// Si el aviso llegó DESPUÉS de la pista, se reclasifica: deja de sonar como voz y pasa
-				// a ser la música de la Jam (así se le puede bajar el volumen por separado).
-				if (remote) {
-					const indice = remote.audios.findIndex((stream) => stream.id === payload.streamId);
-					if (indice >= 0) {
-						const [musica] = remote.audios.splice(indice, 1);
-						remote.music = musica;
-					}
-				}
-			} else {
-				// OJO: NO se borra `remote.music`. El canal sigue existiendo y sólo deja de mandar
-				// audio (la pista queda muda): si se borrara, al volver a poner música no habría
-				// ningún "ontrack" nuevo que la vuelva a enganchar y el otro no escucharía nada.
-				this.remoteMusicIds.delete(from);
-			}
-			this.emit();
-			return;
-		}
 
 		// Si el peer no está en el canal (y nunca hablamos con él), se ignora: si no, alguien que
 		// ya se fue puede rearmar la conexión y armar una guerra de reconexiones.

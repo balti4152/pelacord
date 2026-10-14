@@ -1,8 +1,13 @@
 /**
- * Prueba TEMPORAL de la malla de voz: dos VoiceMesh reales enfrentadas con un transporte falso.
+ * Prueba de la malla de voz: dos VoiceMesh reales enfrentadas con un transporte falso.
  *
- * Verifica lo que estaba roto: que negocien (con choque de ofertas incluido), que la música
- * llegue en las DOS direcciones, y que una señal repetida (la malla reenvía) no rompa nada.
+ * Verifica lo que estaba roto: que negocien (con choque de ofertas incluido), que la VOZ llegue en
+ * las DOS direcciones, que los dos puedan compartir pantalla al mismo tiempo (era el caso que
+ * rompía los m-lines y dejaba la llamada muda) y que una señal repetida (la malla reenvía) no
+ * rompa nada.
+ *
+ * OJO: la música ya NO viaja por acá (cada uno la reproduce localmente, ver musicPlayer.ts), así
+ * que esta prueba es de voz y pantalla.
  */
 import {type MeshTransport, VoiceMesh} from '@/lib/media';
 
@@ -39,18 +44,17 @@ function hacerTransportes() {
 	};
 }
 
+/** Un video chiquito para la pantalla (no hace falta que se vea nada). */
+function pantallaFalsa(): MediaStream {
+	const canvas = document.createElement('canvas');
+	canvas.width = 32;
+	canvas.height = 32;
+	return canvas.captureStream(5);
+}
+
 const transportes = hacerTransportes();
 const mallaA = new VoiceMesh(() => transportes.a);
 const mallaB = new VoiceMesh(() => transportes.b);
-
-const contexto = new AudioContext();
-const destinoAudio = contexto.createMediaStreamDestination();
-const oscilador = contexto.createOscillator();
-const ganancia = contexto.createGain();
-oscilador.connect(ganancia);
-ganancia.connect(destinoAudio);
-oscilador.start();
-const musica = destinoAudio.stream;
 
 type Resultado = {
 	pasos: string[];
@@ -67,58 +71,59 @@ async function correr(): Promise<void> {
 	const pasos: string[] = [];
 	const anotar = (texto: string) => pasos.push(texto);
 
-	await mallaA.start('aaa');
-	await mallaB.start('bbb');
-	// Los dos se conectan al mismo tiempo: eso es lo que provoca el CHOQUE de ofertas.
+	// Los dos entran a la llamada y se conectan al mismo tiempo: eso provoca el CHOQUE de ofertas.
+	await Promise.all([mallaA.start('aaa'), mallaB.start('bbb')]);
 	await Promise.all([mallaA.connect('bbb'), mallaB.connect('aaa')]);
-	// Y al mismo tiempo las dos mandan música (dos transceptores nuevos = renegociación cruzada).
-	await Promise.all([mallaA.setMusicStream(musica), mallaB.setMusicStream(musica)]);
 
 	const estadosFinales = async () => ({a: mallaA.getStates()['bbb'], b: mallaB.getStates()['aaa']});
-	let estados = await estadosFinales();
-	for (let intento = 0; intento < 40 && (estados.a !== 'connected' || estados.b !== 'connected'); intento++) {
-		await esperar(250);
-		estados = await estadosFinales();
-	}
+	const esperarConexion = async () => {
+		let estados = await estadosFinales();
+		for (let intento = 0; intento < 60 && (estados.a !== 'connected' || estados.b !== 'connected'); intento++) {
+			await esperar(250);
+			estados = await estadosFinales();
+		}
+		return estados;
+	};
+	let estados = await esperarConexion();
 	anotar(`1) conexión: a->b=${estados.a} · b->a=${estados.b}`);
 
-	// La música tiene que llegar en las dos direcciones.
-	await esperar(600);
-	const musicaEnB = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.music;
-	const musicaEnA = mallaA.getRemotes().find((remote) => remote.peerId === 'bbb')?.music;
-	anotar(
-		`2) música recibida: en b=${Boolean(musicaEnB)} (${musicaEnB?.getAudioTracks().length ?? 0} pista) · en a=${Boolean(musicaEnA)} (${musicaEnA?.getAudioTracks().length ?? 0} pista)`,
-	);
-
-	// Se suelta el audio del host A: el otro lado tiene que ver la pista en silencio (muteada).
-	await mallaA.setMusicStream(null);
-	await esperar(900);
-	const musicaCortada = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.music;
-	const silenciada = musicaCortada?.getAudioTracks()[0]?.muted;
-	anotar(`3) al cortar en a: pista presente=${Boolean(musicaCortada)} · silenciada=${String(silenciada)}`);
-
-	// Y una pista NUEVA: tiene que reemplazar la anterior (replaceTrack), sin duplicar transceptores.
-	await mallaA.setMusicStream(musica);
+	// La VOZ tiene que llegar en las dos direcciones (el micrófono falso de la prueba).
 	await esperar(800);
-	const pistasEnB = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa');
-	anotar(
-		`4) música de nuevo: en b=${Boolean(pistasEnB?.music)} · audios sueltos=${pistasEnB?.audios.length ?? 0}`,
-	);
+	const audioEnB = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.audios.length ?? 0;
+	const audioEnA = mallaA.getRemotes().find((remote) => remote.peerId === 'bbb')?.audios.length ?? 0;
+	anotar(`2) voz recibida: en b=${audioEnB} pista(s) · en a=${audioEnA} pista(s)`);
+
+	// LOS DOS comparten pantalla al mismo tiempo: es el caso que antes rompía los m-lines
+	// (cada lado terminaba con 6 canales) y dejaba la llamada MUDA sin ningún error visible.
+	await Promise.all([mallaA.startScreen(), mallaB.startScreen()]);
+	await esperar(2500);
+	const videoEnB = Boolean(mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.video);
+	const videoEnA = Boolean(mallaA.getRemotes().find((remote) => remote.peerId === 'bbb')?.video);
+	const trasPantalla = await estadosFinales();
+	anotar(`3) pantalla compartida por los dos: video en b=${videoEnB} · en a=${videoEnA} · conexión a->b=${trasPantalla.a}`);
+
+	// Se corta la pantalla de los dos: la pista remota queda muteada (que es lo que mira la interfaz
+	// para dejar de mostrarla) sin renegociar nada.
+	await Promise.all([mallaA.stopScreen(), mallaB.stopScreen()]);
+	await esperar(1500);
+	const pistaVideo = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.video?.getVideoTracks()[0];
+	const videoTrasCortar = Boolean(pistaVideo?.muted);
+	anotar(`4) al cortar la pantalla: la pista remota queda muteada=${videoTrasCortar}`);
 
 	// Ahora toda la señalización se manda REPETIDA (como cuando un tercero la reenvía).
 	transportes.repetir(true);
-	await mallaA.setMusicStream(null);
-	await mallaA.setMusicStream(musica);
-	await esperar(1500);
+	await Promise.all([mallaA.startScreen(), mallaB.startScreen()]);
+	await esperar(2000);
 	const tras = await estadosFinales();
 	anotar(`5) con señales repetidas: a->b=${tras.a} · b->a=${tras.b}`);
+	transportes.repetir(false);
 
 	// Reconectar de cero (lo que hace el vigilante cuando una conexión se cae).
 	mallaA.disconnect('bbb');
 	await esperar(200);
 	await mallaA.connect('bbb');
 	let reconectado = mallaA.getStates()['bbb'];
-	for (let intento = 0; intento < 40 && reconectado !== 'connected'; intento++) {
+	for (let intento = 0; intento < 60 && reconectado !== 'connected'; intento++) {
 		await esperar(250);
 		reconectado = mallaA.getStates()['bbb'];
 	}
@@ -128,25 +133,27 @@ async function correr(): Promise<void> {
 	const esperados = new Map<string, string | undefined>([
 		['a->b', 'connected'],
 		['b->a', 'connected'],
-		['musicaEnB', 'true'],
-		['musicaEnA', 'true'],
-		['silencio', 'true'],
-		['denuevo', 'true'],
+		['vozEnB', '1'],
+		['vozEnA', '1'],
+		['videoEnB', 'true'],
+		['videoEnA', 'true'],
+		['cortado', 'true'],
 		['repetidas', 'connected'],
 		['reconectado', 'connected'],
 	]);
 	const medido = new Map<string, string | undefined>([
 		['a->b', estados.a],
 		['b->a', estados.b],
-		['musicaEnB', String(Boolean(musicaEnB))],
-		['musicaEnA', String(Boolean(musicaEnA))],
-		['silencio', String(silenciada)],
-		['denuevo', String(Boolean(pistasEnB?.music))],
+		['vozEnB', String(audioEnB)],
+		['vozEnA', String(audioEnA)],
+		['videoEnB', String(videoEnB)],
+		['videoEnA', String(videoEnA)],
+		['cortado', String(videoTrasCortar)],
 		['repetidas', tras.b],
 		['reconectado', reconectado],
 	]);
 	const ok = [...esperados].every(([clave, valor]) => medido.get(clave) === valor) && errores.length === 0;
-	// Se deja todo a la vista para poder mirar la ICE y los candidatos si algo no conecta.
+	// Se deja todo a la vista para poder mirar la ICE y los canales si algo no conecta.
 	(window as unknown as {__mallas: unknown}).__mallas = {a: mallaA, b: mallaB};
 	const diagnostico = {a: mallaA.getDiagnostics()['bbb'], b: mallaB.getDiagnostics()['aaa']};
 	window.__resultado = {

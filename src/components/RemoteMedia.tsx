@@ -98,15 +98,14 @@ function AudioPlayer({
 	return <audio ref={ref} autoPlay />;
 }
 
-/** Reproduce el audio de todos los peers conectados. */
+/** Reproduce el audio de todos los peers conectados (la música ya no viene por acá: cada uno la
+ * reproduce localmente, ver musicPlayer.ts). */
 export function RemoteAudio(): JSX.Element {
 	const remotes = useMeshRemotes();
 	const deafened = useMeshDeafened();
 	const volume = useOutputVolume();
 	const {state} = useStore();
 	const sinkId = state.settings.outputDeviceId;
-	// "Separado de la Jam": escucha su propia música y no la del grupo.
-	const detached = state.settings.musicMuted ?? false;
 	return (
 		<>
 			{remotes.flatMap((remote) => {
@@ -121,18 +120,6 @@ export function RemoteAudio(): JSX.Element {
 					/>
 				));
 			})}
-			{/* Música de la Jam: se reproduce aparte para poder bajarle el volumen sin tocar las voces. */}
-			{remotes.map((remote) =>
-				remote.music ? (
-					<AudioPlayer
-						key={`${remote.peerId}-music`}
-						stream={remote.music}
-						muted={deafened || detached}
-						volume={volume * voiceMesh.getMusicVolume()}
-						sinkId={sinkId}
-					/>
-				) : null,
-			)}
 		</>
 	);
 }

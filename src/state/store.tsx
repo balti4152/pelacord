@@ -1,7 +1,6 @@
 import {createContext, type Dispatch, type ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState} from 'react';
 import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
-import {voiceMesh} from '@/lib/media';
 import {
 	EMPTY_MUSIC_STATE,
 	type MusicBroadcast,
@@ -9,8 +8,11 @@ import {
 	applyMusicCommand,
 	type MusicState,
 	type MusicTrack,
-	currentPositionMs,
+	MUSIC_DRIFT_TOLERANCE_MS,
 	electHost,
+	expectedJamPositionMs,
+	musicSnapshot,
+	musicStamp,
 } from '@/lib/musicQueue';
 import {
 	type MovieMedia,
@@ -21,7 +23,7 @@ import {
 	isStale,
 	sortRooms,
 } from '@/lib/movieRooms';
-import {currentMusicAudio, setHostVolume, startMusicStream, stopMusicStream} from '@/lib/musicPlayer';
+import {currentMusicAudio, onMusicEnded, playMusic, setMusicOutput, stopMusic} from '@/lib/musicPlayer';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
 import {setTaskbarBadge, showNotification, subscribeNotificationClick, avatarIconDataUrl} from '@/lib/notifications';
@@ -1003,7 +1005,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				// "Adoptar": el otro sabe de una Jam que yo no (arranqué vacío). Sólo si no tengo nada.
 				if (command.command.kind === 'adopt') {
 					if (musicStateRef.current.track) return;
-					const adoptado = {...command.command.state, hostId: meRef.current.id};
+					// Lo que llega es una foto del momento (ver musicSnapshot): la posición es "ahora",
+					// así que el arranque pasa a ser ahora con MI reloj.
+					const adoptado = {...command.command.state, hostId: meRef.current.id, startedAt: Date.now()};
 					setMusicState(adoptado);
 					broadcastMusic(adoptado);
 					return;
@@ -1357,8 +1361,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		musicStateRef.current = next;
 		setMusicByChannel((prev) => ({...prev, [channelId]: next}));
 	}, []);
-	/** Id del track que estoy mandando (para saber si tengo que cambiar de tema). */
-	const myMusicTrackId = useRef<string | null>(null);
+	/** Id del tema que estoy reproduciendo LOCALMENTE (para saber si tengo que cambiar de tema). */
+	const playingTrackId = useRef<string | null>(null);
 
 	/** Los que están en mi canal de voz: de esta lista sale el host (el id más chico). */
 	const musicParticipants = useMemo(() => {
@@ -1395,7 +1399,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// Nunca se difunde una Jam vacía: si no, al volver a un canal con música se borraría para
 		// todos (que era justo el bug de "vuelvo y se frena la música").
 		if (!next.track && next.queue.length === 0) return;
-		getDesktopTransport()?.sendMusic({channelId, state: {...next, hostId: meRef.current.id}});
+		// Se manda una FOTO del momento actual (ver musicSnapshot): así cada uno calcula el segundo
+		// con su propio reloj desde que le llegó, y no depende de que los relojes estén iguales.
+		getDesktopTransport()?.sendMusic({channelId, state: {...musicSnapshot(next), hostId: meRef.current.id}});
 	}, []);
 
 	// Se escucha lo que difunde el host de turno (lo de cualquier otro se ignora).
@@ -1471,66 +1477,48 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[sendMusicCommand],
 	);
 
-	/** Silenciar la música de la Jam (sólo para vos: los demás siguen escuchando). */
+	/** Silenciar la música de la Jam (sólo para vos: es TU reproductor). */
 	const musicSetMuted = useCallback((muted: boolean) => {
 		dispatch({type: 'updateSettings', patch: {musicMuted: muted}});
 	}, []);
 
 	const musicSetVolume = useCallback((value: number) => {
-		voiceMesh.setMusicVolume(value);
 		dispatch({type: 'updateSettings', patch: {musicVolume: value}});
 	}, []);
 
 	/**
-	 * El motor de la Jam. Corre en todos, pero sólo uno manda el audio:
-	 * - El host es el mismo para todos (el id más chico del canal): nunca hay dos.
-	 * - El host reproduce, manda el audio por la malla y respeta la pausa.
-	 * - El que entra después se engancha en el segundo en que va: no reinicia nada para los demás.
+	 * El motor de la Jam: cada uno reproduce LOCALMENTE.
+	 *
+	 * Todos reproducen el mismo tema y se corrigen solos si se desvían (igual que Pelaflix con las
+	 * películas). El host sigue siendo el dueño del ESTADO (qué suena, la cola, la pausa), pero el
+	 * audio no viaja por la red: por eso, cuando alguien se mueve de canal o cambia el host, a nadie
+	 * se le corta la música (antes el audio venía de una sola máquina y cada cambio de host dejaba a
+	 * todos sin música los 2-4 s que tardaba el nuevo en resolverla).
 	 */
 	useEffect(() => {
 		const channelId = jamChannelId;
 		const track = musicState.track;
-		// Quién manda el audio: el mismo host de la Jam (ver currentJamHost). Todos calculan lo
-		// mismo, así que nunca hay dos hosts (que era el bug de las dos canciones encimadas).
-		const elected = currentJamHost();
-		const iAmHost = elected === state.me.id;
 
-		// Sin tema, o no estoy en el canal: me aseguro de no estar mandando nada.
+		// Sin tema, o no estoy en el canal: corto lo que esté sonando acá.
 		if (!track || !channelId) {
-			if (myMusicTrackId.current) {
-				myMusicTrackId.current = null;
-				stopMusicStream();
-				void voiceMesh.setMusicStream(null);
-				voiceMesh.announceMusicStream(null);
+			if (playingTrackId.current) {
+				playingTrackId.current = null;
+				stopMusic();
 			}
 			return;
 		}
 
-		// No me toca a mí: si era yo el que mandaba, corto.
-		if (!iAmHost) {
-			if (myMusicTrackId.current) {
-				myMusicTrackId.current = null;
-				stopMusicStream();
-				void voiceMesh.setMusicStream(null);
-				voiceMesh.announceMusicStream(null);
-			}
-			return;
-		}
-
-		// Me toca a mí (nadie más lo está haciendo).
 		let cancelled = false;
 		void (async () => {
 			try {
-				// Ya estoy con este tema: sigo, respeto la pausa y no escribo nada (el estado lo
-				// cambia quien toca los botones: si escribiera acá se armaría un bucle de escrituras).
-				if (myMusicTrackId.current === track.id) {
+				// Ya estoy con este tema: sólo respeto la pausa. La posición la corrige el vigilante
+				// (no acá): si escribiera el estado desde acá se armaría un bucle de escrituras.
+				if (playingTrackId.current === track.id) {
 					const audio = currentMusicAudio();
 					if (audio) {
-						if (musicState.pausedAt && !audio.paused) {
-							audio.pause();
-						} else if (!musicState.pausedAt && audio.paused) {
-							// Al reanudar, todos vuelven al mismo segundo.
-							audio.currentTime = currentPositionMs(musicState) / 1000;
+						if (musicState.pausedAt && !audio.paused) audio.pause();
+						else if (!musicState.pausedAt && audio.paused) {
+							audio.currentTime = expectedJamPositionMs(musicState, jamArrivedAt.current) / 1000;
 							void audio.play().catch(() => {});
 						}
 					}
@@ -1538,23 +1526,23 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				}
 				const url = await getDesktopTransport()?.getAudioUrl(track.url || track.id);
 				if (cancelled) return;
-				if (!url) return;
-				const positionMs = currentPositionMs(musicState);
-				const handle = await startMusicStream(url, positionMs / 1000);
-				if (cancelled) {
-					stopMusicStream();
+				if (!url) {
+					console.warn('[pelacord] no pude sacar el audio de', track.title);
 					return;
 				}
-				myMusicTrackId.current = track.id;
-				if (musicState.pausedAt) handle.audio.pause();
-				await voiceMesh.setMusicStream(handle.stream);
-				voiceMesh.announceMusicStream(handle.stream.id);
-				// Cuando termina, salta solo al siguiente.
-				handle.onEnded(() => {
-					myMusicTrackId.current = null;
-					void voiceMesh.setMusicStream(null);
-					voiceMesh.announceMusicStream(null);
-					void musicSkip();
+				const positionMs = expectedJamPositionMs(musicState, jamArrivedAt.current);
+				const audio = await playMusic(url, positionMs / 1000);
+				if (cancelled) {
+					stopMusic();
+					return;
+				}
+				playingTrackId.current = track.id;
+				if (musicState.pausedAt) audio.pause();
+				// Cuando termina, salta al siguiente. Lo pide SÓLO el host: si lo pidieran todos
+				// (cada uno termina a su hora), la cola avanzaría varios temas de golpe.
+				onMusicEnded(() => {
+					playingTrackId.current = null;
+					if (currentJamHost() === meRef.current.id) void musicSkip();
 				});
 			} catch (error) {
 				console.warn('[pelacord] no pude arrancar la música', String(error));
@@ -1564,11 +1552,44 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		return () => {
 			cancelled = true;
 		};
-		// OJO con las dependencias: acá va `iAmHost`, NO la lista de participantes. Si dependiera de
-		// la lista, cada vez que alguien entra o sale se re-ejecutaría y CANCELARÍA el arranque (que
-		// tarda 1-3 s en pedir el audio) → la música nunca arrancaba.
+		// OJO con las dependencias: NO va la lista de participantes. Si dependiera de la lista, cada
+		// vez que alguien entra o sale se re-ejecutaría y CANCELARÍA el arranque (que tarda 1-3 s en
+		// pedir el audio) → la música nunca arrancaba.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, state.me.id, iAmHost]);
+	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, musicSkip]);
+
+	// Cuándo me llegó la versión actual de la Jam. Sólo se refresca cuando la Jam cambia DE VERDAD
+	// (tema, arranque, pausa o salto): las reafirmaciones traen el mismo estado y no reinician el
+	// reloj. Sirve para calcular el segundo en que va sin depender del reloj del host.
+	const jamArrivedAt = useRef(Date.now());
+	const jamStampRef = useRef('');
+	useEffect(() => {
+		const stamp = musicStamp(musicState);
+		if (stamp === jamStampRef.current) return;
+		jamStampRef.current = stamp;
+		jamArrivedAt.current = Date.now();
+	}, [musicState]);
+
+	/**
+	 * Vigilante de sincronía: cada 3 s se fija que MI audio vaya por donde va la Jam.
+	 *
+	 * Es lo que mantiene a todos en el mismo segundo sin depender de la red: si alguno se desvió
+	 * más de lo tolerable (MUSIC_DRIFT_TOLERANCE_MS), se lo corrige con un salto.
+	 */
+	useEffect(() => {
+		if (!jamChannelId) return;
+		const timer = setInterval(() => {
+			const audio = currentMusicAudio();
+			const state = musicStateRef.current;
+			if (!audio || !state.track || state.pausedAt) return;
+			const expected = expectedJamPositionMs(state, jamArrivedAt.current);
+			const local = audio.currentTime * 1000;
+			if (Math.abs(local - expected) > MUSIC_DRIFT_TOLERANCE_MS) {
+				audio.currentTime = expected / 1000;
+			}
+		}, 3000);
+		return () => clearInterval(timer);
+	}, [jamChannelId]);
 	// Si me voy de un canal en el que NO quedaba nadie más, se limpia la Jam DE ESE canal.
 	// (Se limpia el canal que dejo, no el que abro: por eso antes, al volver, se borraba todo.)
 	const lastJamChannel = useRef<string | null>(null);
@@ -1598,7 +1619,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		if (iAmHost || !jamChannelId || !musicState.track) return;
 		const host = currentJamHost();
 		if (!host) return;
-		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicState}});
+		// Se manda una FOTO (no el estado crudo): el host la adopta tal cual y queda en el mismo
+		// segundo, sin tener que interpretar el reloj de mi máquina.
+		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicSnapshot(musicState)}});
 	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey]);
 
 	// ---------- Pelaflix: salas (por la malla, nada de Firebase) ----------
@@ -1782,15 +1805,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[],
 	);
 
-	// Volumen guardado de la música: se aplica al grupo (los demás) y también al host, que
-	// escucha desde su propio reproductor.
+	// Volumen guardado de la música: se aplica a MI reproductor (cada uno escucha localmente).
 	useEffect(() => {
 		const volume = state.settings.musicVolume ?? 0.8;
 		// Curva cuadrada: al oído el slider queda parejo en todo el recorrido. Con la lineal se
 		// siente que abajo sigue fuerte y que arriba no termina de subir.
 		const curva = volume * volume;
-		voiceMesh.setMusicVolume(curva);
-		setHostVolume(state.settings.musicMuted ? 0 : curva);
+		setMusicOutput(curva, Boolean(state.settings.musicMuted));
 	}, [state.settings.musicVolume, state.settings.musicMuted]);
 
 	/** Hay una Jam con algo: es lo que hace que aparezca todo lo de m�sica (si no, queda dormida). */

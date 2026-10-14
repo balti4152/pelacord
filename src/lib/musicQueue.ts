@@ -87,6 +87,53 @@ export function currentPositionMs(state: MusicState, now = Date.now()): number {
 	return Math.max(0, since);
 }
 
+/** Cuánto se desvía el audio local respecto de la Jam (en milisegundos). */
+export function musicDriftMs(state: MusicState, localPositionMs: number, arrivedAt: number, now = Date.now()): number {
+	return localPositionMs - expectedJamPositionMs(state, arrivedAt, now);
+}
+
+/**
+ * Cuánto se tolera antes de corregir el audio local.
+ *
+ * Si fuera muy chico, cualquier diferencia obligaría a saltar y se escucharía cortado; muy grande y
+ * se nota que uno va atrasado respecto del otro.
+ */
+export const MUSIC_DRIFT_TOLERANCE_MS = 1500;
+
+/**
+ * La "versión" del estado de la Jam.
+ *
+ * Cambia sólo cuando la Jam cambia DE VERDAD (tema, arranque, pausa o salto), no en cada
+ * reafirmación: sirve para saber si hay que volver a medir el tiempo desde cero.
+ */
+export function musicStamp(state: MusicState): string {
+	return `${state.track?.id ?? ''}|${state.startedAt}|${state.pausedAt ?? ''}|${state.positionMs}`;
+}
+
+/**
+ * Por dónde va la Jam, medido con MI reloj desde que me llegó esta versión.
+ *
+ * Se usa el momento de llegada y NO el `startedAt` del host a propósito: mezclar el reloj del host
+ * con el mío convierte cualquier desfase de relojes en un error de posición permanente (uno se
+ * corregiría para siempre y no escucharía nada bien).
+ */
+export function expectedJamPositionMs(state: MusicState, arrivedAt: number, now = Date.now()): number {
+	if (!state.track) return 0;
+	if (state.pausedAt) return Math.max(0, state.positionMs);
+	return Math.max(0, state.positionMs + (now - arrivedAt));
+}
+
+/**
+ * La "foto" del momento actual: es lo que se difunde por la malla.
+ *
+ * `positionMs` pasa a significar "por dónde va AHORA" y `startedAt` el momento de la foto. Así el
+ * que la recibe calcula el segundo con SU reloj desde que le llegó, sin depender del reloj de nadie
+ * más. Es el mismo truco que usa Pelaflix con las películas (y por eso los dos se sincronizan igual).
+ */
+export function musicSnapshot(state: MusicState, now = Date.now()): MusicState {
+	return {...state, positionMs: currentPositionMs(state, now), startedAt: now};
+}
+
 /** Agrega un tema al final de la cola. */
 export function appendToQueue(state: MusicState, track: MusicTrack): MusicTrack[] {
 	return [...state.queue, track];
@@ -107,20 +154,22 @@ export function moveInQueue(state: MusicState, from: number, to: number): MusicT
 }
 
 /** Aplica un comando sobre el estado (lo hace el host cuando recibe una orden). */
-export function applyMusicCommand(state: MusicState, command: MusicCommand): MusicState {
+export function applyMusicCommand(state: MusicState, command: MusicCommand, now = Date.now()): MusicState {
 	if (command.kind === 'play') {
 		return {
 			...state,
 			track: command.track,
-			startedAt: command.track ? Date.now() - (command.startAtMs ?? 0) : 0,
+			// OJO: se usa el `now` que recibe (no Date.now()): si no, la función no se puede probar
+			// de forma determinista y quedaba inconsistente con las otras órdenes.
+			startedAt: command.track ? now - (command.startAtMs ?? 0) : 0,
 			pausedAt: null,
 			positionMs: command.startAtMs ?? 0,
 		};
 	}
 	if (command.kind === 'pause') {
 		return command.paused
-			? {...state, pausedAt: Date.now(), positionMs: currentPositionMs(state)}
-			: {...state, pausedAt: null, startedAt: Date.now() - state.positionMs};
+			? {...state, pausedAt: now, positionMs: currentPositionMs(state, now)}
+			: {...state, pausedAt: null, startedAt: now - state.positionMs};
 	}
 	if (command.kind === 'skip') {
 		const [next, ...rest] = state.queue;

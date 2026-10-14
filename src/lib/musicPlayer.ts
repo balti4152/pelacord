@@ -1,126 +1,87 @@
 /**
- * Reproductor del host: reproduce el audio y lo convierte en un MediaStream.
+ * Reproductor LOCAL de la Jam.
  *
- * Ese stream es el que viaja por la malla (WebRTC) para que los demás lo escuchen como si fuera
- * un participante más. Nada de descargar el archivo: se toca directo desde la URL del stream,
- * así no hay que esperar a que termine de bajar para empezar a escuchar.
+ * Cada uno reproduce el mismo tema en su máquina; qué suena, en qué segundo y si está pausado lo
+ * sincroniza la Jam por la malla (el estado), no el audio.
  *
- * Por qué se hace así: un `<audio>` normal no se puede mandar por WebRTC. Hay que pasar su salida
- * por un AudioContext y de ahí sacar un MediaStream con `createMediaStreamDestination`.
+ * Por qué NO se manda el audio por WebRTC (como antes): con una sola fuente, cada cambio de host
+ * cortaba la música para TODOS durante los 2-4 segundos que el nuevo host tardaba en resolver el
+ * audio (yt-dlp). Con el audio local, que alguien se mueva de canal o que cambie el host no toca
+ * la música de nadie.
+ *
+ * Acá no hay AudioContext: como el audio ya no viaja por la red, alcanza con un <audio> normal.
  */
 
 let audio: HTMLAudioElement | null = null;
-let context: AudioContext | null = null;
-let destination: MediaStreamAudioDestinationNode | null = null;
-let source: MediaElementAudioSourceNode | null = null;
-/** Controla SÓLO lo que escucha el host. Lo que viaja a los demás va por otro camino. */
-let hostGain: GainNode | null = null;
+let endedCallback: (() => void) | null = null;
+/** Volumen y silencio actuales: se aplican en el momento, sin reiniciar la reproducción. */
+let volume = 0.8;
+let muted = false;
 
-/** El stream que hay que mandar a los peers (null si no hay nada sonando). */
-export function currentMusicStream(): MediaStream | null {
-	return destination?.stream ?? null;
-}
-
-/** El elemento de audio (para leer posición, duración, pausar, etc.). */
+/** El elemento de audio que está sonando (null si no hay nada). */
 export function currentMusicAudio(): HTMLAudioElement | null {
 	return audio;
 }
 
-export interface MusicStreamHandle {
-	stream: MediaStream;
-	audio: HTMLAudioElement;
-	/** Segundos que lleva reproducidos. */
-	position(): number;
-	/** Duración total en segundos (0 si todavía no se sabe). */
-	duration(): number;
-	/** Se dispara cuando termina la pista. */
-	onEnded(callback: () => void): void;
-	/** Se dispara cuando ya se puede saber la duración. */
-	onReady(callback: () => void): void;
+/** Avisa cuando el tema termina (para saltar al siguiente). */
+export function onMusicEnded(callback: (() => void) | null): void {
+	endedCallback = callback;
+}
+
+/** Volumen (0 a 1) y silencio de MI música. */
+export function setMusicOutput(nextVolume: number, nextMuted: boolean): void {
+	volume = Math.min(1, Math.max(0, nextVolume));
+	muted = nextMuted;
+	if (audio) audio.volume = muted ? 0 : volume;
+}
+
+/** Espera a que el audio sepa su duración y lo deja en el segundo pedido. */
+async function seek(element: HTMLAudioElement, seconds: number): Promise<void> {
+	if (seconds <= 0.5) return;
+	await new Promise<void>((resolve) => {
+		const listo = () => {
+			element.currentTime = seconds;
+			resolve();
+		};
+		if (element.readyState >= 1) listo();
+		else element.addEventListener('loadedmetadata', listo, {once: true});
+		// Si nunca avisa, se sigue igual: el vigilante de sincronía lo corrige después.
+		setTimeout(resolve, 4000);
+	});
 }
 
 /**
- * Arranca la reproducción de una URL de audio y devuelve el stream para mandar.
+ * Arranca la reproducción de una URL de audio desde un segundo puntual.
  * Si ya había algo sonando, se corta antes.
  */
-export async function startMusicStream(url: string, startAtSeconds = 0): Promise<MusicStreamHandle> {
-	stopMusicStream();
-
+export async function playMusic(url: string, startAtSeconds = 0): Promise<HTMLAudioElement> {
+	stopMusic();
 	const element = new Audio();
-	element.crossOrigin = 'anonymous';
 	element.preload = 'auto';
 	element.src = url;
-
-	// El AudioContext tiene que crearse después de un gesto del usuario o el navegador lo deja
-	// suspendido: se reanuda por las dudas.
-	const audioContext = new AudioContext();
-	if (audioContext.state === 'suspended') await audioContext.resume();
-	const streamDestination = audioContext.createMediaStreamDestination();
-	const mediaSource = audioContext.createMediaElementSource(element);
-	// El volumen del host va por un GainNode, NO por element.volume: cuando un <audio> pasa por
-	// Web Audio, su propio `volume` deja de tener efecto (por eso el slider "no hacía nada").
-	const gain = audioContext.createGain();
-	gain.gain.value = hostVolume;
-	mediaSource.connect(gain);
-	// Lo que escucha el host, con su volumen...
-	gain.connect(audioContext.destination);
-	// ...y lo que viaja a los demás, SIEMPRE a volumen completo.
-	mediaSource.connect(streamDestination);
-
+	element.volume = muted ? 0 : volume;
+	element.addEventListener(
+		'ended',
+		() => {
+			if (audio === element) endedCallback?.();
+		},
+		{once: true},
+	);
 	audio = element;
-	context = audioContext;
-	destination = streamDestination;
-	source = mediaSource;
-	hostGain = gain;
-
-	if (startAtSeconds > 0) {
-		// Para retomar en el segundo exacto (traspaso de host o entrar a mitad de la pista).
-		await new Promise<void>((resolve) => {
-			const onLoaded = () => {
-				element.currentTime = startAtSeconds;
-				resolve();
-			};
-			if (element.readyState >= 1) onLoaded();
-			else element.addEventListener('loadedmetadata', onLoaded, {once: true});
-			setTimeout(resolve, 4000);
-		});
-	}
-
+	await seek(element, startAtSeconds);
 	await element.play();
-
-	return {
-		stream: streamDestination.stream,
-		audio: element,
-		position: () => element.currentTime,
-		duration: () => (Number.isFinite(element.duration) ? element.duration : 0),
-		onEnded: (callback) => element.addEventListener('ended', callback, {once: true}),
-		onReady: (callback) => element.addEventListener('loadedmetadata', callback, {once: true}),
-	};
+	return element;
 }
 
-/** Corta la reproducción y libera el AudioContext. */
-export function stopMusicStream(): void {
+/** Corta la reproducción. */
+export function stopMusic(): void {
+	const element = audio;
+	if (!element) return;
+	audio = null;
 	try {
-		audio?.pause();
-		if (audio) audio.src = '';
-		source?.disconnect();
-		hostGain?.disconnect();
-		destination?.disconnect();
-		void context?.close();
+		element.pause();
+		element.src = '';
 	} catch {
 		// se ignora: puede estar ya cerrado
 	}
-	audio = null;
-	context = null;
-	destination = null;
-	source = null;
-	hostGain = null;
-}
-
-/** Volumen de la música para el host (0 a 1). No afecta a lo que reciben los demás. */
-let hostVolume = 0.8;
-
-export function setHostVolume(value: number): void {
-	hostVolume = Math.min(1, Math.max(0, value));
-	if (hostGain) hostGain.gain.value = hostVolume;
 }

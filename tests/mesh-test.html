@@ -7,10 +7,33 @@
 	<body>
 		<div id="root">midiendo…</div>
 		<script>
-			// Sin micrófono: acá se prueba la NEGOCIACIÓN, no la captura de audio.
+			// Micrófono y pantalla falsos: acá se prueba la NEGOCIACIÓN, no la captura.
+			// (El micrófono es un audio de verdad, así se verifica que la voz llegue.)
+			const contexto = new AudioContext();
+			const destino = contexto.createMediaStreamDestination();
+			const oscilador = contexto.createOscillator();
+			oscilador.connect(destino);
+			oscilador.start();
 			Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+				value: async () => destino.stream,
+			});
+			Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {
 				value: async () => {
-					throw new Error('sin micrófono en la prueba');
+					const canvas = document.createElement('canvas');
+					canvas.width = 32;
+					canvas.height = 32;
+					const contexto = canvas.getContext('2d');
+					// Se dibuja algo en movimiento: si el canvas no cambia, no se producen cuadros y la
+					// pista queda muteada (y la prueba diría que no llega el video).
+					let tono = 0;
+					setInterval(() => {
+						tono = (tono + 30) % 360;
+						if (contexto) {
+							contexto.fillStyle = `hsl(${tono}, 70%, 50%)`;
+							contexto.fillRect(0, 0, 32, 32);
+						}
+					}, 100);
+					return canvas.captureStream(10);
 				},
 			});
 			window.__errores = [];

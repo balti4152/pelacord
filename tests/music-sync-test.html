@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es">
+	<head>
+		<meta charset="utf-8" />
+		<title>Prueba: sincronía de la música (cada uno reproduce local)</title>
+	</head>
+	<body>
+		<div id="root">midiendo…</div>
+		<script type="module">
+			import {
+				EMPTY_MUSIC_STATE,
+				MUSIC_DRIFT_TOLERANCE_MS,
+				applyMusicCommand,
+				expectedJamPositionMs,
+				musicDriftMs,
+				musicSnapshot,
+				musicStamp,
+			} from '/src/lib/musicQueue.ts';
+
+			const tema = {id: 'abc', title: 'Tema', duration: 200, thumbnail: '', author: 'X', url: 'https://youtu.be/abc', addedBy: 'Balti'};
+			const casos = [];
+			const anotar = (nombre, esperado, obtenido) => casos.push({nombre, esperado, obtenido, ok: obtenido === esperado});
+
+			// El host arranca el tema. Cuando alguien se une (o cada tanto) el host difunde una FOTO
+			// del momento: "va por acá, ahora".
+			const t0 = 1_000_000;
+			const sonando = applyMusicCommand(EMPTY_MUSIC_STATE, {kind: 'play', track: tema, startAtMs: 0}, t0);
+
+			// 1) La foto que se manda 60 s después de arrancar dice "va por el segundo 60".
+			const foto = musicSnapshot(sonando, t0 + 60_000);
+			anotar('1) la foto del host dice por dónde va (60 s)', 60_000, foto.positionMs);
+			anotar('2) y el arranque de la foto es el momento de la foto', t0 + 60_000, foto.startedAt);
+
+			// 3) A mí me llega 80 ms después (latencia de la malla): calculo con MI reloj y da 60 s.
+			const meLlego = t0 + 60_080;
+			anotar('3) al llegar, la Jam va por el segundo 60', 60_000, expectedJamPositionMs(foto, meLlego, meLlego));
+
+			// 4) 10 s después de que me llegó, va por el segundo 70 (avanza con MI reloj, solo).
+			anotar('4) 10 s después va por el segundo 70', 70_000, expectedJamPositionMs(foto, meLlego, meLlego + 10_000));
+
+			// 5) Si mi audio va por el mismo segundo, no me corrige (nada de saltos).
+			anotar('5) alineado no se corrige', true, Math.abs(musicDriftMs(foto, 70_000, meLlego, meLlego + 10_000)) < MUSIC_DRIFT_TOLERANCE_MS);
+
+			// 6) Si me quedé atrás 5 segundos, sí me corrige.
+			anotar('6) atrasado 5 s se corrige', true, Math.abs(musicDriftMs(foto, 65_000, meLlego, meLlego + 10_000)) > MUSIC_DRIFT_TOLERANCE_MS);
+
+			// 7) LA PROPIEDAD CLAVE: si el host manda la MISMA foto de nuevo (una reafirmación, o una
+			//    señal duplicada), no reinicio mi reloj: la versión es la misma.
+			anotar('7) la misma foto no cambia la versión', true, musicStamp({...foto}) === musicStamp(foto));
+
+			// 8) Un cambio de verdad (pausa) sí cambia la versión, y pausado la posición no avanza.
+			const pausado = applyMusicCommand(sonando, {kind: 'pause', paused: true}, t0 + 60_000);
+			const fotoPausa = musicSnapshot(pausado, t0 + 60_000);
+			anotar('8) la pausa cambia la versión', true, musicStamp(fotoPausa) !== musicStamp(foto));
+			anotar('9) pausado, la posición queda fija', 60_000, expectedJamPositionMs(fotoPausa, meLlego, meLlego + 30_000));
+
+			// 10) RELOJES DESFASADOS: el `startedAt` del host no influye en nada (uso el de la foto,
+			//     que es el momento en que me llegó). Antes, con relojes distintos, uno se corregía
+			//     para siempre y no podía escuchar bien.
+			const fotoRara = {...foto, startedAt: foto.startedAt - 900_000};
+			anotar('10) un reloj del host desfasado no cambia nada', 70_000, expectedJamPositionMs(fotoRara, meLlego, meLlego + 10_000));
+
+			const ok = casos.every((caso) => caso.ok);
+			window.__resultado = {ok, casos};
+			document.getElementById('root').textContent = ok ? 'OK' : 'FALLO';
+		</script>
+	</body>
+</html>
