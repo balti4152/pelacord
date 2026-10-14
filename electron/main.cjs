@@ -1525,14 +1525,32 @@ function restoreSharedFiles() {
 
 function localAddress() {
 	const all = localInterfaces();
-	const zt = all.find((entry) => entry.isZeroTier);
-	if (zt) return zt.address;
+	const zt = all.filter((entry) => entry.isZeroTier);
+	// OJO: se puede estar en MÁS DE UNA red ZeroTier (pasa cuando probás con otra red, o con un
+	// amigo en otra red). Si se elige la que tus amigos NO tienen, ellos no pueden bajar NADA tuyo
+	// (fotos, archivos, avatar): el navegador intenta esa IP, no responde, y la foto se ve como
+	// "archivo que no anda". Los peers que ya descubrimos nos dicen cuál es la red compartida.
+	if (zt.length > 1) {
+		const amigos = [...knownPeers.values()].map((peer) => String(peer?.host ?? '')).filter(Boolean);
+		const compartida = zt.find((entry) => amigos.some((ip) => mismaRed(entry, ip)));
+		if (compartida) return compartida.address;
+	}
+	if (zt.length > 0) return zt[0].address;
 	// Si no se detecta ZeroTier, se EVITAN los adaptadores virtuales (WSL, Hyper-V, VirtualBox,
 	// VMware, etc.): si se elige uno de esos, los demás no pueden bajar la foto ni los archivos de
 	// este equipo (era justo el caso de "no me ve la foto de perfil").
 	const virtuales = /wsl|hyper-v|vethernet|virtualbox|vmware|loopback|docker|tailscale|radmin|hamachi|tap|tun/i;
 	const candidatas = all.filter((entry) => !virtuales.test(entry.name) && !entry.address.startsWith('169.254.'));
 	return (candidatas[0] ?? all[0])?.address ?? '127.0.0.1';
+}
+
+/** ¿`ip` está en la misma red que esta interfaz? (se compara con la máscara). */
+function mismaRed(entry, ip) {
+	const objetivo = String(ip).split('.').map(Number);
+	if (objetivo.length !== 4 || objetivo.some((parte) => !Number.isFinite(parte))) return false;
+	const propias = entry.address.split('.').map(Number);
+	const mascara = entry.netmask.split('.').map(Number);
+	return propias.every((parte, i) => (parte & mascara[i]) === (objetivo[i] & mascara[i]));
 }
 
 // ---------- Proxy de audio (música de la Jam) ----------

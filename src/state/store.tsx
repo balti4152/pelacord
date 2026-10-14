@@ -709,19 +709,31 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	useEffect(() => {
 		const transport = getDesktopTransport();
 		if (!transport) return;
-		void transport
-			.getFileEndpoint()
-			.then((endpoint) => {
-				fileEndpointRef.current = endpoint;
-				if (!endpoint.host || !endpoint.port) return;
-				// Los assets del perfil (avatar, banner, marco, partículas) se sirven por P2P: acá se
-				// reconstruyen con el host:puerto de AHORA y, de paso, se migran los que quedaron como
-				// data:/blob: (perfiles viejos). Eso último era el "a un amigo no le aparece mi foto":
-				// un blob: sólo existe en esta máquina y un data: gigante no viaja bien en la presencia.
-				const patch = migrateProfileAssets(meRef.current, `http://${endpoint.host}:${endpoint.port}`);
-				if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
-			})
-			.catch(() => {});
+		let activo = true;
+		const revisar = () => {
+			void transport
+				.getFileEndpoint()
+				.then((endpoint) => {
+					if (!activo || !endpoint.host || !endpoint.port) return;
+					fileEndpointRef.current = endpoint;
+					// Los assets del perfil (avatar, banner, marco, partículas) se sirven por P2P: acá se
+					// reconstruyen con el host:puerto de AHORA y, de paso, se migran los que quedaron como
+					// data:/blob: (perfiles viejos). Eso último era el "a un amigo no le aparece mi foto":
+					// un blob: sólo existe en esta máquina y un data: gigante no viaja bien en la presencia.
+					const patch = migrateProfileAssets(meRef.current, `http://${endpoint.host}:${endpoint.port}`);
+					if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
+				})
+				.catch(() => {});
+		};
+		revisar();
+		// Se vuelve a preguntar cada tanto: la IP propia puede cambiar de red. Si estás en más de una
+		// red ZeroTier, la app elige la que COMPARTÍS con tus amigos recién cuando los descubre; esto
+		// lo propaga (la presencia se publica cada 10 s, así que los demás lo toman enseguida).
+		const timer = setInterval(revisar, 20000);
+		return () => {
+			activo = false;
+			clearInterval(timer);
+		};
 	}, []);
 
 	const presencePayload = useCallback(() => {
