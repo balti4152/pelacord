@@ -60,6 +60,18 @@
 					members: [miembro({id: 'yo', fileHost: undefined, filePort: undefined})],
 					esperado: 'http://10.243.87.243:7789/file/abc123',
 				},
+				{
+					nombre: '7) GIF mandado como ARCHIVO (kind image, igual que una imagen)',
+					adjunto: mensaje({mime: 'image/gif', name: 'baile.gif'}),
+					members: [miembro({fileHost: '10.243.33.108', filePort: 7789})],
+					esperado: 'http://10.243.33.108:7789/file/abc123',
+				},
+				{
+					nombre: '8) GIF del selector KLIPY (url remota, sin dueno): se deja la url remota',
+					adjunto: {id: 'klipy1', name: 'giphy.gif', size: 0, mime: 'image/gif', kind: 'image', url: 'https://klipy.com/x.gif'},
+					members: [miembro({fileHost: '10.243.33.108', filePort: 7789})],
+					esperado: 'https://klipy.com/x.gif',
+				},
 			];
 
 			const resultados = casos.map((caso) => ({
