@@ -54,8 +54,17 @@ export class VoiceMesh {
 	private signalChains = new Map<string, Promise<void>>();
 	/** Cuántas veces se reinició el ICE de cada conexión. */
 	private iceRestarts = new Map<string, number>();
-	/** Desde cuándo cada conexión está "disconnected" (para no reiniciar por un hipo corto). */
+	/** Desde cuándo cada conexión está "disconnected" o "connecting" (para no reiniciar por un hipo). */
 	private disconnectedAt = new Map<string, number>();
+	private connectingAt = new Map<string, number>();
+	/**
+	 * Rearmes completos por peer (tirar la conexión y hacerla de nuevo) y cuándo se puede volver a
+	 * intentar. Sin esta espera creciente, una conexión que no cierra entra en un bucle de rearranques
+	 * cada 5 s y, como un ICE nuevo tarda 5-30 s en converger, NUNCA llega a conectar (era el
+	 * "amarillo para siempre" que reportó el usuario).
+	 */
+	private rebuilds = new Map<string, number>();
+	private rebuildAt = new Map<string, number>();
 	private watchdog: ReturnType<typeof setInterval> | null = null;
 	private myId = '';
 	private muted = false;
@@ -165,6 +174,9 @@ export class VoiceMesh {
 		this.signalChains.clear();
 		this.iceRestarts.clear();
 		this.disconnectedAt.clear();
+		this.connectingAt.clear();
+		this.rebuilds.clear();
+		this.rebuildAt.clear();
 		this.senders.clear();
 		for (const pc of this.pcs.values()) pc.close();
 		this.pcs.clear();
@@ -414,11 +426,20 @@ export class VoiceMesh {
 			}
 			if (pc.connectionState === 'disconnected') {
 				if (!this.disconnectedAt.has(peerId)) this.disconnectedAt.set(peerId, Date.now());
+				this.connectingAt.delete(peerId);
+				return;
+			}
+			if (pc.connectionState === 'connecting') {
+				if (!this.connectingAt.has(peerId)) this.connectingAt.set(peerId, Date.now());
 				return;
 			}
 			if (pc.connectionState === 'connected') {
+				// Se conectó: se olvida todo lo anterior (reintentos y rearmes).
 				this.iceRestarts.set(peerId, 0);
 				this.disconnectedAt.delete(peerId);
+				this.connectingAt.delete(peerId);
+				this.rebuilds.delete(peerId);
+				this.rebuildAt.delete(peerId);
 			}
 			// Reaplicar el bitrate cuando la conexión está lista (los encodings ya existen).
 			if (pc.connectionState === 'connected') {
@@ -518,40 +539,69 @@ export class VoiceMesh {
 		this.remoteReady.delete(peerId);
 		this.diagnostics.delete(peerId);
 		this.disconnectedAt.delete(peerId);
+		this.connectingAt.delete(peerId);
 		this.senders.delete(peerId);
 		this.detachAnalyser(peerId);
 		this.emit();
 	}
 
-	/** Reinicia el ICE de una conexión. Si ya se reinició demasiadas veces, la tira para rearmarla. */
+	/**
+	 * Reinicia el ICE de una conexión, con ESPERA CRECIENTE.
+	 *
+	 * Por qué la espera: un ICE nuevo tarda 5-30 s en converger. Si se reiniciara cada 5 s (como
+	 * antes), se tiran abajo los chequeos que estaban por funcionar y la conexión queda en
+	 * "connecting" para siempre. Si después de varios intentos no hay caso, se rearma la conexión
+	 * entera, también con espera creciente (hasta 1 minuto) para no entrar en un bucle.
+	 */
 	private tryIceRestart(peerId: string, pc: RTCPeerConnection): void {
 		const attempts = (this.iceRestarts.get(peerId) ?? 0) + 1;
 		this.iceRestarts.set(peerId, attempts);
 		if (attempts > 3) {
-			console.warn(`[pelacord-media] ${peerId}: se rearma la conexión desde cero`);
+			// Se rearma de cero, pero espaciando cada vez más.
+			const rearmes = (this.rebuilds.get(peerId) ?? 0) + 1;
+			this.rebuilds.set(peerId, rearmes);
+			this.rebuildAt.set(peerId, Date.now() + Math.min(60000, 10000 * rearmes));
+			console.warn(`[pelacord-media] ${peerId}: se rearma la conexión (intento ${rearmes})`);
 			this.drop(peerId);
 			return;
 		}
-		try {
-			pc.restartIce();
-		} catch {
-			this.drop(peerId);
-		}
+		const espera = Math.min(45000, 8000 * attempts);
+		setTimeout(() => {
+			// Si ya no es esta conexión (se rearmó), no se toca.
+			if (this.pcs.get(peerId) !== pc) return;
+			try {
+				pc.restartIce();
+			} catch {
+				this.drop(peerId);
+			}
+		}, espera);
+	}
+
+	/** Rearma toda la malla: corta y vuelve a empezar (lo usa el botón "Reconectar" de la llamada). */
+	async reconnect(): Promise<void> {
+		const myId = this.myId;
+		const peers = [...this.desired];
+		this.stop();
+		await this.start(myId);
+		for (const peerId of peers) await this.connect(peerId);
 	}
 
 	/**
 	 * Vigilante: cada 5 s revisa que todos los peers del canal tengan una conexión viva.
 	 *
-	 * Recrea las que faltan o se cayeron, y corta las que ya no corresponden. Esto es lo que hace
-	 * que la llamada se ARREGLE SOLA: antes, si una conexión se caía, quedaba muerta hasta salir y
-	 * volver a entrar al canal (era justo el caso "dos no se escuchan y el tercero sí").
+	 * Recrea las que faltan o se cayeron (respetando la espera del rearme) y corta las que ya no
+	 * corresponden. Es lo que hace que la llamada se ARREGLE SOLA: antes, si una conexión se caía,
+	 * quedaba muerta hasta salir y volver a entrar al canal.
 	 */
 	private startWatchdog(): void {
 		if (this.watchdog) return;
 		this.watchdog = setInterval(() => {
+			const now = Date.now();
 			for (const peerId of this.desired) {
 				const pc = this.pcs.get(peerId);
 				if (!pc) {
+					// Se espera lo que diga el rearme (si nunca se conectó, no hay espera).
+					if ((this.rebuildAt.get(peerId) ?? 0) > now) continue;
 					void this.pcFor(peerId);
 					continue;
 				}
@@ -560,8 +610,15 @@ export class VoiceMesh {
 					continue;
 				}
 				if (pc.connectionState === 'disconnected') {
-					const since = this.disconnectedAt.get(peerId) ?? Date.now();
-					if (Date.now() - since > 12000) this.tryIceRestart(peerId, pc);
+					const since = this.disconnectedAt.get(peerId) ?? now;
+					// 20 s: se le da tiempo a que se arregle solo (muchas veces vuelve en unos segundos).
+					if (now - since > 20000) this.tryIceRestart(peerId, pc);
+					continue;
+				}
+				if (pc.connectionState === 'connecting') {
+					const since = this.connectingAt.get(peerId) ?? now;
+					// 40 s en "connecting": ya no va a cerrar solo, se reinicia el ICE.
+					if (now - since > 40000) this.tryIceRestart(peerId, pc);
 				}
 			}
 			for (const peerId of [...this.pcs.keys()]) {

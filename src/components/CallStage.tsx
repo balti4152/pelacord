@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {RefreshCw} from 'lucide-react';
 import {ColorAvatar, Icon, IconButton} from '@/components/primitives';
 import {
 	useLocalScreen,
@@ -349,6 +350,13 @@ export function CallStage(): JSX.Element | null {
 					title={voice.deafened ? 'Activar audio' : 'Ensordecer y silenciar el micrófono'}
 					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'deafened'})}>
 					<Icon name={voice.deafened ? 'headphonesOff' : 'headphones'} size={22} />
+				</button>
+				<button
+					type="button"
+					className="call-control"
+					title="Reconectar la llamada (si quedó en amarillo)"
+					onClick={() => void voiceMesh.reconnect()}>
+					<RefreshCw size={20} />
 				</button>
 				<button
 					type="button"
