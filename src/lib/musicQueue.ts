@@ -104,7 +104,7 @@ export function musicDriftMs(state: MusicState, localPositionMs: number, arrived
  * Si fuera muy chico, cualquier diferencia obligaría a saltar y se escucharía cortado; muy grande y
  * se nota que uno va atrasado respecto del otro.
  */
-export const MUSIC_DRIFT_TOLERANCE_MS = 1500;
+export const MUSIC_DRIFT_TOLERANCE_MS = 450;
 
 /**
  * La "versión" del estado de la Jam.
@@ -150,7 +150,7 @@ export function receiveMusicSnapshot(state: MusicState, now = Date.now()): Music
  * Un salto en el medio de un tema se escucha como un corte; con la velocidad se llega al mismo
  * lugar sin que se note (el tono no cambia: Chromium mantiene el pitch).
  */
-export const MUSIC_NUDGE_LIMIT_MS = 5000;
+export const MUSIC_NUDGE_LIMIT_MS = 4000;
 
 /** Qué hacer con mi audio según cuánto se desvió de la Jam. */
 export type MusicSyncAction = {kind: 'ok'} | {kind: 'nudge'; rate: number} | {kind: 'seek'};
@@ -165,9 +165,30 @@ export function musicSyncAction(
 	toleranceMs = MUSIC_DRIFT_TOLERANCE_MS,
 	nudgeLimitMs = MUSIC_NUDGE_LIMIT_MS,
 ): MusicSyncAction {
-	if (Math.abs(driftMs) <= toleranceMs) return {kind: 'ok'};
-	if (Math.abs(driftMs) <= nudgeLimitMs) return {kind: 'nudge', rate: driftMs < 0 ? 1.05 : 0.95};
+	const distance = Math.abs(driftMs);
+	if (distance <= toleranceMs) return {kind: 'ok'};
+	if (distance <= nudgeLimitMs) {
+		// Proporcional: un desvío chico se corrige suave (3%, inaudible) y uno grande más rápido
+		// (hasta 8%). Con un 5% fijo, 4 s de atraso tardaban más de un minuto en alinearse.
+		const amount = Math.min(0.08, Math.max(0.03, distance / 40000));
+		const rate = driftMs < 0 ? 1 + amount : 1 - amount;
+		return {kind: 'nudge', rate: Math.round(rate * 1000) / 1000};
+	}
 	return {kind: 'seek'};
+}
+
+/**
+ * ¿Dos fotos de la Jam son "la misma"? (mismo tema, misma reproducción, misma cola y casi el
+ * mismo segundo). El host reafirma cada pocos segundos: si nada cambió de verdad, no hace falta
+ * re-renderizar la app entera, alcanza con guardar el reloj nuevo.
+ */
+export function sameMusicMoment(a: MusicState | undefined, b: MusicState, toleranceMs = 300): boolean {
+	if (!a) return false;
+	if (a.track?.id !== b.track?.id || a.playbackId !== b.playbackId || a.revision !== b.revision) return false;
+	if (Boolean(a.pausedAt) !== Boolean(b.pausedAt) || a.hostId !== b.hostId) return false;
+	if (a.queue.length !== b.queue.length || a.queue.some((track, index) => track.id !== b.queue[index]?.id)) return false;
+	if (a.pausedAt) return Math.abs(a.positionMs - b.positionMs) <= toleranceMs;
+	return Math.abs(a.startedAt - b.startedAt) <= toleranceMs;
 }
 
 /** Agrega un tema al final de la cola. */

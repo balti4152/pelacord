@@ -63,6 +63,8 @@ const socketIds = new Map();
 const sockets = new Map();
 const outgoingByAddress = new Map();
 const peerPresences = new Map();
+/** peerId -> sesión que se despidió (cerró la app). Si vuelve, llega con otra sesión. */
+const departedSessions = new Map();
 let ownPresence = null;
 let manualPeers = [];
 
@@ -115,7 +117,7 @@ function dropSocket(socket) {
 
 function attachSocket(socket, connection, outgoing, expectedId) {
 	const address = connection?.remoteAddress?.replace(/^::ffff:/, '');
-	sockets.set(socket, {address: isIPv4(address) ? address : undefined, localAddress: connection?.localAddress, outgoing, expectedId, alive: true});
+	sockets.set(socket, {address: isIPv4(address) ? address : undefined, localAddress: connection?.localAddress, outgoing, expectedId, alive: true, attachedAt: Date.now()});
 	socket.on('pong', () => {
 		const info = sockets.get(socket);
 		if (info) info.alive = true;
@@ -195,10 +197,14 @@ function startDiscovery() {
 			if (now - presence.receivedAt > 30000) peerPresences.delete(id);
 		}
 		for (const [socket, info] of sockets) {
-			if (!info.alive || !socketIds.has(socket)) {
+			// Una conexión recién abierta todavía puede no haber recibido el "hola": se le dan 10 s.
+			// Antes se cortaba si justo caía el chequeo entre que abría y que llegaba la presentación.
+			const unidentified = !socketIds.has(socket) && now - (info.attachedAt ?? 0) > 10000;
+			if (!info.alive || unidentified) {
 				socket.terminate();
 				continue;
 			}
+			if (!socketIds.has(socket)) continue;
 			if (socket.readyState !== WebSocket.OPEN) continue;
 			info.alive = false;
 			socket.ping();
@@ -307,10 +313,26 @@ function handleMessage(socket, raw) {
 		if (type === 'hello') return;
 	}
 	const neighbor = socketIds.get(socket);
-	if (!neighbor || !['presence', 'music', 'movie-room', 'signal', 'messages', 'command'].includes(type)) return;
+	if (!neighbor || !['presence', 'music', 'movie-room', 'signal', 'messages', 'command', 'leave'].includes(type)) return;
 	if (typeof msgId !== 'string' || !rememberMessage(msgId)) return;
-	if (type === 'presence') {
+	if (type === 'leave') {
+		// Cerró la app: se lo saca YA de la llamada y de la lista (antes se esperaba a que su
+		// presencia venciera, ~15 s con su cuadrito "conectando" en la llamada).
+		const session = payload?.session;
+		const previous = peerPresences.get(from);
+		// Una despedida vieja (de una sesión anterior) no puede echar a alguien que volvió a entrar.
+		if (!previous || session === undefined || previous.payload.session === session) {
+			peerPresences.delete(from);
+			// Una presencia de esa misma sesión que todavía venía en camino no lo puede "revivir".
+			if (session !== undefined) departedSessions.set(from, session);
+			sendToRenderer('pelacord:peer-left', {id: from});
+		}
+	} else if (type === 'presence') {
 		if (payload?.id !== from) return;
+		if (departedSessions.has(from)) {
+			if (departedSessions.get(from) === payload.session) return;
+			departedSessions.delete(from);
+		}
 		const previous = peerPresences.get(from);
 		if (previous && ((previous.payload.session ?? 0) > (payload.session ?? 0) ||
 			(previous.payload.session === payload.session && (previous.payload.seq ?? -1) >= (payload.seq ?? 0)))) return;
@@ -684,31 +706,114 @@ ipcMain.handle('pelacord:ytdlp-version', async () => {
 	return result.ok ? result.output : null;
 });
 
+/**
+ * Miniatura LIVIANA de un video (320x180).
+ *
+ * yt-dlp devuelve como última miniatura la más grande (hasta 1280px): para una fila de 40px se
+ * bajaban ~200 KB por resultado y la lista de búsqueda tardaba en pintarse.
+ */
+function ytThumbnail(id) {
+	return `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+}
+
 /** Convierte una entrada de yt-dlp en un resultado de búsqueda (mismo formato en todos lados). */
 function ytEntryToResult(entry) {
+	const id = String(entry?.id || '');
 	return {
-		id: String(entry?.id || ''),
+		id,
 		title: String(entry?.title || ''),
 		duration: Number(entry?.duration) || 0,
-		thumbnail: String(entry?.thumbnails?.[entry.thumbnails.length - 1]?.url || `https://i.ytimg.com/vi/${entry?.id}/mqdefault.jpg`),
+		thumbnail: id ? ytThumbnail(id) : String(entry?.thumbnails?.[0]?.url || ''),
 		author: String(entry?.uploader || entry?.channel || ''),
-		url: String(entry?.url || `https://www.youtube.com/watch?v=${entry?.id}`),
+		url: String(entry?.url || `https://www.youtube.com/watch?v=${id}`),
 	};
 }
 
+/** "3:45" o "1:02:03" → segundos. */
+function parseClock(text) {
+	const parts = String(text || '').trim().split(':').map(Number);
+	if (parts.length === 0 || parts.some((part) => !Number.isFinite(part))) return 0;
+	return parts.reduce((total, part) => total * 60 + part, 0);
+}
+
+/** Texto de un nodo de la API de YouTube ({simpleText} o {runs: [{text}]}). */
+function ytText(node) {
+	if (!node) return '';
+	if (typeof node.simpleText === 'string') return node.simpleText;
+	return Array.isArray(node.runs) ? node.runs.map((run) => run?.text ?? '').join('') : '';
+}
+
 /**
- * Busca en YouTube y devuelve la lista (título, duración, miniatura, autor).
- * Es la búsqueda del reproductor: lo que el usuario escribe o el tema de una playlist de Spotify.
+ * Búsqueda RÁPIDA: la misma API que usa la página de YouTube (una sola petición HTTPS).
+ *
+ * Lanzar yt-dlp para buscar tardaba 2-5 s (arranca un proceso, carga Python y el reproductor de
+ * YouTube). Esto responde en ~300-600 ms. Si YouTube cambia algo y falla, se cae a yt-dlp, así
+ * que en el peor caso queda igual que antes.
  */
-ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
-	const clean = String(query || '').trim();
-	if (!clean) return [];
+async function innertubeSearch(query, count) {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 7000);
+	try {
+		const response = await fetch('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+			method: 'POST',
+			signal: controller.signal,
+			headers: {
+				'Content-Type': 'application/json',
+				'User-Agent': AUDIO_USER_AGENT,
+				'Accept-Language': 'es-419,es;q=0.9,en;q=0.8',
+			},
+			body: JSON.stringify({
+				context: {client: {clientName: 'WEB', clientVersion: '2.20241120.01.00', hl: 'es'}},
+				query,
+				// Filtro "sólo videos" (sin canales, playlists ni shorts mezclados).
+				params: 'EgIQAQ==',
+			}),
+		});
+		if (!response.ok) return null;
+		const data = await response.json();
+		const sections = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents ?? [];
+		const results = [];
+		for (const section of sections) {
+			for (const item of section?.itemSectionRenderer?.contents ?? []) {
+				const video = item?.videoRenderer;
+				// Sin duración = transmisión en vivo: no se puede reproducir como tema de la Jam.
+				if (!video?.videoId || !video.lengthText) continue;
+				results.push({
+					id: String(video.videoId),
+					title: ytText(video.title),
+					duration: parseClock(ytText(video.lengthText)),
+					thumbnail: ytThumbnail(video.videoId),
+					author: ytText(video.ownerText) || ytText(video.longBylineText),
+					url: `https://www.youtube.com/watch?v=${video.videoId}`,
+				});
+				if (results.length >= count) return results;
+			}
+		}
+		return results.length > 0 ? results : null;
+	} catch {
+		return null;
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/** Últimas búsquedas (10 min): buscar lo mismo dos veces es instantáneo. */
+const searchCache = new Map();
+const SEARCH_CACHE_MS = 10 * 60 * 1000;
+
+function rememberSearch(key, results) {
+	searchCache.delete(key);
+	searchCache.set(key, {at: Date.now(), results});
+	while (searchCache.size > 80) searchCache.delete(searchCache.keys().next().value);
+}
+
+/** Búsqueda con yt-dlp (el camino lento, de respaldo). */
+async function ytDlpSearch(clean, count) {
 	// Una sola búsqueda a la vez: la anterior se mata. Sin esto se apilan procesos de yt-dlp.
 	if (currentSearch) {
 		killTree(currentSearch);
 		currentSearch = null;
 	}
-	const count = Math.min(25, Math.max(1, Number(limit) || 15));
 	// "flat-playlist" trae sólo los datos de la lista: rápido, no toca cada video.
 	const result = await runYtDlp(
 		['--dump-single-json', '--flat-playlist', '--no-warnings', `ytsearch${count}:${clean}`],
@@ -718,26 +823,69 @@ ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
 		},
 	);
 	currentSearch = null;
-	if (!result.ok) return [];
+	if (!result.ok) return null;
 	try {
 		const parsed = JSON.parse(result.output);
-		const entries = parsed.entries || [];
-		return entries.map(ytEntryToResult);
+		return (parsed.entries || []).map(ytEntryToResult);
 	} catch (error) {
 		console.warn('[pelacord] búsqueda de YouTube ilegible:', String(error));
-		return [];
+		return null;
 	}
+}
+
+/**
+ * Busca en YouTube y devuelve la lista (título, duración, miniatura, autor).
+ * Es la búsqueda del reproductor: lo que el usuario escribe o el tema de una playlist de Spotify.
+ */
+ipcMain.handle('pelacord:yt-search', async (_event, query, limit = 15) => {
+	const clean = String(query || '').trim();
+	if (!clean) return [];
+	const count = Math.min(25, Math.max(1, Number(limit) || 15));
+	const key = `${count}:${clean.toLowerCase()}`;
+	const cached = searchCache.get(key);
+	if (cached && Date.now() - cached.at < SEARCH_CACHE_MS) return cached.results;
+	const results = (await innertubeSearch(clean, count)) ?? (await ytDlpSearch(clean, count));
+	if (!results) return [];
+	if (results.length > 0) rememberSearch(key, results);
+	return results;
 });
 
 /**
- * Resuelve VARIAS búsquedas de una sola vez (una corrida de yt-dlp para todas).
+ * Resuelve VARIAS búsquedas (al agregar una playlist de Spotify entera).
  *
- * Se usa al agregar una playlist de Spotify entera: lanzar un proceso por canción tardaría
- * minutos. Devuelve un resultado por consulta, EN EL MISMO ORDEN (null si esa no encontró nada).
+ * Primero por la API rápida, de a 5 en paralelo; lo que no aparezca se resuelve con yt-dlp.
+ * Devuelve un resultado por consulta, EN EL MISMO ORDEN (null si esa no encontró nada).
  */
 ipcMain.handle('pelacord:yt-search-batch', async (_event, queries) => {
 	const list = (Array.isArray(queries) ? queries : []).map((query) => String(query || '').trim()).filter(Boolean);
 	if (list.length === 0) return [];
+	const found = new Array(list.length).fill(null);
+	let cursor = 0;
+	await Promise.all(
+		Array.from({length: Math.min(5, list.length)}, async () => {
+			while (cursor < list.length) {
+				const index = cursor++;
+				const key = `1:${list[index].toLowerCase()}`;
+				const cached = searchCache.get(key);
+				const results = cached && Date.now() - cached.at < SEARCH_CACHE_MS ? cached.results : await innertubeSearch(list[index], 1);
+				if (results?.[0]) {
+					found[index] = results[0];
+					rememberSearch(key, results);
+				}
+			}
+		}),
+	);
+	const missing = list.map((_, index) => index).filter((index) => !found[index]);
+	if (missing.length === 0) return found;
+	const fallback = await ytDlpBatch(missing.map((index) => list[index]));
+	missing.forEach((index, position) => {
+		found[index] = fallback[position] ?? null;
+	});
+	return found;
+});
+
+/** Varias búsquedas con yt-dlp (una corrida para todas; si se desalinean, de a una). */
+async function ytDlpBatch(list) {
 	const args = ['--dump-json', '--flat-playlist', '--no-warnings', '--ignore-errors', ...list.map((query) => `ytsearch1:${query}`)];
 	const result = await runYtDlp(args, 90000);
 	const lines = result.ok ? result.output.split('\n').filter((line) => line.trim().startsWith('{')) : [];
@@ -767,14 +915,63 @@ ipcMain.handle('pelacord:yt-search-batch', async (_event, queries) => {
 		}
 	}
 	return single;
+}
+
+/**
+ * Audio ya resuelto por tema, hasta poco antes de que venza su URL.
+ *
+ * Resolver con yt-dlp tarda 2-4 s. Antes se hacía SIEMPRE al dar play (y de nuevo si alguien
+ * volvía a poner el mismo tema). Ahora se guarda hasta que la URL firmada esté por vencer, y el
+ * próximo tema de la cola se resuelve por adelantado (prefetch). Si igual vence o da 403, el proxy
+ * de audio (serveAudio) la vuelve a resolver solo.
+ */
+const audioSourceCache = new Map();
+/** Resoluciones en curso: dos pedidos del mismo tema esperan la misma corrida de yt-dlp. */
+const audioResolving = new Map();
+
+function audioSourceExpiry(url) {
+	try {
+		const expire = Number(new URL(url).searchParams.get('expire'));
+		if (expire > 0) return expire * 1000 - 15 * 60 * 1000;
+	} catch {
+		// URL rara: se usa el plazo por defecto
+	}
+	return Date.now() + 45 * 60 * 1000;
+}
+
+function rememberAudioSource(target, source) {
+	audioSourceCache.delete(target);
+	audioSourceCache.set(target, {source, expiresAt: audioSourceExpiry(source.url)});
+	while (audioSourceCache.size > 40) audioSourceCache.delete(audioSourceCache.keys().next().value);
+}
+
+function resolveAudioCached(target) {
+	const key = String(target || '').trim();
+	if (!key) return Promise.resolve(null);
+	const hit = audioSourceCache.get(key);
+	if (hit && hit.expiresAt > Date.now()) return Promise.resolve(hit.source);
+	const running = audioResolving.get(key);
+	if (running) return running;
+	const promise = resolveAudioUrl(key)
+		.then((source) => {
+			if (source) rememberAudioSource(key, source);
+			return source;
+		})
+		.finally(() => audioResolving.delete(key));
+	audioResolving.set(key, promise);
+	return promise;
+}
+
+/** El próximo tema de la cola: se resuelve en segundo plano para que arranque al instante. */
+ipcMain.on('pelacord:yt-prefetch', (_event, target) => {
+	void resolveAudioCached(target).catch(() => {});
 });
 
 /**
- * Devuelve la URL directa del audio (para streamear, sin descargar el archivo).
- * Se pide en el momento de reproducir: esas URLs vencen, así que no se cachean.
+ * Devuelve la URL del audio (para streamear, sin descargar el archivo), servida por el proxy local.
  */
 ipcMain.handle('pelacord:yt-audio-url', async (_event, target) => {
-	const source = await resolveAudioUrl(target);
+	const source = await resolveAudioCached(target);
 	if (!source) return null;
 	// Se sirve desde la app (ver serveAudio): así no depende de IPv6 ni de las cabeceras de CORS
 	// de googlevideo, y si la URL vence se vuelve a resolver sola.
@@ -1675,7 +1872,13 @@ async function serveAudio(token, req, res) {
 			return;
 		}
 		entry.refresh ??= (entry.source !== previous ? Promise.resolve(entry.source) : resolveAudioUrl(entry.target)).then((source) => {
-			if (source) entry.source = source;
+			if (source) {
+				entry.source = source;
+				// La guardada ya no sirve (por eso falló): se reemplaza por la nueva.
+				rememberAudioSource(String(entry.target || '').trim(), source);
+			} else {
+				audioSourceCache.delete(String(entry.target || '').trim());
+			}
 			return source;
 		}).finally(() => { entry.refresh = null; });
 		const fresh = await entry.refresh;
@@ -2489,8 +2692,20 @@ app.on('window-all-closed', () => {
 });
 
 // Salir de verdad (bandeja, actualización o apagado) no debe esconderse.
-app.on('before-quit', () => {
+let saidGoodbye = false;
+app.on('before-quit', (event) => {
 	isQuitting = true;
+	// Se avisa a la malla que me voy (así me sacan de la llamada al instante) y se espera un
+	// momento a que el mensaje salga por los sockets antes de cerrar de verdad.
+	if (saidGoodbye || !myPeerId || peers.size === 0) return;
+	saidGoodbye = true;
+	event.preventDefault();
+	try {
+		broadcast({type: 'leave', from: myPeerId, payload: {session: ownPresence?.payload?.session}});
+	} catch {
+		// se sale igual
+	}
+	setTimeout(() => app.quit(), 200);
 });
 
 // Los atajos globales hay que darlos de baja al salir.

@@ -22,8 +22,8 @@ import {
 	type MessageRecord,
 	type MessageSyncPayload,
 	applyDelete,
+	groupMessages,
 	mergeRecord,
-	messagesOf,
 	recordsSince,
 	watermarks,
 } from '@/lib/messageLog';
@@ -189,6 +189,7 @@ function seedState(): AppState {
 type Action =
 	| {type: 'selectChannel'; channelId: string}
 	| {type: 'setChannelMessages'; channelId: string; messages: Message[]}
+	| {type: 'setMessagesBulk'; updates: Record<string, Message[]>}
 	| {type: 'markRead'; channelId: string}
 	| {type: 'bumpUnread'; channelId: string}
 	| {type: 'toggleChannelMute'; channelId: string}
@@ -237,6 +238,8 @@ function reducer(state: AppState, action: Action): AppState {
 			return {...state, knownMembers: action.knownMembers};
 		case 'setChannelMessages':
 			return {...state, messages: {...state.messages, [action.channelId]: action.messages}};
+		case 'setMessagesBulk':
+			return {...state, messages: {...state.messages, ...action.updates}};
 		case 'setRemoteMembers':
 			return {...state, members: action.members};
 		case 'setVoiceMembers':
@@ -446,33 +449,61 @@ function persistMessageLog(log: MessageLog): void {
 	}
 }
 
-function applyEffects(state: AppState): void {
+/** Lo último que se aplicó al documento (para no tocar el DOM si no cambió nada). */
+const appliedEffects: {theme?: ThemeName; cssVariables: string[]; customCss?: string} = {cssVariables: []};
+
+/**
+ * Aplica tema, escala, variables y CSS propio.
+ *
+ * Antes corría en CADA cambio del estado (cada presencia, cada mensaje): reescribía el <style> del
+ * CSS propio (el navegador recalcula los estilos de toda la página) y mandaba un IPC por la barra
+ * de título. Eso trababa la interfaz unos milisegundos cada pocos segundos. Ahora sólo se toca lo
+ * que cambió de verdad.
+ */
+function applyEffects(settings: Settings): void {
 	if (typeof document === 'undefined') return;
 	const body = document.body;
 	const themes: ThemeName[] = ['dark', 'light', 'coal'];
-	for (const theme of themes) body.classList.toggle(`theme-${theme}`, state.settings.theme === theme);
-	body.style.fontSize = `${16 * state.settings.fontScale}px`;
+	for (const theme of themes) body.classList.toggle(`theme-${theme}`, settings.theme === theme);
+	body.style.fontSize = `${16 * settings.fontScale}px`;
 	// Accesibilidad/rendimiento: apaga las animaciones de los cosméticos.
-	body.classList.toggle('no-cosmetic-anim', !state.settings.cosmeticAnimations);
+	body.classList.toggle('no-cosmetic-anim', !settings.cosmeticAnimations);
 
 	const root = document.documentElement;
-	for (const name of Object.keys(state.settings.cssVariables)) root.style.removeProperty(name);
-	for (const [name, value] of Object.entries(state.settings.cssVariables)) {
+	for (const name of appliedEffects.cssVariables) {
+		if (!(name in settings.cssVariables)) root.style.removeProperty(name);
+	}
+	for (const [name, value] of Object.entries(settings.cssVariables)) {
 		if (name.startsWith('--')) root.style.setProperty(name, value);
 	}
+	appliedEffects.cssVariables = Object.keys(settings.cssVariables);
 
 	// La barra de título (botones de la ventana) sigue el tema elegido.
-	const titleBar = TITLEBAR_COLORS[state.settings.theme] ?? TITLEBAR_COLORS.dark;
-	getDesktopTransport()?.setTitleBar(titleBar);
-
-	let styleEl = document.getElementById(CUSTOM_CSS_ID) as HTMLStyleElement | null;
-	if (!styleEl) {
-		styleEl = document.createElement('style');
-		styleEl.id = CUSTOM_CSS_ID;
-		document.head.appendChild(styleEl);
+	if (appliedEffects.theme !== settings.theme) {
+		appliedEffects.theme = settings.theme;
+		getDesktopTransport()?.setTitleBar(TITLEBAR_COLORS[settings.theme] ?? TITLEBAR_COLORS.dark);
 	}
-	styleEl.textContent = state.settings.customCss;
+
+	if (appliedEffects.customCss !== settings.customCss) {
+		appliedEffects.customCss = settings.customCss;
+		let styleEl = document.getElementById(CUSTOM_CSS_ID) as HTMLStyleElement | null;
+		if (!styleEl) {
+			styleEl = document.createElement('style');
+			styleEl.id = CUSTOM_CSS_ID;
+			document.head.appendChild(styleEl);
+		}
+		styleEl.textContent = settings.customCss;
+	}
 }
+
+/** ¿Dos listas de mensajes son la misma (mismos objetos, en el mismo orden)? */
+function sameMessages(a: Message[] | undefined, b: Message[]): boolean {
+	if (!a || a.length !== b.length) return false;
+	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+	return true;
+}
+
+const NO_MESSAGES: Message[] = [];
 
 interface StoreContextValue {
 	state: AppState;
@@ -560,6 +591,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	const channelsRef = useRef<Channel[]>(state.channels);
 	channelsRef.current = state.channels;
 	const fileEndpointRef = useRef<{host: string; port: number} | null>(null);
+	/** Firma de lo último que publicó la presencia (para no re-renderizar si no cambió nada). */
+	const presenceSigRef = useRef<{known?: string; voice?: string; members?: string}>({});
 
 	/**
 	 * El log local de mensajes: es la FUENTE DE VERDAD de lo que se ve en el chat.
@@ -587,12 +620,35 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 	/** Con qué peers ya se reconcilió el historial (se olvida cuando se van, para re-sincronizar). */
 	const syncedPeersRef = useRef<Set<string>>(new Set());
 
-	/** Publica en la vista lo que dice el log para cada canal de texto. */
+	/** Lo que la vista muestra ahora por canal (para mandar sólo los canales que cambiaron). */
+	const messagesRef = useRef(state.messages);
+	messagesRef.current = state.messages;
+
+	/**
+	 * Guarda el log en disco, pero agrupado: con la sincronización llegan ráfagas de registros y
+	 * serializar TODO el historial a localStorage por cada uno trababa la interfaz.
+	 */
+	const logPersistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+	const scheduleLogPersist = useCallback((): void => {
+		if (logPersistTimer.current) return;
+		logPersistTimer.current = setTimeout(() => {
+			logPersistTimer.current = null;
+			persistMessageLog(messageLogRef.current);
+		}, 600);
+	}, []);
+
+	/** Publica en la vista lo que dice el log, en UN solo cambio y sólo con los canales que cambiaron. */
 	const publishLog = useCallback((log: MessageLog): void => {
+		const grouped = groupMessages(log);
+		const updates: Record<string, Message[]> = {};
 		for (const channel of channelsRef.current) {
 			if (channel.type !== 'text') continue;
-			dispatch({type: 'setChannelMessages', channelId: channel.id, messages: messagesOf(log, channel.id)});
+			const next = grouped[channel.id] ?? NO_MESSAGES;
+			if (!sameMessages(messagesRef.current[channel.id], next)) updates[channel.id] = next;
 		}
+		if (Object.keys(updates).length === 0) return;
+		messagesRef.current = {...messagesRef.current, ...updates};
+		dispatch({type: 'setMessagesBulk', updates});
 	}, []);
 
 	/** Avisa (sonido, globito, notificación) de un mensaje que acaba de llegar. */
@@ -647,7 +703,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			// Si no cambió nada (el mismo mensaje recibido dos veces), no hay nada que republicar.
 			if (next === messageLogRef.current) return;
 			messageLogRef.current = next;
-			persistMessageLog(next);
+			scheduleLogPersist();
 			publishLog(next);
 			const now = Date.now();
 			for (const message of fresh) {
@@ -661,7 +717,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				announceMessage(message);
 			}
 		},
-		[announceMessage, publishLog],
+		[announceMessage, publishLog, scheduleLogPersist],
 	);
 
 	/** Sube un registro a Firestore; si falla, queda anotado para reintentar. */
@@ -782,10 +838,35 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		};
 	}, []);
 
+	// El estado se guarda en disco agrupado (no en cada cambio: con la presencia llegando cada pocos
+	// segundos, serializar todo a localStorage cada vez se sentía como tirones en la interfaz).
+	const latestStateRef = useRef(state);
+	latestStateRef.current = state;
 	useEffect(() => {
-		persist(state);
-		applyEffects(state);
+		const timer = setTimeout(() => persist(latestStateRef.current), 500);
+		return () => clearTimeout(timer);
 	}, [state]);
+
+	// Al cerrar o recargar, lo pendiente se guarda YA (estado y log de mensajes).
+	useEffect(() => {
+		const flush = () => {
+			persist(latestStateRef.current);
+			if (logPersistTimer.current) {
+				clearTimeout(logPersistTimer.current);
+				logPersistTimer.current = null;
+				persistMessageLog(messageLogRef.current);
+			}
+		};
+		window.addEventListener('beforeunload', flush);
+		return () => {
+			window.removeEventListener('beforeunload', flush);
+			flush();
+		};
+	}, []);
+
+	useEffect(() => {
+		applyEffects(state.settings);
+	}, [state.settings]);
 
 	// Persist the identity used as the author id for messages.
 	useEffect(() => {
@@ -941,9 +1022,18 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				customDeco: member.cachedDeco ?? member.customDeco,
 				customParticle: member.cachedParticle ?? member.customParticle,
 			}));
-		dispatch({type: 'setKnownMembers', knownMembers: known});
-		dispatch({type: 'setVoiceMembers', voiceMembers});
-		dispatch({type: 'setRemoteMembers', members: [me, ...online, ...offline]});
+		// La presencia de cada peer llega cada 3 s. Si no cambió nada visible, NO se toca el estado:
+		// antes cada anuncio re-renderizaba la app entera (chat, llamada, lista) varias veces por
+		// segundo con 3-4 personas, y eso era parte de que "se pusiera raro" al cambiar de canal.
+		const members = [me, ...online, ...offline];
+		const knownSig = JSON.stringify(known);
+		const voiceSig = JSON.stringify(voiceMembers);
+		const membersSig = JSON.stringify(members);
+		const last = presenceSigRef.current;
+		if (knownSig !== last.known) dispatch({type: 'setKnownMembers', knownMembers: known});
+		if (voiceSig !== last.voice) dispatch({type: 'setVoiceMembers', voiceMembers});
+		if (membersSig !== last.members) dispatch({type: 'setRemoteMembers', members});
+		presenceSigRef.current = {known: knownSig, voice: voiceSig, members: membersSig};
 	}, []);
 
 	// Al abrir la app ya se muestran los perfiles guardados (aunque estén desconectados).

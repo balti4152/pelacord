@@ -16,6 +16,7 @@ import {hasChosenName} from '@/lib/identity';
 import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
 import {initUpdater} from '@/lib/updater';
+import {subscribeNotificationClick} from '@/lib/notifications';
 import {DEFAULT_SHARE_OPTIONS, findShareSource, type ShareKind, type ShareOptions} from '@/lib/screenShare';
 import {subscribeSharePicker} from '@/lib/sharePicker';
 import {playSound} from '@/lib/sounds';
@@ -36,6 +37,14 @@ export function App(): JSX.Element {
 	useEffect(() => {
 		initUpdater();
 	}, []);
+
+	// Click en una notificación: además de ir al canal (lo hace el store), se cierran Música y
+	// Pelaflix. Si no, el canal cambiaba "por detrás" y seguías viendo la otra pantalla.
+	useEffect(() => subscribeNotificationClick((channelId) => {
+		if (!channelId) return;
+		setMusicOpen(false);
+		setMoviesOpen(false);
+	}), []);
 
 	// Arrastrar y soltar archivos en cualquier parte de la ventana.
 	useEffect(() => {
@@ -149,16 +158,16 @@ export function App(): JSX.Element {
 	const remoteInChannel = state.voice.channelId
 		? (state.voiceMembers[state.voice.channelId] ?? []).filter((p) => p.id !== state.me.id).length
 		: 0;
-	const prevRemote = useRef(remoteInChannel);
+	const prevRemote = useRef({count: remoteInChannel, channelId: state.voice.channelId});
 	useEffect(() => {
 		const previous = prevRemote.current;
-		// Sólo cuenta lo que pasa DENTRO de la llamada: si entro o salgo yo, el sonido es el de
-		// 'join'/'leave'. Si alguien se desconecta, el de 'userLeft' (y lo escuchan los demás).
-		if (state.voice.channelId) {
-			if (remoteInChannel > previous) playSound('userJoined');
-			else if (remoteInChannel < previous) playSound('userLeft');
+		// Sólo cuenta lo que pasa DENTRO de la llamada: si entro, salgo o me cambio de canal, el sonido
+		// es el de 'join'/'leave' (antes, al pasar de un canal a otro sonaban los dos encimados).
+		if (state.voice.channelId && previous.channelId === state.voice.channelId) {
+			if (remoteInChannel > previous.count) playSound('userJoined');
+			else if (remoteInChannel < previous.count) playSound('userLeft');
 		}
-		prevRemote.current = remoteInChannel;
+		prevRemote.current = {count: remoteInChannel, channelId: state.voice.channelId};
 	}, [remoteInChannel, state.voice.channelId]);
 
 	/** ¿Estoy compartiendo pantalla? Se guarda en un ref para que los atajos lo lean siempre al día. */
@@ -246,7 +255,9 @@ export function App(): JSX.Element {
 				) : showStage ? (
 					<CallStage key={state.voice.channelId} />
 				) : (
-					<ChatView />
+					// Un chat nuevo por canal: así no se arrastra la búsqueda, la edición, el menú ni el
+					// scroll del canal anterior (era el "se pone raro" al cambiar de canal).
+					<ChatView key={state.activeChannelId} />
 				)}
 				{showMembers ? <MemberList /> : null}
 			</div>

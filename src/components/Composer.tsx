@@ -97,9 +97,28 @@ async function buildAttachment(file: File, ownerId: string): Promise<Attachment>
 	return {id: uid(), name, size: file.size, mime, kind, url: URL.createObjectURL(file), ownerId, thumbnail};
 }
 
+/**
+ * Lo que quedó escrito en cada canal sin mandar (como Discord): al ir a otro canal y volver, el
+ * texto sigue ahí. Antes se perdía, porque el composer se arma de nuevo en cada canal.
+ */
+const drafts = new Map<string, string>();
+
 export function Composer(): JSX.Element {
 	const {sendMessage, state} = useStore();
-	const [text, setText] = useState('');
+	const channelId = state.activeChannelId;
+	const channelName = state.channels.find((channel) => channel.id === channelId)?.name;
+	const [text, setTextState] = useState(() => drafts.get(channelId) ?? '');
+	const setText = useCallback(
+		(next: string | ((previous: string) => string)) => {
+			setTextState((previous) => {
+				const value = typeof next === 'function' ? next(previous) : next;
+				if (value) drafts.set(channelId, value);
+				else drafts.delete(channelId);
+				return value;
+			});
+		},
+		[channelId],
+	);
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
 	const [preparing, setPreparing] = useState(0);
 	const [fileError, setFileError] = useState('');
@@ -121,6 +140,17 @@ export function Composer(): JSX.Element {
 	const insertEmoji = useCallback((emoji: string) => {
 		setText((prev) => prev + emoji);
 		textarea.current?.focus();
+	}, [setText]);
+
+	// Al volver a un canal con borrador, el cuadro recupera su alto y el foco queda listo.
+	useEffect(() => {
+		const el = textarea.current;
+		if (!el) return;
+		if (el.value) {
+			el.style.height = 'auto';
+			el.style.height = `${Math.min(el.scrollHeight, 192)}px`;
+		}
+		el.focus({preventScroll: true});
 	}, []);
 
 	const addFiles = useCallback(async (files: File[]) => {
@@ -321,7 +351,7 @@ export function Composer(): JSX.Element {
 				<textarea
 					ref={textarea}
 					className="composer-input"
-					placeholder="Escribí un mensaje"
+					placeholder={channelName ? `Escribí en #${channelName}` : 'Escribí un mensaje'}
 					aria-label="Mensaje"
 					rows={1}
 					value={text}
