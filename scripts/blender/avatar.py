@@ -41,6 +41,24 @@ BONES = {
 }
 
 
+# Cabeza grande (proporción chibi): todo lo que va en la cabeza se agranda desde el cuello. Lo usan
+# también el avatar modular (wardrobe.py) y los sombreros (costumes.py) para que encajen.
+HEAD_SCALE = 1.18
+HEAD_PIVOT = (0.0, 0.0, 0.80)
+HEAD_BONES = {'head', 'mouth', 'eye_L', 'eye_R'}
+
+
+def head_matrix():
+	from mathutils import Matrix
+	pivot = Vector(HEAD_PIVOT)
+	return Matrix.Translation(pivot) @ Matrix.Scale(HEAD_SCALE, 4) @ Matrix.Translation(-pivot)
+
+
+def scale_head_point(co):
+	px, py, pz = HEAD_PIVOT
+	return (px + (co[0] - px) * HEAD_SCALE, py + (co[1] - py) * HEAD_SCALE, pz + (co[2] - pz) * HEAD_SCALE)
+
+
 def assign(obj, bone):
 	group = obj.vertex_groups.new(name=bone)
 	group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
@@ -134,6 +152,12 @@ def build_armature():
 		bpy.ops.object.mode_set(mode='EDIT')
 		for name, (head, tail, parent) in BONES.items():
 			bone = data.edit_bones.new(name)
+			# Los huesos de la cara siguen a la cabeza agrandada (si no, el parpadeo y la boca escalan
+			# desde un punto corrido).
+			if name in ('mouth', 'eye_L', 'eye_R'):
+				head, tail = scale_head_point(head), scale_head_point(tail)
+			elif name == 'head':
+				tail = scale_head_point(tail)
 			bone.head = head
 			bone.tail = tail
 			bone.roll = 0

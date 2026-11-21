@@ -81,6 +81,33 @@ Los scripts corren igual **en segundo plano** (`build_all.py`) que **en el Blend
   - `room_campfire.glb` trae la animación `Flicker` (la llama).
 - **`ui_props.glb`**: `SeatReticle` (anillo blanco) y `NameplatePill` (fondo de la placa del nombre).
 
+
+## El mundo dentro de la app (cómo está armado)
+
+Botón **Mundo 3D** en la barra lateral → `src/components/world/WorldView.tsx`.
+
+| Archivo | Qué hace |
+|---|---|
+| `src/world/core.ts` | Tipos, catálogo, perfil local (look, inventario, monedas, casa) y red P2P (canal `world`) |
+| `src/world/engine.ts` | three.js: salas, ciudad y puertas, WASD + carteles "E", asientos, NPC, tele, decorar, cámara de la mesa |
+| `src/world/avatars.ts` | Arma cada personaje del avatar modular; filtra las animaciones por huesos (ver nota) |
+| `src/world/tableGames.ts` / `tableView.ts` | Juegos de la mesa redonda (reglas + red) y su dibujo 3D |
+| `src/world/spatialAudio.ts` | Audio espacial (HRTF) de las voces de la llamada |
+| `src/components/world/WorldPanels.tsx` | Editor de personaje, tienda, decorar, invitar, tele y panel de la mesa |
+| `src/styles/world.css` | Interfaz estilo juguete (Fredoka, botones con relieve, sólo íconos de lucide) |
+
+- **Controles:** WASD (Shift corre), E interactúa (sentarse/pararse, puertas, tele, vendedora,
+  carteles de la tienda, mesa). Clic en el piso también camina.
+- **Lugares:** `city` (plaza) → puertas `Door_<sala>` a cine, tienda, juegos, living, campamento y
+  `house:<id>`. Adentro, el cartel "Salir a la ciudad" está en la entrada.
+- **Nota importante de animaciones:** el exportador de glTF guarda TODOS los huesos en cada clip.
+  `avatars.ts` deja en Blink/Talk/Wave/Slap sólo sus huesos; si no, el parpadeo "paraba" a los
+  sentados. `Sit` se reproduce una vez y queda fija.
+- **Red:** estado del jugador cada 2 s y en cada cambio (los demás simulan la caminata hacia `tx/tz`),
+  gestos, invitaciones a la casa y jugadas de la mesa (el que arranca la partida es el dueño).
+- **Proporciones:** `HEAD_SCALE` (avatar.py) agranda la cabeza estilo chibi; peinados, cara y
+  sombreros lo siguen.
+
 ## MCP de Blender (instalado)
 
 - Addon: `%APPDATA%\Blender Foundation\Blender\5.2\scripts\addons\blender_mcp_addon.py` (activado y guardado).

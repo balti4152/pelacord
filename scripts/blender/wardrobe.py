@@ -78,6 +78,8 @@ def part(pieces, name, rig, slot, body='any', item=None, hides=None):
 	for obj, bone in pieces:
 		group = obj.vertex_groups.new(name=bone)
 		group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
+		if bone in avatar.HEAD_BONES:
+			obj.matrix_world = avatar.head_matrix() @ obj.matrix_world
 		toy.apply_transforms(obj)
 	mesh = toy.join([obj for obj, _ in pieces], name)
 	mesh.parent = rig
@@ -97,7 +99,7 @@ def body_parts(rig, kind, m, prefix=''):
 	shape = BODY_SHAPES[kind]
 	p = []
 	p.append((tapered('torso', 0.17, 0.43, (0, 0, 0.615), shape, m['Skin']), 'spine'))
-	p.append((tapered('pelvis', 0.163, 0.2, (0, 0, 0.43), shape, m['Skin'], bottom=shape['hips'], top=shape['hips']), 'hips'))
+	p.append((tapered('pelvis', 0.163, 0.2, (0, 0, 0.43), shape, m['Skin'], bottom=shape['hips'] * 0.84, top=shape['hips']), 'hips'))
 	p.append((toy.sphere('head', radius=0.2, scale=(1.0, 0.95, 1.15), loc=(0, 0, 0.98), mat=m['Skin']), 'head'))
 	p.append((toy.sphere('nose', radius=0.029, scale=(1.0, 0.9, 0.95), loc=(0, -0.2, 0.948), mat=m['Skin'], segments=14, rings=10), 'head'))
 	for side, arm, leg in ((1, 'arm_L', 'leg_L'), (-1, 'arm_R', 'leg_R')):
@@ -121,8 +123,10 @@ def eyes_parts(rig, m, prefix=''):
 	out = []
 	def both(make):
 		return [(make(side), 'eye_L' if side > 0 else 'eye_R') for side in (1, -1)]
-	dot = lambda s: toy.sphere(f'eye_{s}', radius=0.024, scale=(1.0, 0.55, 1.18), loc=(s * 0.052, -0.18, 1.0), mat=m['Ink'], segments=14, rings=10)
-	out.append(part(both(dot), f'{prefix}Eyes_Dot', rig, 'eyes', item='eyes_dot'))
+	dot = lambda s: toy.sphere(f'eye_{s}', radius=0.027, scale=(1.0, 0.55, 1.18), loc=(s * 0.052, -0.18, 1.0), mat=m['Ink'], segments=14, rings=10)
+	shine = lambda s: toy.sphere(f'eye_shine_{s}', radius=0.0075, loc=(s * 0.052 + 0.008, -0.196, 1.012), mat=m['White'], segments=8, rings=6)
+	pieces = both(dot) + [(shine(s), 'eye_L' if s > 0 else 'eye_R') for s in (1, -1)]
+	out.append(part(pieces, f'{prefix}Eyes_Dot', rig, 'eyes', item='eyes_dot'))
 
 	pieces = both(dot)
 	for side in (1, -1):
@@ -363,7 +367,8 @@ def bottoms(rig, kind, m, prefix=''):
 	out = []
 
 	def pelvis(name):
-		return (tapered(name, 0.163, 0.2, (0, 0, 0.43), shape, B, bottom=shape['hips'], top=shape['hips'], grow=GROW), 'hips')
+		# Se angosta hacia las piernas: si no, la bermuda parecía un pañal.
+		return (tapered(name, 0.163, 0.2, (0, 0, 0.43), shape, B, bottom=shape['hips'] * 0.84, top=shape['hips'], grow=GROW), 'hips')
 
 	def legs(length, radius=0.066):
 		res = []

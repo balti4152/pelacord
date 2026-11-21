@@ -109,7 +109,7 @@ function makeLabel(name: string, color: string, avatarUrl?: string): {el: HTMLDi
 	waves.innerHTML = '<i></i><i></i><i></i>';
 	el.append(face, text, waves);
 	const obj = new CSS2DObject(el);
-	obj.position.set(0, 1.62, 0);
+	obj.position.set(0, 1.74, 0);
 	return {el, obj};
 }
 
@@ -501,7 +501,7 @@ export class WorldEngine {
 			el.innerHTML = svg ?? '';
 		}
 		const obj = new CSS2DObject(el);
-		obj.position.set(0, 2.0, 0);
+		obj.position.set(0, 2.15, 0);
 		actor.avatar.root.add(obj);
 		setTimeout(() => obj.removeFromParent(), 1400);
 	}
@@ -1018,7 +1018,7 @@ export class WorldEngine {
 		}
 		this.current = found.action;
 		// Siempre arriba de MI cabeza: así no se pisa con las placas de nombre ni queda tapado.
-		this.promptAnchor.copy(me ? me.pos : found.at).setY(2.25);
+		this.promptAnchor.copy(me ? me.pos : found.at).setY(2.38);
 		this.prompt.position.copy(this.promptAnchor);
 		this.prompt.visible = true;
 	}
