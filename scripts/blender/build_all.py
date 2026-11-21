@@ -9,6 +9,7 @@ import avatar  # noqa: E402
 import catalog  # noqa: E402
 import costumes  # noqa: E402
 import furniture  # noqa: E402
+import places  # noqa: E402
 import sets  # noqa: E402
 import shop  # noqa: E402
 import wardrobe  # noqa: E402
@@ -38,4 +39,8 @@ if __name__ == '__main__':
 	toy.reset_scene()
 	shop.build_shop()
 	toy.export_glb('room_shop.glb', lights=True)
+	# Ciudad y casa de juegos.
+	for key, make in places.PLACES.items():
+		toy.reset_scene()
+		toy.export_glb(make(), lights=True)
 	catalog.main()

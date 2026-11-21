@@ -2,6 +2,7 @@ import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {type MeshRemote, voiceMesh} from '@/lib/media';
 import {getOutputVolume, routeMediaOutput, subscribeOutputVolume} from '@/lib/sounds';
 import {useStore} from '@/state/store';
+import {spatialVoices, useSpatialActive} from '@/world/spatialAudio';
 
 export interface MediaDevices {
 	inputs: MediaDeviceInfo[];
@@ -157,10 +158,23 @@ export function RemoteAudio(): JSX.Element {
 	const peerVolumes = useMeshValue(() => voiceMesh.getPeerVolumes(), sameRecord);
 	const {state} = useStore();
 	const sinkId = state.settings.outputDeviceId;
+	// En el mundo 3D las voces salen por el audio espacial (cada una desde su personaje): el <audio>
+	// queda mudo pero enganchado (Chromium lo necesita para que el stream fluya hacia WebAudio).
+	const spatial = useSpatialActive();
+	useEffect(() => {
+		spatialVoices.setSink(sinkId);
+	}, [sinkId]);
+	useEffect(() => {
+		if (!spatial) return;
+		spatialVoices.sync(
+			remotes.filter((r) => r.audio).map((r) => ({peerId: r.peerId, stream: r.audio as MediaStream, volume: volume * (peerVolumes[r.peerId] ?? 1)})),
+			deafened,
+		);
+	}, [spatial, remotes, volume, peerVolumes, deafened]);
 	return (
 		<>
 			{remotes.map(({peerId, audio}) => audio && (
-				<AudioPlayer key={peerId} stream={audio} muted={deafened} volume={volume * (peerVolumes[peerId] ?? 1)} sinkId={sinkId} />
+				<AudioPlayer key={peerId} stream={audio} muted={deafened || spatial} volume={volume * (peerVolumes[peerId] ?? 1)} sinkId={sinkId} />
 			))}
 		</>
 	);

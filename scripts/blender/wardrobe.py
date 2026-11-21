@@ -78,6 +78,8 @@ def part(pieces, name, rig, slot, body='any', item=None, hides=None):
 	for obj, bone in pieces:
 		group = obj.vertex_groups.new(name=bone)
 		group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
+		if bone in avatar.HEAD_BONES:
+			obj.matrix_world = avatar.head_matrix() @ obj.matrix_world
 		toy.apply_transforms(obj)
 	mesh = toy.join([obj for obj, _ in pieces], name)
 	mesh.parent = rig
@@ -97,7 +99,7 @@ def body_parts(rig, kind, m, prefix=''):
 	shape = BODY_SHAPES[kind]
 	p = []
 	p.append((tapered('torso', 0.17, 0.43, (0, 0, 0.615), shape, m['Skin']), 'spine'))
-	p.append((tapered('pelvis', 0.163, 0.2, (0, 0, 0.43), shape, m['Skin'], bottom=shape['hips'], top=shape['hips']), 'hips'))
+	p.append((tapered('pelvis', 0.163, 0.2, (0, 0, 0.43), shape, m['Skin'], bottom=shape['hips'] * 0.84, top=shape['hips']), 'hips'))
 	p.append((toy.sphere('head', radius=0.2, scale=(1.0, 0.95, 1.15), loc=(0, 0, 0.98), mat=m['Skin']), 'head'))
 	p.append((toy.sphere('nose', radius=0.029, scale=(1.0, 0.9, 0.95), loc=(0, -0.2, 0.948), mat=m['Skin'], segments=14, rings=10), 'head'))
 	for side, arm, leg in ((1, 'arm_L', 'leg_L'), (-1, 'arm_R', 'leg_R')):
@@ -121,8 +123,10 @@ def eyes_parts(rig, m, prefix=''):
 	out = []
 	def both(make):
 		return [(make(side), 'eye_L' if side > 0 else 'eye_R') for side in (1, -1)]
-	dot = lambda s: toy.sphere(f'eye_{s}', radius=0.024, scale=(1.0, 0.55, 1.18), loc=(s * 0.052, -0.18, 1.0), mat=m['Ink'], segments=14, rings=10)
-	out.append(part(both(dot), f'{prefix}Eyes_Dot', rig, 'eyes', item='eyes_dot'))
+	dot = lambda s: toy.sphere(f'eye_{s}', radius=0.027, scale=(1.0, 0.55, 1.18), loc=(s * 0.052, -0.18, 1.0), mat=m['Ink'], segments=14, rings=10)
+	shine = lambda s: toy.sphere(f'eye_shine_{s}', radius=0.0075, loc=(s * 0.052 + 0.008, -0.196, 1.012), mat=m['White'], segments=8, rings=6)
+	pieces = both(dot) + [(shine(s), 'eye_L' if s > 0 else 'eye_R') for s in (1, -1)]
+	out.append(part(pieces, f'{prefix}Eyes_Dot', rig, 'eyes', item='eyes_dot'))
 
 	pieces = both(dot)
 	for side in (1, -1):
@@ -214,52 +218,106 @@ def hair_cap(name, mat, front=0.17, back=-0.09, scale=(1.02, 0.99, 1.14), radius
 	return toy.smooth(obj, 80)
 
 
+def fuse_hair(pieces, name, mat, cut_below=0.9, face=(0.16, 0.95), voxel=0.0105):
+	"""Funde las formas en UNA masa de pelo esculpida (como plastilina): remesh por vóxeles,
+	se despeja la cara, se recorta abajo y se suaviza. Así no quedan bordes serruchados."""
+	obj = toy.join(pieces, name)
+	for slot in obj.material_slots:
+		slot.material = mat
+	mod = obj.modifiers.new('Fuse', 'REMESH')
+	mod.mode = 'VOXEL'
+	mod.voxel_size = voxel
+	mod.adaptivity = 0.0
+	toy.apply_modifiers(obj)
+	cutters = []
+	# Cara: un óvalo adelante (más angosto que la cabeza para no comerse los mechones laterales).
+	face_y, face_w = face
+	cutters.append(toy.sphere('face_cut', radius=0.2, scale=(face_w * 0.95, 1.0, 0.8), loc=(0, -0.2 - face_y * 0.15, 0.905), segments=32, rings=20))
+	# Todo lo que queda por debajo de `cut_below` (nuca / hombros).
+	cutters.append(toy.rounded_box('low_cut', size=(1.2, 1.2, 1.0), loc=(0, 0, cut_below - 0.5), radius=0.01))
+	for cutter in cutters:
+		b = obj.modifiers.new(cutter.name, 'BOOLEAN')
+		b.operation = 'DIFFERENCE'
+		b.object = cutter
+		b.solver = 'EXACT'
+	toy.apply_modifiers(obj)
+	for cutter in cutters:
+		bpy.data.objects.remove(cutter, do_unlink=True)
+	smooth = obj.modifiers.new('Soft', 'SMOOTH')
+	smooth.factor = 0.7
+	smooth.iterations = 6
+	dec = obj.modifiers.new('Light', 'DECIMATE')
+	dec.ratio = max(0.08, min(1.0, 3200 / max(1, len(obj.data.polygons))))
+	toy.apply_modifiers(obj)
+	for poly in obj.data.polygons:
+		poly.material_index = 0
+	return toy.smooth(obj, 180)
+
+
+def cap(name, mat, radius=0.218, z=0.995, scale=(1.04, 1.03, 1.1)):
+	return toy.sphere(name, radius=radius, scale=scale, loc=(0, 0.012, z), mat=mat, segments=32, rings=20)
+
+
 def hair_parts(rig, m, prefix=''):
 	H = m['Hair']
 	out = []
-	out.append(part([(hair_cap('bowl', H), 'head')], f'{prefix}Hair_Bowl', rig, 'hair', item='hair_bowl'))
 
-	pieces = [(hair_cap('short', H, front=0.24, back=-0.02, thickness=0.022), 'head')]
-	for k, (x, y) in enumerate(((0, -0.08), (-0.07, -0.04), (0.07, -0.04), (-0.03, 0.04), (0.05, 0.05))):
-		spike = toy.cone(f'spike_{k}', r1=0.05, r2=0.006, depth=0.08, loc=(x, y, 1.215), mat=H, segments=10)
-		spike.rotation_euler = (DEG(-y * 300), DEG(x * 300), 0)
-		pieces.append((spike, 'head'))
-	out.append(part(pieces, f'{prefix}Hair_Spiky', rig, 'hair', item='hair_spiky'))
+	# Flequillo clásico: casco con cuatro mechones redondos sobre la frente.
+	pieces = [cap('bowl_cap', H)]
+	for k, x in enumerate((-0.12, -0.04, 0.04, 0.12)):
+		pieces.append(toy.sphere(f'bang_{k}', radius=0.062, scale=(1.15, 0.75, 0.95), loc=(x, -0.165 + abs(x) * 0.25, 1.075 - abs(x) * 0.12), mat=H, segments=16, rings=10))
+	out.append(part([(fuse_hair(pieces, 'bowl', H, cut_below=0.9), 'head')], f'{prefix}Hair_Bowl', rig, 'hair', item='hair_bowl'))
 
-	pieces = [(hair_cap('long_cap', H, front=0.2, back=-0.2), 'head')]
-	pieces.append((toy.rounded_box('long_back', size=(0.4, 0.13, 0.42), loc=(0, 0.11, 0.86), radius=0.06, mat=H), 'head'))
-	for s in (1, -1):
-		pieces.append((toy.capsule(f'long_side_{s}', radius=0.05, height=0.36, loc=(s * 0.185, -0.03, 0.86), mat=H), 'head'))
-	out.append(part(pieces, f'{prefix}Hair_Long', rig, 'hair', item='hair_long'))
+	# Pinchos: casco corto + mechones gorditos hacia arriba y atrás.
+	pieces = [cap('spiky_cap', H, radius=0.212, z=0.99)]
+	for k, (x, y, tilt_x, tilt_y) in enumerate(((0, -0.1, -25, 0), (-0.09, -0.06, -15, -25), (0.09, -0.06, -15, 25), (-0.05, 0.04, 15, -20), (0.06, 0.05, 15, 20), (0, 0.1, 30, 0), (0, -0.02, 0, 0))):
+		tuft = toy.cone(f'tuft_{k}', r1=0.07, r2=0.012, depth=0.15, loc=(x, y, 1.2), mat=H, segments=12)
+		tuft.rotation_euler = (DEG(tilt_x), DEG(tilt_y), 0)
+		pieces.append(tuft)
+	out.append(part([(fuse_hair(pieces, 'spiky', H, cut_below=0.98), 'head')], f'{prefix}Hair_Spiky', rig, 'hair', item='hair_spiky'))
 
-	pieces = [(hair_cap('pony_cap', H, front=0.19, back=-0.12), 'head')]
-	pieces.append((toy.torus('pony_band', major=0.035, minor=0.014, loc=(0, 0.215, 1.04), rot=(DEG(90), 0, 0), mat=m['Accent']), 'head'))
-	tail = toy.capsule('pony_tail', radius=0.06, height=0.3, loc=(0, 0.255, 0.92), mat=H)
-	tail.rotation_euler = (DEG(-18), 0, 0)
-	pieces.append((tail, 'head'))
-	out.append(part(pieces, f'{prefix}Hair_Ponytail', rig, 'hair', item='hair_ponytail'))
+	# Largo: casco + melena atrás + mechones a los costados de la cara.
+	pieces = [cap('long_cap', H)]
+	pieces.append(toy.capsule('long_back', radius=0.2, height=0.62, scale=(1.05, 0.62, 1.0), loc=(0, 0.075, 0.83), mat=H))
+	for side in (1, -1):
+		pieces.append(toy.capsule(f'long_lock_{side}', radius=0.058, height=0.38, loc=(side * 0.168, -0.045, 0.86), mat=H))
+	for k, x in enumerate((-0.1, 0.0, 0.1)):
+		pieces.append(toy.sphere(f'long_bang_{k}', radius=0.06, scale=(1.2, 0.75, 0.9), loc=(x, -0.168, 1.08 - abs(x) * 0.1), mat=H, segments=14, rings=10))
+	out.append(part([(fuse_hair(pieces, 'long', H, cut_below=0.6, face=(0.16, 0.74)), 'head')], f'{prefix}Hair_Long', rig, 'hair', item='hair_long'))
 
-	pieces = [(hair_cap('buns_cap', H, front=0.19, back=-0.06), 'head')]
-	for s in (1, -1):
-		pieces.append((toy.sphere(f'bun_{s}', radius=0.085, loc=(s * 0.13, 0.03, 1.2), mat=H, segments=18, rings=12), 'head'))
-	out.append(part(pieces, f'{prefix}Hair_Buns', rig, 'hair', item='hair_buns'))
+	# Colita: casco + cola en cadena de esferas + gomita.
+	pieces = [cap('pony_cap', H)]
+	for k, (y, z, r) in enumerate(((0.215, 1.06, 0.062), (0.265, 0.97, 0.072), (0.275, 0.86, 0.066), (0.26, 0.77, 0.048))):
+		pieces.append(toy.sphere(f'pony_{k}', radius=r, loc=(0, y, z), mat=H, segments=16, rings=10))
+	for k, x in enumerate((-0.07, 0.07)):
+		pieces.append(toy.sphere(f'pony_bang_{k}', radius=0.06, scale=(1.3, 0.75, 0.9), loc=(x, -0.165, 1.08), mat=H, segments=14, rings=10))
+	hair = fuse_hair(pieces, 'pony', H, cut_below=0.7)
+	band = toy.torus('pony_band', major=0.05, minor=0.017, loc=(0, 0.24, 1.02), rot=(DEG(70), 0, 0), mat=m['Accent'])
+	out.append(part([(hair, 'head'), (band, 'head')], f'{prefix}Hair_Ponytail', rig, 'hair', item='hair_ponytail'))
 
-	pieces = []
-	for k in range(14):
-		a = k / 14 * math.tau
-		pieces.append((toy.sphere(f'curl_{k}', radius=0.09, loc=(math.cos(a) * 0.17, math.sin(a) * 0.15 + 0.03, 1.07 + 0.05 * math.sin(a * 2)), mat=H, segments=12, rings=8), 'head'))
-	for k in range(6):
-		a = k / 6 * math.tau
-		pieces.append((toy.sphere(f'curl_top_{k}', radius=0.095, loc=(math.cos(a) * 0.09, math.sin(a) * 0.08 + 0.03, 1.2), mat=H, segments=12, rings=8), 'head'))
-	# Los rulos que taparían la cara se descartan (y se BORRAN: si no, quedaban flotando en la escena).
-	keep = []
-	for o, b in pieces:
-		if o.location.y < -0.1 and o.location.z < 1.12:
-			bpy.data.objects.remove(o, do_unlink=True)
-		else:
-			keep.append((o, b))
-	pieces = keep
-	out.append(part(pieces, f'{prefix}Hair_Curly', rig, 'hair', item='hair_curly'))
+	# Dos rodetes.
+	pieces = [cap('buns_cap', H)]
+	for side in (1, -1):
+		pieces.append(toy.sphere(f'bun_{side}', radius=0.088, loc=(side * 0.135, 0.02, 1.2), mat=H, segments=18, rings=12))
+	for k, x in enumerate((-0.07, 0.07)):
+		pieces.append(toy.sphere(f'buns_bang_{k}', radius=0.06, scale=(1.3, 0.75, 0.9), loc=(x, -0.165, 1.08), mat=H, segments=14, rings=10))
+	hair = fuse_hair(pieces, 'buns', H, cut_below=0.9)
+	bands = [toy.torus(f'bun_band_{side}', major=0.07, minor=0.014, loc=(side * 0.125, 0.02, 1.13), rot=(DEG(side * -20), 0, 0), mat=m['Accent']) for side in (1, -1)]
+	out.append(part([(hair, 'head')] + [(b, 'head') for b in bands], f'{prefix}Hair_Buns', rig, 'hair', item='hair_buns'))
+
+	# Rulos: muchas bolitas sobre un casco, fundidas en una masa con textura de rulo.
+	pieces = [cap('curly_cap', H, radius=0.225, scale=(1.08, 1.06, 1.08))]
+	golden = math.pi * (3 - math.sqrt(5))
+	for k in range(70):
+		yk = 1 - (k / 69) * 2
+		rk = math.sqrt(max(0.0, 1 - yk * yk))
+		theta = golden * k
+		px, py, pz = math.cos(theta) * rk, math.sin(theta) * rk, yk
+		x, y, z = px * 0.235, py * 0.235 + 0.012, pz * 0.25 + 1.0
+		if z < 0.9 or (y < -0.12 and z < 1.08):
+			continue
+		pieces.append(toy.sphere(f'curl_{k}', radius=0.055, loc=(x, y, z), mat=H, segments=10, rings=8))
+	out.append(part([(fuse_hair(pieces, 'curly', H, cut_below=0.88, voxel=0.0095), 'head')], f'{prefix}Hair_Curly', rig, 'hair', item='hair_curly'))
 	return out
 
 
@@ -309,7 +367,8 @@ def bottoms(rig, kind, m, prefix=''):
 	out = []
 
 	def pelvis(name):
-		return (tapered(name, 0.163, 0.2, (0, 0, 0.43), shape, B, bottom=shape['hips'], top=shape['hips'], grow=GROW), 'hips')
+		# Se angosta hacia las piernas: si no, la bermuda parecía un pañal.
+		return (tapered(name, 0.163, 0.2, (0, 0, 0.43), shape, B, bottom=shape['hips'] * 0.84, top=shape['hips'], grow=GROW), 'hips')
 
 	def legs(length, radius=0.066):
 		res = []

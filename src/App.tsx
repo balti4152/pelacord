@@ -5,6 +5,7 @@ import {ChatView} from '@/components/ChatView';
 import {MemberList} from '@/components/MemberList';
 import {MusicView} from '@/components/MusicView';
 import {MoviesView} from '@/components/MoviesView';
+import {WorldView} from '@/components/world/WorldView';
 import {Onboarding} from '@/components/Onboarding';
 import {FloatingStream} from '@/components/FloatingStream';
 import {Icon} from '@/components/primitives';
@@ -27,6 +28,8 @@ export function App(): JSX.Element {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [musicOpen, setMusicOpen] = useState(false);
 	const [moviesOpen, setMoviesOpen] = useState(false);
+	/** Mundo 3D (salas, casa, tienda, juegos y audio espacial). */
+	const [worldOpen, setWorldOpen] = useState(false);
 	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
 	const [droppedFiles, setDroppedFiles] = useState<File[] | null>(null);
@@ -84,12 +87,12 @@ export function App(): JSX.Element {
 
 	const showStage = state.voice.channelId !== null && state.voice.stageOpen;
 	const shareChannel = state.channels.find(({id}) => id === state.voice.channelId);
-	const showMembers = !showStage && !musicOpen && !moviesOpen && state.settings.showMembers;
+	const showMembers = !showStage && !musicOpen && !moviesOpen && !worldOpen && state.settings.showMembers;
 	useEffect(() => {
-		if (!droppedFiles || showStage || musicOpen || moviesOpen) return;
+		if (!droppedFiles || showStage || musicOpen || moviesOpen || worldOpen) return;
 		attachFiles(droppedFiles);
 		setDroppedFiles(null);
-	}, [droppedFiles, showStage, musicOpen, moviesOpen]);
+	}, [droppedFiles, showStage, musicOpen, moviesOpen, worldOpen]);
 
 	useLayoutEffect(() => {
 		if (!isDesktop()) return;
@@ -232,23 +235,36 @@ export function App(): JSX.Element {
 		<>
 			<div className={`app-shell${isDesktop() ? ' is-desktop' : ''}${showMembers ? '' : ' is-members-hidden'}`}>
 				<ChannelSidebar
-					view={moviesOpen ? 'movies' : musicOpen ? 'music' : showStage ? 'call' : 'chat'}
+					view={worldOpen ? 'world' : moviesOpen ? 'movies' : musicOpen ? 'music' : showStage ? 'call' : 'chat'}
 					onOpenSettings={() => setSettingsOpen(true)}
-					onOpenVoice={() => dispatch({type: 'openVoiceStage'})}
+					onOpenVoice={() => {
+						setWorldOpen(false);
+						dispatch({type: 'openVoiceStage'});
+					}}
 					onOpenMusic={() => {
 						setMoviesOpen(false);
+						setWorldOpen(false);
 						setMusicOpen(true);
 					}}
 					onOpenMovies={() => {
 						setMusicOpen(false);
+						setWorldOpen(false);
 						setMoviesOpen(true);
+					}}
+					onOpenWorld={() => {
+						setMusicOpen(false);
+						setMoviesOpen(false);
+						setWorldOpen(true);
 					}}
 					onChannelClick={() => {
 						setMusicOpen(false);
 						setMoviesOpen(false);
+						setWorldOpen(false);
 					}}
 				/>
-				{moviesOpen ? (
+				{worldOpen ? (
+					<WorldView onClose={() => setWorldOpen(false)} onOpenMovies={() => { setWorldOpen(false); setMoviesOpen(true); }} />
+				) : moviesOpen ? (
 					<MoviesView onClose={() => setMoviesOpen(false)} />
 				) : musicOpen ? (
 					<MusicView onClose={() => setMusicOpen(false)} />

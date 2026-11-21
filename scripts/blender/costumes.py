@@ -28,6 +28,11 @@ def finish(parts, name, attach):
 		toy.apply_transforms(p)
 	obj = toy.join(parts, name)
 	obj['pelacord_attach'] = attach
+	# Los sombreros (y el pancho, que envuelve la cabeza) siguen a la cabeza agrandada del avatar.
+	if attach == 'head' or name == 'Costume_Hotdog':
+		import avatar
+		obj.matrix_world = avatar.head_matrix() @ obj.matrix_world
+		toy.apply_transforms(obj)
 	return obj
 
 

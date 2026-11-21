@@ -41,6 +41,24 @@ BONES = {
 }
 
 
+# Cabeza grande (proporción chibi): todo lo que va en la cabeza se agranda desde el cuello. Lo usan
+# también el avatar modular (wardrobe.py) y los sombreros (costumes.py) para que encajen.
+HEAD_SCALE = 1.18
+HEAD_PIVOT = (0.0, 0.0, 0.80)
+HEAD_BONES = {'head', 'mouth', 'eye_L', 'eye_R'}
+
+
+def head_matrix():
+	from mathutils import Matrix
+	pivot = Vector(HEAD_PIVOT)
+	return Matrix.Translation(pivot) @ Matrix.Scale(HEAD_SCALE, 4) @ Matrix.Translation(-pivot)
+
+
+def scale_head_point(co):
+	px, py, pz = HEAD_PIVOT
+	return (px + (co[0] - px) * HEAD_SCALE, py + (co[1] - py) * HEAD_SCALE, pz + (co[2] - pz) * HEAD_SCALE)
+
+
 def assign(obj, bone):
 	group = obj.vertex_groups.new(name=bone)
 	group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
@@ -134,6 +152,12 @@ def build_armature():
 		bpy.ops.object.mode_set(mode='EDIT')
 		for name, (head, tail, parent) in BONES.items():
 			bone = data.edit_bones.new(name)
+			# Los huesos de la cara siguen a la cabeza agrandada (si no, el parpadeo y la boca escalan
+			# desde un punto corrido).
+			if name in ('mouth', 'eye_L', 'eye_R'):
+				head, tail = scale_head_point(head), scale_head_point(tail)
+			elif name == 'head':
+				tail = scale_head_point(tail)
 			bone.head = head
 			bone.tail = tail
 			bone.roll = 0
@@ -181,13 +205,13 @@ def new_action(rig, name):
 #   (brazo derecho se abre con Z positivo; el izquierdo con Z negativo)
 
 def anim_idle(rig):
+	"""Respiración simple: sin escalar nada (antes se estiraba la cabeza) y con el loop cerrado."""
 	new_action(rig, 'Idle')
-	for f, s, tilt, sway in ((1, 1.0, 0, 0), (13, 1.025, 2, -3), (25, 1.0, 0, 0), (37, 1.025, -2, 3), (49, 1.0, 0, 0)):
-		key(rig, f, 'spine', scale=(1, s, 1))
-		key(rig, f, 'head', rot=(tilt, 0, sway))
-	for f, a in ((1, 6), (25, 9), (49, 6)):
-		key(rig, f, 'arm_L', rot=(0, 0, -a))
-		key(rig, f, 'arm_R', rot=(0, 0, a))
+	for f, bob, tilt, arm in ((1, 0.0, 0, 6), (25, 0.006, 1.5, 8), (49, 0.0, 0, 6)):
+		key(rig, f, 'hips', loc=(0, bob, 0))
+		key(rig, f, 'head', rot=(tilt, 0, 0))
+		key(rig, f, 'arm_L', rot=(0, 0, -arm))
+		key(rig, f, 'arm_R', rot=(0, 0, arm))
 
 
 def anim_walk(rig):

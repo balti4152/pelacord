@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import logo from '@/assets/logo.png';
-import {Film, ListMusic, Music, VolumeX} from 'lucide-react';
+import {Film, Globe, ListMusic, Music, VolumeX} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
 import {installUpdate, useUpdater} from '@/lib/updater';
@@ -182,14 +182,17 @@ export function ChannelSidebar({
 	onOpenVoice,
 	onOpenMusic,
 	onOpenMovies,
+	onOpenWorld,
 	onChannelClick,
 }: {
-	view: 'chat' | 'call' | 'music' | 'movies';
+	view: 'chat' | 'call' | 'music' | 'movies' | 'world';
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
 	/** Abre el catálogo de películas. */
 	onOpenMovies: () => void;
+	/** Abre el mundo 3D. */
+	onOpenWorld: () => void;
 	/** Al abrir cualquier canal: sirve para cerrar la vista de Música, como con la llamada. */
 	onChannelClick?: () => void;
 }): JSX.Element {
@@ -382,6 +385,11 @@ export function ChannelSidebar({
 				) : null}
 			</button>
 			{/* Pelaflix: el catálogo del grupo, estilo Netflix. */}
+			{/* Mundo 3D: salas, tu casa, la tienda, juegos de mesa y audio espacial. */}
+			<button type="button" className="world-button" aria-current={view === 'world' ? 'page' : undefined} onClick={onOpenWorld}>
+				<Globe size={18} />
+				<span>Mundo 3D</span>
+			</button>
 			<button type="button" className="movies-button" aria-current={view === 'movies' ? 'page' : undefined} onClick={onOpenMovies}>
 				<Film size={18} />
 				<span>Pelaflix</span>
