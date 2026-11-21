@@ -24,10 +24,12 @@ const ASSETS = [
  */
 export function migrateProfileAssets(me: Member, base: string): Partial<Member> {
 	const patch: Partial<Member> = {};
-	const urlP2P = (kind: string) => `${base}/file/${kind}`;
 	for (const asset of ASSETS) {
 		const url = me[asset.campo] as string | undefined;
 		if (!url) continue;
+		// Se conserva el `?v=` (versión): si se pierde, Chromium muestra la copia vieja de la caché.
+		const query = /^https?:/i.test(url) ? (url.match(/\?[^#]*/)?.[0] ?? '') : '';
+		const urlP2P = (kind: string) => `${base}/file/${kind}${query}`;
 		if (me[asset.flag]) {
 			// Ya es P2P: se reconstruye la URL con el host:puerto de ahora (cambian al reiniciar).
 			const actual = urlP2P(asset.kind);

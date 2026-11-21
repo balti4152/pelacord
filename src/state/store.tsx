@@ -934,9 +934,15 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			 * (cae a uno libre si el fijo está ocupado) o de adaptador de red, la foto/el archivo NO
 			 * cargaba para nadie (404 / conexión rechazada) — era la foto de perfil que "no se veía".
 			 */
+			const loopback = /^(127\.|localhost$|::1$|0\.0\.0\.0$)/i;
 			const rebase = (url?: string): string | undefined => {
-				if (!url || !peer.fileHost || !peer.filePort) return url;
-				return url.replace(/^https?:\/\/[^/]+(\/file\/)/i, `http://${peer.fileHost}:${peer.filePort}$1`);
+				if (!url) return url;
+				const hostOk = peer.fileHost && peer.filePort && !loopback.test(peer.fileHost);
+				if (hostOk) return url.replace(/^https?:\/\/[^/]+(\/file\/)/i, `http://${peer.fileHost}:${peer.filePort}$1`);
+				// Sin una dirección real del otro, una URL "127.0.0.1" apuntaría a MI propio servidor: se
+				// veía MI foto en lugar de la suya. Mejor no mostrar nada (queda su foto guardada o la inicial).
+				if (/^https?:\/\/(127\.|localhost[:/]|\[::1\])/i.test(url)) return undefined;
+				return url;
 			};
 			const avatarUrl = rebase(peer.avatarUrl);
 			const bannerUrl = rebase(peer.bannerUrl);

@@ -268,7 +268,17 @@ export function App(): JSX.Element {
 				/>
 				{/* El mundo queda montado aunque vuelvas a la parte 2D: al volver aparecés donde estabas, y
 				    los demás te ven ahí (gris, "ausente"). */}
-				{worldMounted ? <WorldView hidden={!worldOpen} onClose={() => setWorldOpen(false)} /> : null}
+				{worldMounted ? (
+					<WorldView
+						hidden={!worldOpen}
+						onClose={() => setWorldOpen(false)}
+						// Salir del todo: se desmonta (los demás dejan de verte) y al volver arranca de cero.
+						onQuit={() => {
+							setWorldOpen(false);
+							setWorldMounted(false);
+						}}
+					/>
+				) : null}
 				{worldOpen ? null : moviesOpen ? (
 					<MoviesView onClose={() => setMoviesOpen(false)} />
 				) : musicOpen ? (

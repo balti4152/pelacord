@@ -137,9 +137,31 @@ function makeLabel(name: string, color: string, avatarUrl?: string): {el: HTMLDi
 	waves.className = 'w-waves';
 	waves.innerHTML = '<i></i><i></i><i></i>';
 	el.append(face, text, waves);
+	el.dataset.face = avatarUrl ?? '';
 	const obj = new CSS2DObject(el);
 	obj.position.set(0, 1.74, 0);
 	return {el, obj};
+}
+
+/** Cambia la foto de la plaquita del nombre (cuando alguien cambia su foto de perfil). */
+function setLabelFace(el: HTMLDivElement, name: string, avatarUrl?: string): void {
+	if ((el.dataset.face ?? '') === (avatarUrl ?? '')) return;
+	el.dataset.face = avatarUrl ?? '';
+	const face = el.querySelector('.w-name-face');
+	if (!face) return;
+	face.textContent = '';
+	if (avatarUrl) {
+		const img = document.createElement('img');
+		img.src = avatarUrl;
+		img.alt = '';
+		img.onerror = () => {
+			img.remove();
+			face.textContent = name.slice(0, 1).toUpperCase();
+		};
+		face.append(img);
+	} else {
+		face.textContent = name.slice(0, 1).toUpperCase();
+	}
 }
 
 export class WorldEngine {
@@ -497,6 +519,7 @@ export class WorldEngine {
 			await this.me.avatar.setLook(look);
 			this.me.look = look;
 			this.me.labelEl.querySelector('.w-name-text')!.textContent = name;
+			setLabelFace(this.me.labelEl, name, avatarUrl);
 			return;
 		}
 		this.me = this.createActor(id, name, color, look, avatarUrl);
@@ -552,6 +575,7 @@ export class WorldEngine {
 			actor.anim = s.anim;
 			this.setCompanion(actor, s.equippedPet);
 			actor.labelEl.querySelector('.w-name-text')!.textContent = name;
+			setLabelFace(actor.labelEl, name, info[s.id]?.avatarUrl);
 			const reported = new THREE.Vector3(s.x, 0, s.z);
 			// Sentado: se usa el asiento de verdad (con su altura y hacia dónde mira). Antes quedaba a la
 			// altura del piso y se veía hundido en el sillón.

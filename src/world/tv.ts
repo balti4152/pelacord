@@ -157,11 +157,12 @@ export const tv = {
 	playNow(room: RoomId, track: TvTrack): void {
 		setTv(room, (c) => {
 			const queue = c.mode === 'music' ? [...c.queue.slice(0, c.index + 1), track, ...c.queue.slice(c.index + 1)] : [track];
-			return {mode: 'music', queue, index: c.mode === 'music' ? c.index + 1 : 0, positionMs: 0, paused: false, movieRoomId: null, sharerId: null};
+			// (Se recuerda quién compartía pantalla: al sacar la música, la tele vuelve a su transmisión.)
+			return {mode: 'music', queue, index: c.mode === 'music' ? c.index + 1 : 0, positionMs: 0, paused: false, movieRoomId: null};
 		});
 	},
 	enqueue(room: RoomId, track: TvTrack): void {
-		setTv(room, (c) => (c.mode === 'music' ? {queue: [...c.queue, track]} : {mode: 'music', queue: [track], index: 0, positionMs: 0, paused: false, movieRoomId: null, sharerId: null}));
+		setTv(room, (c) => (c.mode === 'music' ? {queue: [...c.queue, track]} : {mode: 'music', queue: [track], index: 0, positionMs: 0, paused: false, movieRoomId: null}));
 	},
 	toggle(room: RoomId): void {
 		setTv(room, (c) => ({paused: !c.paused}));
@@ -170,7 +171,11 @@ export const tv = {
 		setTv(room, () => ({positionMs: Math.max(0, positionMs)}));
 	},
 	next(room: RoomId): void {
-		setTv(room, (c) => (c.index + 1 < c.queue.length ? {index: c.index + 1, positionMs: 0, paused: false} : {index: c.queue.length, positionMs: 0, paused: true}));
+		setTv(room, (c) => {
+			if (c.index + 1 < c.queue.length) return {index: c.index + 1, positionMs: 0, paused: false};
+			// Se terminó la cola: si alguien estaba compartiendo pantalla, vuelve a verse.
+			return c.sharerId ? {mode: 'screen', index: c.queue.length, positionMs: 0, paused: true} : {index: c.queue.length, positionMs: 0, paused: true};
+		});
 	},
 	previous(room: RoomId): void {
 		setTv(room, (c) => (tvPosition(c) > 4000 ? {positionMs: 0} : {index: Math.max(0, c.index - 1), positionMs: 0, paused: false}));
@@ -185,13 +190,20 @@ export const tv = {
 		});
 	},
 	movie(room: RoomId, movieRoomId: string): void {
-		setTv(room, () => ({mode: 'movie', movieRoomId, sharerId: null, paused: false}));
+		setTv(room, () => ({mode: 'movie', movieRoomId, paused: false}));
 	},
 	screen(room: RoomId, sharerId: string): void {
 		setTv(room, () => ({mode: 'screen', sharerId, movieRoomId: null}));
 	},
+	/** Apaga lo que hay. Si había música/película encima de una pantalla compartida, vuelve la pantalla. */
 	off(room: RoomId): void {
-		setTv(room, () => ({mode: 'off', movieRoomId: null, sharerId: null, paused: true}));
+		setTv(room, (c) => (c.sharerId && c.mode !== 'screen'
+			? {mode: 'screen', movieRoomId: null, paused: true}
+			: {mode: 'off', movieRoomId: null, sharerId: null, paused: true}));
+	},
+	/** El que compartía dejó de hacerlo: la tele se olvida de su pantalla. */
+	stopSharing(room: RoomId): void {
+		setTv(room, (c) => (c.mode === 'screen' ? {mode: 'off', sharerId: null, paused: true} : {sharerId: null}));
 	},
 };
 

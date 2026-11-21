@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-	Armchair, Brush, Coins, Fish, Headphones, Home, LogOut, MapPin, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Tv, User, UserPlus, Volume2, VolumeX, Keyboard, X,
+	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Tv, User, UserPlus, Volume2, VolumeX, Keyboard, X,
 } from 'lucide-react';
 import {EMOTES, type EmoteDef, EmoteMenu} from '@/components/world/EmoteMenu';
 import {MoviePlayer} from '@/components/MoviePlayer';
@@ -42,7 +42,7 @@ function roomTitle(room: RoomId, owner: string | null, names: Record<string, str
  * `hidden`: el mundo sigue montado mientras se usa la parte 2D de PelaCord. Así, al volver, aparecés
  * donde estabas, y los demás te siguen viendo ahí (gris y medio transparente, "ausente").
  */
-export function WorldView({onClose, hidden = false}: {onClose: () => void; hidden?: boolean}): JSX.Element {
+export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => void; onQuit?: () => void; hidden?: boolean}): JSX.Element {
 	const {state, dispatch, movieRoomsList, movieOpen, movieJoin, movieLeave, movieCommand, myJoinedMovieRoom} = useStore();
 	const catalog = useCatalog();
 	const profile = useProfile();
@@ -367,7 +367,7 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 			tv.screen(roomRef.current, state.me.id);
 		}
 		if (!localScreen) {
-			for (const t of Object.values(tvs)) if (t.mode === 'screen' && t.sharerId === state.me.id) tv.off(t.room);
+			for (const t of Object.values(tvs)) if (t.sharerId === state.me.id) tv.stopSharing(t.room);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [localScreen]);
@@ -612,6 +612,9 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 					)}
 					<button type="button" className="t-round" title="Mi personaje" onClick={() => { setTryOn(null); setPanel('editor'); }}><User size={18} strokeWidth={2.6} /></button>
 					<button type="button" className="t-round is-exit" title="Volver a PelaCord (tu personaje se queda acá)" onClick={onClose}><LogOut size={18} strokeWidth={2.6} /></button>
+					{onQuit ? (
+						<button type="button" className="t-round is-exit" title="Salir del mundo del todo (se cierra y la próxima vez arranca de cero)" onClick={onQuit}><Power size={18} strokeWidth={2.6} /></button>
+					) : null}
 				</div>
 			</header>
 
@@ -801,7 +804,7 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 					}}
 					onStopShare={() => {
 						dispatch({type: 'setSharing', sharing: false});
-						tv.off(room);
+						tv.stopSharing(room);
 					}}
 					onOff={() => {
 						if (myTv?.mode === 'movie' && movieRoom?.hostId === state.me.id) movieLeave();

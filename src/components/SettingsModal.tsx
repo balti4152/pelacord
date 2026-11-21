@@ -106,7 +106,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 					// Cuadro fijo (primer cuadro del GIF): para los tamaños chicos y de respaldo.
 					const poster = await fileToDataUrl(file, 96, 0.8).catch(() => undefined);
 					updateProfile({
-						avatarUrl: `http://${endpoint.host}:${endpoint.port}/file/avatar`,
+						avatarUrl: `http://127.0.0.1:${endpoint.port}/file/avatar?v=${Date.now()}`,
 						avatarCrop: crop,
 						avatarP2P: true,
 						avatarPoster: poster,
@@ -125,6 +125,23 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 		// no ven ni la foto ni el banner) y encima cacheAvatar no puede bajarlo (sólo acepta http), así
 		// que las listas se quedaban con la copia vieja. Con un cuadro fijo chico, se ve siempre.
 		const respaldo = await fileToDataUrl(file, AVATAR_SOURCE, 0.9).catch(() => undefined);
+		// La foto se GUARDA en disco y se sirve por P2P. Antes quedaba sólo como data: y, cada 20 s, la
+		// app la "migraba" al archivo del disco... que tenía la foto VIEJA (no se podía cambiar la foto).
+		// El `?v=` hace que nadie (ni yo) muestre la copia vieja guardada en caché.
+		if (respaldo && transport) {
+			try {
+				const data = await (await fetch(respaldo)).arrayBuffer();
+				const mime = respaldo.slice(5, respaldo.indexOf(';')) || 'image/webp';
+				const ok = await transport.shareProfileAsset({kind: 'avatar', name: 'avatar', mime, data});
+				const endpoint = ok ? await transport.getFileEndpoint() : null;
+				if (endpoint?.port) {
+					updateProfile({avatarUrl: `http://127.0.0.1:${endpoint.port}/file/avatar?v=${Date.now()}`, avatarCrop: crop, avatarP2P: true, avatarPoster: undefined});
+					return;
+				}
+			} catch {
+				// cae al data URL
+			}
+		}
 		updateProfile({avatarUrl: respaldo, avatarCrop: crop, avatarP2P: false, avatarPoster: undefined});
 	}
 
