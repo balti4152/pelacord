@@ -214,6 +214,78 @@ def arcade(name, x, y, facing, color):
 	return obj
 
 
+def game_shelf(cx, cy, colors):
+	"""Biblioteca abierta de juegos de mesa: fondo, costados, tres estantes, cajas apiladas y paradas,
+	dados y una copa arriba. El frente mira a la sala (+Y), así se ve lo que hay adentro."""
+	wood = toy.material('Shelf', 'wood')
+	dark = toy.material('ShelfBack', 'wood_dark')
+	W, D, H = 2.6, 0.5, 2.0
+	parts = [
+		toy.rounded_box('shelf_back', size=(W, 0.06, H), loc=(cx, cy - D / 2 + 0.03, H / 2), radius=0.02, mat=dark),
+		toy.rounded_box('shelf_top', size=(W + 0.1, D + 0.04, 0.08), loc=(cx, cy, H), radius=0.03, mat=wood),
+		toy.rounded_box('shelf_base', size=(W + 0.1, D + 0.04, 0.12), loc=(cx, cy, 0.06), radius=0.03, mat=wood),
+	]
+	for side in (-1, 1):
+		parts.append(toy.rounded_box(f'shelf_side_{side}', size=(0.08, D, H), loc=(cx + side * (W / 2), cy, H / 2), radius=0.03, mat=wood))
+	levels = (0.12, 0.72, 1.32)
+	for k, z in enumerate(levels[1:]):
+		parts.append(toy.rounded_box(f'shelf_board_{k}', size=(W - 0.04, D - 0.04, 0.05), loc=(cx, cy, z), radius=0.015, mat=wood))
+	for p in parts:
+		toy.apply_transforms(p)
+	toy.join(parts, 'GameShelf')
+	random.seed(6)
+	boxes = []
+	for row, base in enumerate(levels):
+		x = cx - W / 2 + 0.12
+		limit = cx + W / 2 - 0.12
+		n = 0
+		while x < limit - 0.2:
+			color = toy.material(f'GBox_{row}_{n}', random.choice(colors))
+			if random.random() < 0.55:
+				# Pila de cajas acostadas.
+				w = random.uniform(0.38, 0.5)
+				if x + w > limit:
+					break
+				z = base + 0.025
+				for k in range(random.randint(1, 3)):
+					h = random.uniform(0.07, 0.12)
+					c = color if k == 0 else toy.material(f'GBox_{row}_{n}_{k}', random.choice(colors))
+					boxes.append(toy.rounded_box(f'gstack_{row}_{n}_{k}', size=(w - k * 0.03, D - 0.14, h), loc=(x + w / 2, cy + 0.02, z + h / 2), rot=(0, 0, DEG(random.uniform(-4, 4))), radius=0.015, mat=c))
+					z += h
+				x += w + 0.05
+			else:
+				# Cajas paradas, como libros.
+				for k in range(random.randint(2, 4)):
+					t = random.uniform(0.07, 0.11)
+					if x + t > limit:
+						break
+					h = random.uniform(0.36, 0.5)
+					c = toy.material(f'GBook_{row}_{n}_{k}', random.choice(colors))
+					boxes.append(toy.rounded_box(f'gbook_{row}_{n}_{k}', size=(t, D - 0.16, h), loc=(x + t / 2, cy + 0.02, base + 0.025 + h / 2), radius=0.012, mat=c))
+					x += t + 0.012
+				x += 0.06
+			n += 1
+	for b in boxes:
+		toy.apply_transforms(b)
+	toy.join(boxes, 'GameBoxes')
+	# Arriba: dados grandes y una copa.
+	white = toy.material('DiceWhite', 'white')
+	pip = toy.material('DicePip', 'ink')
+	for k, (dx, rot) in enumerate(((-0.7, 18), (-0.38, -25))):
+		die = toy.rounded_box(f'TopDie_{k}', size=(0.22, 0.22, 0.22), loc=(cx + dx, cy, H + 0.15), rot=(0, 0, DEG(rot)), radius=0.05, mat=white)
+		toy.apply_transforms(die)
+		toy.sphere(f'TopDiePip_{k}', radius=0.03, loc=(cx + dx, cy, H + 0.265), mat=pip, segments=8, rings=6)
+	gold = toy.material('TrophyGold', 'gold', roughness=0.3)
+	trophy = [
+		toy.cylinder('trophy_base', radius=0.1, depth=0.08, loc=(cx + 0.7, cy, H + 0.08), mat=toy.material('TrophyBase', 'wood_dark'), segments=14),
+		toy.cylinder('trophy_stem', radius=0.03, depth=0.14, loc=(cx + 0.7, cy, H + 0.19), mat=gold, segments=10),
+		toy.cone('trophy_cup', r1=0.07, r2=0.13, depth=0.18, loc=(cx + 0.7, cy, H + 0.35), mat=gold, segments=18),
+	]
+	for p in trophy:
+		toy.apply_transforms(p)
+	toy.join(trophy, 'Trophy')
+
+
 def build_games():
 	sets.room_shell(10, 9, 'midnight_blue', 'floor_plum')
 	rug = toy.material('GamesRug', (0.42, 0.22, 0.55))
@@ -241,24 +313,13 @@ def build_games():
 		seat = toy.mark_seat(f'Table_{k + 1}', (0, -0.04, 0.53), parent=c)
 		seat['pelacord_table'] = k + 1
 	# Arcades contra la pared izquierda y un rincón gamer a la derecha.
+	# (El frente del arcade es su -Y: con 90° mira hacia el centro de la sala; con -90° miraba la pared.)
 	for k, c in enumerate(('seat_red', 'sofa_purple', 'sky')):
-		arcade(f'Arcade_{k}', -4.4, -3.0 + k * 1.1, -90, c)
+		arcade(f'Arcade_{k}', -4.3, -3.1 + k * 1.15, 90, c)
 	# Sillón contra la pared derecha, mirando a la mesa (antes una tele tapaba la vista).
 	sets.sofa('GamerSofa', (4.1, 1.0, 0), 'sky', seats=2, facing=-90)
 	# Estantes con cajas de juegos.
-	shelf = toy.material('Shelf', 'wood')
-	toy.rounded_box('GameShelf', size=(2.6, 0.45, 1.9), loc=(2.6, -4.2, 0.95), radius=0.06, mat=shelf)
-	random.seed(6)
-	boxes = []
-	for row, z in enumerate((0.4, 0.95, 1.5)):
-		x = 1.45
-		while x < 3.7:
-			w = random.uniform(0.3, 0.5)
-			boxes.append(toy.rounded_box(f'gbox_{row}_{x:.2f}', size=(w, 0.32, random.uniform(0.12, 0.3)), loc=(x + w / 2, -4.0, z), radius=0.025, mat=toy.material(f'GBox_{row}_{int(x * 10)}', random.choice(colors))))
-			x += w + 0.06
-	for b in boxes:
-		toy.apply_transforms(b)
-	toy.join(boxes, 'GameBoxes')
+	game_shelf(2.6, -4.15, colors)
 	# Cartel de neón y lámpara sobre la mesa.
 	import shop
 	shop.text_mesh('GamesNeon', 'JUEGOS', 0.55, (-1.6, -4.38, 2.4), toy.material('GamesNeonMat', 'mint', emission=3.5, emission_color=toy.PALETTE['mint']), extrude=0.04, rot=(DEG(90), 0, DEG(180)))
