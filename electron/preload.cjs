@@ -71,11 +71,13 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	/** Películas: catálogo de TMDB (filas, búsqueda y detalle). */
 	tmdbRows: () => ipcRenderer.invoke('pelacord:tmdb-rows'),
 	tmdbSearch: (query) => ipcRenderer.invoke('pelacord:tmdb-search', query),
-	tmdbMovie: (id) => ipcRenderer.invoke('pelacord:tmdb-movie', id),
+	// OJO: hay que pasar el tipo. Sin él, el detalle de una SERIE se pedía como película (otro id).
+	tmdbMovie: (id, mediaType) => ipcRenderer.invoke('pelacord:tmdb-movie', id, mediaType),
 	/** Películas: destraba o traba la barra de subtítulos del reproductor. */
 	movieSubtitles: (viewId, enable) => ipcRenderer.invoke('pelacord:movie-subtitles', viewId, enable),
 	spotifyLogout: () => ipcRenderer.invoke('pelacord:spotify-logout'),
 	getAudioUrl: (target) => ipcRenderer.invoke('pelacord:yt-audio-url', target),
+	prefetchAudio: (target) => ipcRenderer.send('pelacord:yt-prefetch', target),
 	shareFile: (payload) => ipcRenderer.invoke('pelacord:share-file', payload),
 	shareBuffer: (payload) => ipcRenderer.invoke('pelacord:share-buffer', payload),
 	shareAvatar: (payload) => ipcRenderer.invoke('pelacord:share-avatar', payload),

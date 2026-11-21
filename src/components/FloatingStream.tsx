@@ -6,14 +6,30 @@ import {useStore} from '@/state/store';
 const WIDTH = 320;
 const HEIGHT = 200;
 
+function clamp(x: number, y: number): {x: number; y: number} {
+	return {
+		x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - WIDTH - 8)),
+		y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - HEIGHT - 8)),
+	};
+}
+
 /** Ventanita flotante con la transmisión cuando salís de la grilla de la llamada. */
 export function FloatingStream(): JSX.Element | null {
 	const {state, dispatch} = useStore();
 	const localScreen = useLocalScreen();
+	// Arranca ARRIBA a la derecha: abajo tapaba el cuadro para escribir y el botón de enviar (era lo
+	// "raro" de abrir un chat de texto mientras alguien transmitía).
 	const [position, setPosition] = useState(() => ({
 		x: Math.max(8, window.innerWidth - WIDTH - 20),
-		y: Math.max(8, window.innerHeight - HEIGHT - 20),
+		y: 64,
 	}));
+
+	// Si se achica la ventana, la ventanita se acomoda para no quedar afuera (y no poder agarrarla).
+	useEffect(() => {
+		const onResize = () => setPosition((current) => clamp(current.x, current.y));
+		window.addEventListener('resize', onResize);
+		return () => window.removeEventListener('resize', onResize);
+	}, []);
 	const drag = useRef<{offsetX: number; offsetY: number; startX: number; startY: number; moved: boolean} | null>(null);
 	const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -45,13 +61,6 @@ export function FloatingStream(): JSX.Element | null {
 	}, [stream, visible, ownShare]);
 
 	if (!visible) return null;
-
-	function clamp(x: number, y: number): {x: number; y: number} {
-		return {
-			x: Math.min(Math.max(8, x), Math.max(8, window.innerWidth - WIDTH - 8)),
-			y: Math.min(Math.max(8, y), Math.max(8, window.innerHeight - HEIGHT - 8)),
-		};
-	}
 
 	function onPointerDown(event: PointerEvent<HTMLDivElement>): void {
 		(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);

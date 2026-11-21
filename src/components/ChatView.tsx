@@ -1,4 +1,4 @@
-import {type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useRef, useState} from 'react';
+import {type MouseEvent as ReactMouseEvent, type ReactNode, memo, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {Composer} from '@/components/Composer';
 import {Avatar, formatBytes, Icon, IconButton} from '@/components/primitives';
 import {getDesktopTransport} from '@/lib/desktop';
@@ -17,6 +17,16 @@ function formatTime(ts: number): string {
 function formatDay(ts: number): string {
 	return new Date(ts).toLocaleDateString([], {month: 'long', day: 'numeric', year: 'numeric'});
 }
+
+/** "Hoy", "Ayer" o la fecha completa. */
+function dayLabel(ts: number): string {
+	const day = formatDay(ts);
+	if (day === formatDay(Date.now())) return 'Hoy';
+	if (day === formatDay(Date.now() - 86_400_000)) return 'Ayer';
+	return day;
+}
+
+const NO_MESSAGES: Message[] = [];
 
 /** Resolves the author of a message, falling back to the name/color embedded in the message. */
 function authorFor(state: AppState, message: Message): {member: ReturnType<typeof resolveMember>; isMe: boolean} {
@@ -82,10 +92,12 @@ function highlightTerm(content: string, term: string): ReactNode {
  * ¿El mensaje es sólo emojis (menos de 3)? Entonces se muestran grandes, como en WhatsApp.
  * Con 3 o más vuelven al tamaño normal.
  */
+const graphemes = new Intl.Segmenter(undefined, {granularity: 'grapheme'});
+
 function isJumboEmojis(text: string): boolean {
 	const trimmed = text.trim();
-	if (!trimmed || /[0-9A-Za-z]/.test(trimmed)) return false;
-	const segments = Array.from(new Intl.Segmenter(undefined, {granularity: 'grapheme'}).segment(trimmed));
+	if (!trimmed || trimmed.length > 32 || /[0-9A-Za-z]/.test(trimmed)) return false;
+	const segments = Array.from(graphemes.segment(trimmed));
 	if (segments.length === 0 || segments.length >= 3) return false;
 	return segments.every(
 		(part) =>
@@ -114,6 +126,11 @@ function LinkEmbeds({urls}: {urls: string[]}): JSX.Element | null {
 function LinkEmbed({url}: {url: string}): JSX.Element | null {
 	const videoId = youtubeId(url);
 	const [preview, setPreview] = useState<LinkPreview | null | undefined>(undefined);
+	/**
+	 * El reproductor de YouTube se carga recién al tocar play. Cada <iframe> de YouTube baja más
+	 * de 1 MB de scripts: un canal con varios links tardaba en abrirse y el scroll se trababa.
+	 */
+	const [playing, setPlaying] = useState(false);
 
 	useEffect(() => {
 		let activo = true;
@@ -128,13 +145,26 @@ function LinkEmbed({url}: {url: string}): JSX.Element | null {
 	if (videoId) {
 		return (
 			<div className="embed embed-video">
-				<iframe
-					className="embed-player"
-					src={`https://www.youtube.com/embed/${videoId}`}
-					title="Video de YouTube"
-					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-					allowFullScreen
-				/>
+				{playing ? (
+					<iframe
+						className="embed-player"
+						src={`https://www.youtube.com/embed/${videoId}?autoplay=1`}
+						title="Video de YouTube"
+						allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+						allowFullScreen
+					/>
+				) : (
+					<button
+						type="button"
+						className="embed-player embed-player-poster"
+						aria-label={`Reproducir ${preview?.title ?? 'video de YouTube'}`}
+						onClick={() => setPlaying(true)}>
+						<img src={`https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`} alt="" loading="lazy" />
+						<span className="embed-play-badge">
+							<Icon name="play" size={22} />
+						</span>
+					</button>
+				)}
 				<div className="embed-body">
 					<span className="embed-site">YouTube</span>
 					{preview?.title ? (
@@ -467,22 +497,70 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 export function ChatView(): JSX.Element {
 	const {state, dispatch, updateSettings, editMessage, removeMessage} = useStore();
 	const channel = state.channels.find((c) => c.id === state.activeChannelId);
-	const messages = state.messages[state.activeChannelId] ?? [];
-	const mentionNames = state.members.map((member) => member.name);
+	const messages = state.messages[state.activeChannelId] ?? NO_MESSAGES;
+	const mentionNames = useMemo(() => state.members.map((member) => member.name), [state.members]);
 	const muted = state.mutedChannels.includes(state.activeChannelId);
 	const [menu, setMenu] = useState<{message: Message; isMe: boolean; x: number; y: number} | null>(null);
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [search, setSearch] = useState<string | null>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
+	/**
+	 * ¿El usuario está mirando lo último? Mientras sí, el chat se queda pegado abajo aunque el
+	 * contenido crezca (imágenes, embeds y videos que terminan de cargar). Antes, al cambiar de
+	 * canal, el scroll quedaba "a mitad de camino" porque las imágenes cargaban después.
+	 */
+	const pinnedRef = useRef(true);
+	const [unseen, setUnseen] = useState(0);
 	const searching = search !== null;
 	const term = (search ?? '').trim().toLowerCase();
 	// Con búsqueda activa se muestran sólo los mensajes que coinciden.
 	const visible = term ? messages.filter((message) => (message.content ?? '').toLowerCase().includes(term)) : messages;
 
-	useEffect(() => {
+	function scrollToBottom(): void {
+		const el = scrollRef.current;
+		if (!el) return;
+		el.scrollTop = el.scrollHeight;
+		pinnedRef.current = true;
+		setUnseen(0);
+	}
+
+	// Al abrir el canal, se arranca abajo de todo (antes de pintar: sin salto visible).
+	useLayoutEffect(() => {
 		const el = scrollRef.current;
 		if (el) el.scrollTop = el.scrollHeight;
-	}, [messages.length, state.activeChannelId]);
+	}, []);
+
+	// Si el contenido crece y estaba mirando lo último, se mantiene abajo.
+	useEffect(() => {
+		const el = scrollRef.current;
+		const content = contentRef.current;
+		if (!el || !content || typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(() => {
+			if (pinnedRef.current) el.scrollTop = el.scrollHeight;
+		});
+		observer.observe(content);
+		return () => observer.disconnect();
+	}, [visible.length > 0]);
+
+	// Mensaje nuevo: si es mío o estaba abajo, se baja; si estaba leyendo arriba, se avisa.
+	const lastMessage = messages[messages.length - 1];
+	const previousLast = useRef(lastMessage?.id);
+	useLayoutEffect(() => {
+		if (!lastMessage || previousLast.current === lastMessage.id) return;
+		const hadPrevious = previousLast.current !== undefined;
+		previousLast.current = lastMessage.id;
+		if (lastMessage.authorId === state.me.id || pinnedRef.current || !hadPrevious) scrollToBottom();
+		else setUnseen((count) => count + 1);
+	}, [lastMessage, state.me.id]);
+
+	function onScroll(): void {
+		const el = scrollRef.current;
+		if (!el) return;
+		const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 72;
+		pinnedRef.current = atBottom;
+		if (atBottom && unseen) setUnseen(0);
+	}
 
 	useEffect(() => {
 		if (!menu) return;
@@ -505,12 +583,24 @@ export function ChatView(): JSX.Element {
 
 	let lastAuthorId = '';
 	let lastTimestamp = 0;
+	let lastDay = '';
 	const rendered: JSX.Element[] = [];
+	const compact = state.settings.messageDisplay === 'compact';
 
 	for (const message of visible) {
 		const {member, isMe} = authorFor(state, message);
-		const grouped = message.authorId === lastAuthorId && message.createdAt - lastTimestamp < 5 * 60 * 1000;
-		const compact = state.settings.messageDisplay === 'compact';
+		// Separador por día (antes había uno solo, arriba de todo, aunque el historial fuera de semanas).
+		const day = formatDay(message.createdAt);
+		const newDay = day !== lastDay;
+		if (newDay) {
+			lastDay = day;
+			rendered.push(
+				<div className="divider" key={`day-${day}`} role="separator">
+					{dayLabel(message.createdAt)}
+				</div>,
+			);
+		}
+		const grouped = !newDay && message.authorId === lastAuthorId && message.createdAt - lastTimestamp < 5 * 60 * 1000;
 		lastAuthorId = message.authorId;
 		lastTimestamp = message.createdAt;
 		rendered.push(
@@ -580,20 +670,34 @@ export function ChatView(): JSX.Element {
 				</div>
 			</header>
 
-			<div className="chat-body" ref={scrollRef}>
+			<div className="chat-body" ref={scrollRef} onScroll={onScroll}>
 				{visible.length ? (
-					<div className="chat-history">
-						<div className="divider">{formatDay(visible[0].createdAt)}</div>
+					<div className="chat-history" ref={contentRef}>
+						{term ? null : (
+							<div className="chat-welcome">
+								<div className="chat-intro-icon"><Icon name="hash" size={25} /></div>
+								<h2>Te damos la bienvenida a #{channel.name}</h2>
+								<p>{channel.topic || 'Este es el comienzo del canal.'}</p>
+							</div>
+						)}
 						<div className="messages">{rendered}</div>
 					</div>
 				) : (
 					<div className="chat-intro">
 						<div className="chat-intro-icon"><Icon name={term ? 'search' : 'hash'} size={25} /></div>
-						<h2>{term ? 'Sin resultados' : 'Todavía no hay mensajes'}</h2>
-						<p>{term ? 'Probá con otra búsqueda.' : 'Escribí el primer mensaje del canal.'}</p>
+						<h2>{term ? 'Sin resultados' : `Te damos la bienvenida a #${channel.name}`}</h2>
+						<p>{term ? 'Probá con otra búsqueda.' : 'Todavía no hay mensajes. Escribí el primero.'}</p>
 					</div>
 				)}
 			</div>
+
+			{unseen > 0 && !term ? (
+				<button type="button" className="chat-jump" onClick={scrollToBottom}>
+					{unseen === 1 ? '1 mensaje nuevo' : `${unseen} mensajes nuevos`}
+					<span>Ir al presente</span>
+					<Icon name="chevronDown" size={16} />
+				</button>
+			) : null}
 
 			<Composer key={channel.id} />
 
@@ -693,7 +797,25 @@ function MessageMenu({
 	);
 }
 
-function MessageRow({
+type MessageRowProps = Parameters<typeof MessageRowView>[0];
+
+/** ¿Cambió algo que se vea? Las funciones se ignoran: dependen sólo de `message` y `isMe`. */
+function sameRow(a: MessageRowProps, b: MessageRowProps): boolean {
+	if (a.message !== b.message || a.isMe !== b.isMe || a.grouped !== b.grouped || a.compact !== b.compact) return false;
+	if (a.editing !== b.editing || a.mentionNames !== b.mentionNames || a.searchTerm !== b.searchTerm) return false;
+	if (a.member === b.member) return true;
+	const keys = new Set([...Object.keys(a.member), ...Object.keys(b.member)]) as Set<keyof typeof a.member>;
+	for (const key of keys) if (a.member[key] !== b.member[key]) return false;
+	return true;
+}
+
+/**
+ * Una fila del chat, memorizada: con cientos de mensajes, re-renderizar todas por cada cambio
+ * del estado (presencia, música, voz) era lo que hacía sentir pesado el chat durante una llamada.
+ */
+const MessageRow = memo(MessageRowView, sameRow);
+
+function MessageRowView({
 	message,
 	member,
 	isMe,
@@ -765,7 +887,7 @@ function MessageRow({
 							</span>
 						) : null}
 						<span className="message-timestamp">
-							{formatDay(message.createdAt) === formatDay(Date.now()) ? 'Hoy' : formatDay(message.createdAt)} a las{' '}
+							{dayLabel(message.createdAt)} a las{' '}
 							{formatTime(message.createdAt)}
 							{message.edited ? ' (editado)' : ''}
 						</span>

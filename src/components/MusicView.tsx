@@ -2,7 +2,7 @@ import {type CSSProperties, useEffect, useRef, useState} from 'react';
 import {GripVertical, ListMusic, Loader2, Pause, Play, Plus, Search, SkipForward, Trash2, TriangleAlert, Volume2, VolumeX, X} from 'lucide-react';
 import {SiSpotify} from 'react-icons/si';
 import {type SpotifyPlaylist, type TrackResult, getDesktopTransport} from '@/lib/desktop';
-import {type MusicTrack} from '@/lib/musicQueue';
+import {currentPositionMs, type MusicState, type MusicTrack} from '@/lib/musicQueue';
 import {useSpotifyImport} from '@/lib/spotifyImport';
 import {SPOTIFY_GREEN, SpotifyView} from '@/components/SpotifyView';
 import {SpotifyPlaylistDetail} from '@/components/SpotifyPlaylistDetail';
@@ -26,6 +26,58 @@ function formatDuration(seconds: number): string {
 	if (!Number.isFinite(seconds) || seconds <= 0) return '--:--';
 	const total = Math.floor(seconds);
 	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+/** Búsquedas de esta sesión: volver a una búsqueda (o borrar una letra y volver) es instantáneo. */
+const searchMemory = new Map<string, TrackResult[]>();
+function rememberSearch(key: string, results: TrackResult[]): void {
+	searchMemory.delete(key);
+	searchMemory.set(key, results);
+	while (searchMemory.size > 40) searchMemory.delete(searchMemory.keys().next().value as string);
+}
+
+/**
+ * Barra de progreso del tema que suena. Va aparte (con su propio reloj) para que el avance de la
+ * barra no re-renderice toda la vista de Música cada medio segundo.
+ */
+function MusicProgress({state}: {state: MusicState}): JSX.Element | null {
+	const [, tick] = useState(0);
+	const paused = Boolean(state.pausedAt);
+	useEffect(() => {
+		if (paused || !state.track) return;
+		const timer = setInterval(() => tick((value) => value + 1), 500);
+		return () => clearInterval(timer);
+	}, [paused, state.track]);
+	if (!state.track) return null;
+	const duration = state.track.duration;
+	const position = Math.min(duration > 0 ? duration : Infinity, currentPositionMs(state) / 1000);
+	const percent = duration > 0 ? Math.min(100, (position / duration) * 100) : 0;
+	return (
+		<div className="music-progress" aria-label="Progreso del tema">
+			<span>{formatDuration(position) === '--:--' ? '0:00' : formatDuration(position)}</span>
+			<div className="music-progress-track">
+				<div className="music-progress-fill" style={{width: `${percent}%`}} />
+			</div>
+			<span>{formatDuration(duration)}</span>
+		</div>
+	);
+}
+
+/** Filas "fantasma" mientras llegan los resultados (en vez de una lista vacía). */
+function MusicSkeleton(): JSX.Element {
+	return (
+		<ul className="music-list" aria-hidden="true">
+			{Array.from({length: 6}, (_, index) => (
+				<li key={index} className="music-row is-skeleton">
+					<span className="skeleton skeleton-art" />
+					<span className="music-row-info">
+						<span className="skeleton skeleton-line" style={{width: `${55 + ((index * 13) % 30)}%`}} />
+						<span className="skeleton skeleton-line is-short" />
+					</span>
+				</li>
+			))}
+		</ul>
+	);
 }
 
 /**
@@ -60,14 +112,14 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const inVoice = Boolean(state.voice.channelId);
 	const voiceChannel = state.channels.find(({id}) => id === state.voice.channelId);
 
-	// Pausa larga: si dejás de escribir, busca igual (sin lanzar uno por tecla).
+	// Pausa corta: si dejás de escribir, busca solo (sin lanzar una búsqueda por tecla). La búsqueda
+	// ahora va por la API rápida de YouTube (no por yt-dlp), así que se puede esperar menos.
 	useEffect(() => {
-		const timer = setTimeout(() => setSearchTerm(query), 900);
+		const timer = setTimeout(() => setSearchTerm(query), 450);
 		return () => clearTimeout(timer);
 	}, [query]);
 
-	// Busca sólo cuando corresponde: al apretar Enter o después de una pausa larga.
-	// (Buscar en cada tecla lanzaba un proceso de yt-dlp por vez y trababa todo.)
+	// Busca al apretar Enter o después de la pausa. Lo ya buscado se muestra al instante.
 	useEffect(() => {
 		const clean = searchTerm.trim();
 		if (!clean) {
@@ -75,24 +127,31 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 			setLoading(false);
 			return;
 		}
+		const key = clean.toLowerCase();
+		const cached = searchMemory.get(key);
+		if (cached) {
+			setResults(cached);
+			setLoading(false);
+			return;
+		}
 		let stale = false;
 		setLoading(true);
-		const timer = setTimeout(() => {
-			void getDesktopTransport()
-				?.searchYouTube(clean, 12)
-				.then((list) => {
-					if (!stale) setResults(list ?? []);
-				})
-				.catch(() => {
-					if (!stale) setResults([]);
-				})
-				.finally(() => {
-					if (!stale) setLoading(false);
-				});
-		}, 250);
+		void getDesktopTransport()
+			?.searchYouTube(clean, 15)
+			.then((list) => {
+				if (stale) return;
+				const found = list ?? [];
+				if (found.length > 0) rememberSearch(key, found);
+				setResults(found);
+			})
+			.catch(() => {
+				if (!stale) setResults([]);
+			})
+			.finally(() => {
+				if (!stale) setLoading(false);
+			});
 		return () => {
 			stale = true;
-			clearTimeout(timer);
 		};
 	}, [searchTerm]);
 
@@ -236,15 +295,23 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 								) : null}
 							</>
 						) : null}
-						{!loading && query.trim() && results.length === 0 ? (
+						{!loading && searchTerm.trim() && query.trim() && results.length === 0 ? (
 							<p className="settings-hint">No encontré nada con eso.</p>
 						) : null}
-						<ul className="music-list">
+						{loading && results.length === 0 ? <MusicSkeleton /> : null}
+						<ul className={`music-list${loading && results.length > 0 ? ' is-refreshing' : ''}`}>
 							{results.map((track) => (
-								<li key={track.id} className="music-row">
+								<li
+									key={track.id}
+									className={`music-row${current?.id === track.id ? ' is-playing' : ''}`}
+									title={inVoice ? 'Doble click para reproducir para todos' : undefined}
+									onDoubleClick={() => {
+										if (inVoice) void musicPlay(toMusicTrack(track, state.me.name));
+									}}>
 									{track.thumbnail ? <img src={track.thumbnail} alt="" loading="lazy" /> : <span className="music-artwork"><ListMusic size={17} /></span>}
 									<span className="music-row-info">
 										<span className="music-row-title" title={track.title}>
+											{current?.id === track.id ? <span className="music-eq" aria-label="Sonando"><i /><i /><i /></span> : null}
 											{track.title}
 										</span>
 										<span className="music-row-sub">
@@ -387,6 +454,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						<span className="music-bar-sub">Nada sonando</span>
 					)}
 				</div>
+				<div className="music-bar-center">
 				<div className="music-bar-controls">
 					<button
 						type="button"
@@ -404,6 +472,8 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						onClick={() => void musicSkip()}>
 						<SkipForward size={18} />
 					</button>
+				</div>
+				<MusicProgress state={musicState} />
 				</div>
 				<div className="music-bar-volume">
 					<button

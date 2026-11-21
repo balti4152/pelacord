@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 900" width="600" height="900">
+  <!-- Póster de una película inventada (estilo juguete plano) para las paredes del cine. -->
+  <rect width="600" height="900" rx="28" fill="#ff8a5c"/>
+  <rect width="600" height="660" fill="#ff8a5c"/>
+  <rect y="0" width="600" height="300" fill="#7a3fa0"/><rect y="230" width="600" height="160" fill="#c8537a"/>
+  <circle cx="300" cy="430" r="120" fill="#ffd36b"/>
+  <ellipse cx="300" cy="690" rx="420" ry="230" fill="#4a2a63"/>
+  <ellipse cx="90" cy="640" rx="200" ry="120" fill="#3a1f50"/>
+  <path d="M300 300 L360 520 L240 520 Z" fill="#ff6a10" stroke="#140b1c" stroke-width="0"/>
+  <path d="M276 388 L324 388 L333 422 L267 422 Z" fill="#fff"/><path d="M258 455 L342 455 L350 485 L250 485 Z" fill="#fff"/>
+  <rect x="210" y="515" width="180" height="30" rx="12" fill="#2a1a33"/>
+  <circle cx="300" cy="300" r="14" fill="#ff6a10"/>
+  <rect x="0" y="660" width="600" height="240" fill="#140b1c" opacity="0.92"/>
+  <text x="300" y="742" font-family="'Arial Rounded MT Bold','Nunito','Baloo 2','Segoe UI',sans-serif" font-weight="900" text-anchor="middle" font-size="62" fill="#ff8a3d" stroke="#140b1c" stroke-width="8" paint-order="stroke">EL CONO</text>
+  <text x="300" y="808" font-family="'Arial Rounded MT Bold','Nunito','Baloo 2','Segoe UI',sans-serif" font-weight="900" text-anchor="middle" font-size="62" fill="#ffffff" stroke="#140b1c" stroke-width="8" paint-order="stroke">PERDIDO</text>
+  <text x="300" y="858" font-family="'Arial Rounded MT Bold','Nunito','Baloo 2','Segoe UI',sans-serif" font-weight="900" text-anchor="middle" font-size="22" fill="#b9a8d6" letter-spacing="4">NADIE LO VIO VENIR</text>
+  <rect x="10" y="10" width="580" height="880" rx="22" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="4"/>
+</svg>

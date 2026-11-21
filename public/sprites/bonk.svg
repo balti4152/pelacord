@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Viñeta de cómic para interacciones (estilo plano, borde negro grueso). -->
+  <polygon points="496.3,314.7 397.8,333.6 456.2,436.0 350.0,394.7 343.7,499.7 274.9,411.7 214.6,521.3 196.8,406.9 110.4,444.1 143.3,349.3 25.4,348.7 114.3,277.4 26.5,219.4 137.1,203.8 72.3,96.9 180.2,138.6 191.3,45.2 256.9,121.1 316.4,19.3 333.7,131.9 427.8,84.8 386.0,188.4 511.1,185.8 420.9,258.4" fill="#1a1020"/>
+  <polygon points="486.3,302.7 387.8,321.6 446.2,424.0 340.0,382.7 333.7,487.7 264.9,399.7 204.6,509.3 186.8,394.9 100.4,432.1 133.3,337.3 15.4,336.7 104.3,265.4 16.5,207.4 127.1,191.8 62.3,84.9 170.2,126.6 181.3,33.2 246.9,109.1 306.4,7.3 323.7,119.9 417.8,72.8 376.0,176.4 501.1,173.8 410.9,246.4" fill="#7ad7ff" stroke="#1a1020" stroke-width="14" stroke-linejoin="round"/>
+  <g transform="rotate(-8 256 256)" font-family="'Arial Rounded MT Bold','Nunito','Baloo 2','Segoe UI',sans-serif" font-weight="900" font-size="104" text-anchor="middle" letter-spacing="-2">
+    <text x="262" y="292" fill="#1a1020">BONK!</text>
+    <text x="256" y="284" fill="#ffffff" stroke="#1a1020" stroke-width="10" paint-order="stroke" stroke-linejoin="round">BONK!</text>
+  </g>
+</svg>

@@ -1,0 +1,197 @@
+{
+ "items": [
+  {
+   "id": "sofa",
+   "name": "Sillón de 3",
+   "price": 400,
+   "category": "asientos",
+   "glb": "models/furniture/sofa.glb",
+   "seats": 3,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#8a5cff"
+  },
+  {
+   "id": "loveseat",
+   "name": "Sillón de 2",
+   "price": 300,
+   "category": "asientos",
+   "glb": "models/furniture/loveseat.glb",
+   "seats": 2,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326"
+  },
+  {
+   "id": "armchair",
+   "name": "Sillón individual",
+   "price": 220,
+   "category": "asientos",
+   "glb": "models/furniture/armchair.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326"
+  },
+  {
+   "id": "pouf",
+   "name": "Puf",
+   "price": 90,
+   "category": "asientos",
+   "glb": "models/furniture/pouf.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#ff7350"
+  },
+  {
+   "id": "beanbag",
+   "name": "Puf gigante",
+   "price": 160,
+   "category": "asientos",
+   "glb": "models/furniture/beanbag.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#6bc7ff"
+  },
+  {
+   "id": "bed",
+   "name": "Cama",
+   "price": 380,
+   "category": "dormitorio",
+   "glb": "models/furniture/bed.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#6bc7ff"
+  },
+  {
+   "id": "coffee_table",
+   "name": "Mesa ratona",
+   "price": 150,
+   "category": "mesas",
+   "glb": "models/furniture/coffee_table.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null
+  },
+  {
+   "id": "side_table",
+   "name": "Mesita",
+   "price": 80,
+   "category": "mesas",
+   "glb": "models/furniture/side_table.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null
+  },
+  {
+   "id": "table_lamp",
+   "name": "Lámpara de mesa",
+   "price": 70,
+   "category": "luces",
+   "glb": "models/furniture/table_lamp.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326"
+  },
+  {
+   "id": "floor_lamp",
+   "name": "Lámpara de pie",
+   "price": 120,
+   "category": "luces",
+   "glb": "models/furniture/floor_lamp.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326"
+  },
+  {
+   "id": "neon_moon",
+   "name": "Neón de luna",
+   "price": 200,
+   "category": "luces",
+   "glb": "models/furniture/neon_moon.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null
+  },
+  {
+   "id": "fireplace",
+   "name": "Chimenea",
+   "price": 450,
+   "category": "luces",
+   "glb": "models/furniture/fireplace.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null
+  },
+  {
+   "id": "plant",
+   "name": "Planta",
+   "price": 60,
+   "category": "deco",
+   "glb": "models/furniture/plant.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#ff7350"
+  },
+  {
+   "id": "bookshelf",
+   "name": "Biblioteca",
+   "price": 260,
+   "category": "deco",
+   "glb": "models/furniture/bookshelf.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#9c6236"
+  },
+  {
+   "id": "rug",
+   "name": "Alfombra redonda",
+   "price": 110,
+   "category": "deco",
+   "glb": "models/furniture/rug.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#5c428f"
+  },
+  {
+   "id": "tv",
+   "name": "Tele",
+   "price": 500,
+   "category": "deco",
+   "glb": "models/furniture/tv.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null
+  }
+ ]
+}

@@ -301,6 +301,8 @@ export function ChannelSidebar({
 											onDragOver={
 												channel.type === 'voice'
 													? (event) => {
+															// Sólo se marca al arrastrar a una PERSONA (los archivos van al chat).
+															if (Array.from(event.dataTransfer.types).includes('Files')) return;
 															event.preventDefault();
 															setDropTarget(channel.id);
 														}
@@ -387,7 +389,10 @@ export function ChannelSidebar({
 			<VoicePanel onOpenVoice={onOpenVoice} />
 			<UserPanel onOpenSettings={onOpenSettings} />
 			{menu ? (
-				<div className="context-menu" style={{left: menu.x, top: menu.y}} onClick={(event) => event.stopPropagation()}>
+				<div
+					className="context-menu"
+					style={{left: Math.min(menu.x, window.innerWidth - 200), top: Math.min(menu.y, window.innerHeight - 60)}}
+					onClick={(event) => event.stopPropagation()}>
 					<button
 						type="button"
 						className="is-danger"

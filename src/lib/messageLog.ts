@@ -59,6 +59,24 @@ export function messagesOf(log: MessageLog, channelId: string): Message[] {
 }
 
 /**
+ * Todos los canales de una pasada: mensajes vivos agrupados por canal y ordenados.
+ *
+ * `messagesOf` recorre el log entero por cada canal; con muchos canales y mucho historial eso se
+ * notaba en cada mensaje que llegaba. Acá se recorre una sola vez.
+ */
+export function groupMessages(log: MessageLog): Record<string, Message[]> {
+	const grouped: Record<string, Message[]> = {};
+	for (const record of Object.values(log)) {
+		if (record.deleted) continue;
+		(grouped[record.message.channelId] ??= []).push(record.message);
+	}
+	for (const list of Object.values(grouped)) {
+		list.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
+	}
+	return grouped;
+}
+
+/**
  * El "hasta cuándo sé" de CADA autor: por autor, el mayor `updatedAt` que tengo.
  *
  * Se lleva por autor (y no un solo número global) porque cada máquina pone la hora con su propio

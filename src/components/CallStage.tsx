@@ -90,12 +90,13 @@ function ParticipantCard({
 					/>
 				)}
 			</div>
+			{participant.sharing && !compact ? <span className="pcard-live">EN VIVO</span> : null}
 			<div className="pcard-footer">
 				<span className="pcard-name">
 					{video ? <Icon name="screenShare" size={12} /> : null}
 					{isMe ? `${participant.name} (vos)` : participant.name}
 				</span>
-				{participant.muted ? <Icon name="micOff" size={14} /> : null}
+				{participant.deafened ? <Icon name="headphonesOff" size={14} /> : participant.muted ? <Icon name="micOff" size={14} /> : null}
 			</div>
 			{!isMe ? (
 				<span className={`pcard-status is-${state}`} title={STATE_TITLE[state] ?? state} />
@@ -117,6 +118,12 @@ function useElapsed(joinedAt: number | null): string {
 	const hours = Math.floor(total / 3600);
 	const pad = (value: number) => String(value).padStart(2, '0');
 	return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`;
+}
+
+/** El cronómetro va aparte: así sólo él se re-renderiza cada segundo, no toda la llamada. */
+function CallTimer({joinedAt}: {joinedAt: number | null}): JSX.Element {
+	const elapsed = useElapsed(joinedAt);
+	return <span className="call-stage-timer">{elapsed}</span>;
 }
 
 function VolumeRow({
@@ -170,13 +177,39 @@ export function CallStage(): JSX.Element | null {
 	const meshStates = useMeshStates();
 	const localScreen = useLocalScreen();
 	const speakingIds = useSpeakingIds();
-	const elapsed = useElapsed(voice.joinedAt);
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 	const [menu, setMenu] = useState<{id: string; x: number; y: number} | null>(null);
 	const [profile, setProfile] = useState<UserLike | null>(null);
 	const [hideStrip, setHideStrip] = useState(false);
 	const [showVolume, setShowVolume] = useState(false);
 	const stageRef = useRef<HTMLDivElement>(null);
+
+	// Cuando alguien EMPIEZA a transmitir y no estás mirando nada en grande, su pantalla pasa al
+	// frente sola (antes había que encontrar su cuadrito y hacerle click).
+	const sharingKey = (voice.channelId ? (state.voiceMembers[voice.channelId] ?? []) : [])
+		.filter((participant) => participant.sharing && participant.id !== state.me.id)
+		.map((participant) => participant.id)
+		.join(',');
+	const previousSharers = useRef<string[]>([]);
+	useEffect(() => {
+		const now = sharingKey ? sharingKey.split(',') : [];
+		const started = now.find((id) => !previousSharers.current.includes(id));
+		previousSharers.current = now;
+		if (started) setExpandedId((current) => current ?? started);
+	}, [sharingKey]);
+
+	// Escape cierra el menú, el panel de sonido o vuelve a la grilla.
+	useEffect(() => {
+		const onKey = (event: KeyboardEvent) => {
+			if (event.key !== 'Escape' || document.fullscreenElement) return;
+			if (menu) setMenu(null);
+			else if (showVolume) setShowVolume(false);
+			else if (expandedId) setExpandedId(null);
+		};
+		window.addEventListener('keydown', onKey);
+		return () => window.removeEventListener('keydown', onKey);
+	}, [menu, showVolume, expandedId]);
+
 	if (!voice.channelId) return null;
 
 	const channel = state.channels.find((c) => c.id === voice.channelId);
@@ -185,6 +218,13 @@ export function CallStage(): JSX.Element | null {
 		name: state.me.name,
 		color: state.me.avatarColor,
 		avatarUrl: state.me.avatarUrl,
+		avatarCrop: state.me.avatarCrop,
+		decoration: state.me.decoration,
+		decorationColor: state.me.decorationColor,
+		customDeco: state.me.customDeco,
+		decoImage: state.me.decoImage,
+		decoSize: state.me.decoSize,
+		original: state.me.particleOriginal,
 		muted: voice.muted,
 		deafened: voice.deafened,
 		sharing: voice.sharing,
@@ -235,7 +275,7 @@ export function CallStage(): JSX.Element | null {
 					) : (
 						<span className="call-stage-sub">{!remoteCount ? 'Estás solo en el canal' : `${readyCount} de ${remoteCount} en llamada`}</span>
 					)}
-					<span className="call-stage-timer">{elapsed}</span>
+					<CallTimer joinedAt={voice.joinedAt} />
 				</div>
 				<div className="call-stage-header-tools">
 					{expanded ? <IconButton icon="grid" label="Volver a la grilla" onClick={() => setExpandedId(null)} /> : null}

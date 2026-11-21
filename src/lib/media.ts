@@ -272,6 +272,11 @@ export class VoiceMesh {
 		return this.peerVolumes[peerId] ?? 1;
 	}
 
+	/** Copia de los volúmenes por persona (para que la interfaz detecte cambios). */
+	getPeerVolumes(): Record<string, number> {
+		return {...this.peerVolumes};
+	}
+
 	setPeerVolume(peerId: string, volume: number): void {
 		this.peerVolumes[peerId] = Math.min(1, Math.max(0, volume));
 		this.emit();
@@ -973,13 +978,18 @@ export class VoiceMesh {
 	private detachAnalyser(id: string): void {
 		this.analysers.get(id)?.source.disconnect();
 		this.analysers.delete(id);
+		this.lastLoud.delete(id);
 		if (this.speaking.delete(id)) this.emit();
 	}
+
+	/** Última vez que cada uno superó el umbral (para que el anillo no parpadee entre sílabas). */
+	private lastLoud = new Map<string, number>();
 
 	private startSpeakingLoop(): void {
 		if (this.speakingTimer) return;
 		this.speakingTimer = setInterval(() => {
 			let changed = false;
+			const now = performance.now();
 			for (const [id, entry] of this.analysers) {
 				entry.analyser.getByteTimeDomainData(entry.data);
 				let sum = 0;
@@ -987,11 +997,17 @@ export class VoiceMesh {
 					const value = (entry.data[i] - 128) / 128;
 					sum += value * value;
 				}
-				const loud = Math.sqrt(sum / entry.data.length) > 0.02;
-				if (loud && !this.speaking.has(id)) {
+				const level = Math.sqrt(sum / entry.data.length);
+				// Histéresis: para EMPEZAR a marcar hace falta más volumen que para seguir marcando,
+				// y se sostiene 300 ms después de la última sílaba. Antes el anillo verde parpadeaba
+				// hasta 10 veces por segundo y cada parpadeo re-renderizaba la llamada y la barra.
+				const speaking = this.speaking.has(id);
+				const loud = level > (speaking ? 0.015 : 0.022);
+				if (loud) this.lastLoud.set(id, now);
+				if (loud && !speaking) {
 					this.speaking.add(id);
 					changed = true;
-				} else if (!loud && this.speaking.has(id)) {
+				} else if (!loud && speaking && now - (this.lastLoud.get(id) ?? 0) > 300) {
 					this.speaking.delete(id);
 					changed = true;
 				}

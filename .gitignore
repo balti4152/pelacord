@@ -4,3 +4,15 @@ release
 *.local
 .DS_Store
 release-log.txt
+# Locales / generados
+.codegraph/
+tsconfig.tsbuildinfo
+__pycache__/
+Pelacord Setup *.exe
+# Vistas previas 3D: sólo se versionan las hojas resumen (el resto se regenera con los scripts)
+art/previews/*
+!art/previews/sheet_avatar.png
+!art/previews/sheet_rooms.png
+!art/previews/costumes.png
+!art/previews/room_shop.png
+!art/previews/shop_showcase.png

@@ -13,6 +13,7 @@ import {
 	musicSyncAction,
 	type MusicTrack,
 	receiveMusicSnapshot,
+	sameMusicMoment,
 } from '@/lib/musicQueue';
 import type {VoiceState} from '@/types';
 
@@ -114,7 +115,11 @@ export function useMusicJam(
 				offerJam(channel, from, existing);
 				return;
 			}
-			setJam(channel, receiveMusicSnapshot({...incoming.state, hostId: from}));
+			const next = receiveMusicSnapshot({...incoming.state, hostId: from});
+			// Reafirmación sin cambios (mismo tema, cola y segundo): no se re-renderiza nada. Quedarse
+			// con el reloj anterior además evita que el "ruido" de la red mueva la posición a cada rato.
+			if (sameMusicMoment(existing, next)) return;
+			setJam(channel, next);
 		});
 		const offCommand = transport.onCommand(({from, payload}) => {
 			const message = payload as {kind: string; channelId?: string; voiceSession?: string; command?: MusicCommand} | null;
@@ -198,14 +203,27 @@ export function useMusicJam(
 					onReady: (audio) => {
 						clearTimeout(timeout);
 						const current = jams.current[channelId];
-						if (current.track?.id !== track.id || current.playbackId !== playbackId) return;
+						if (!current || current.track?.id !== track.id || current.playbackId !== playbackId) return;
 						seekMusic(audio, currentPositionMs(current) / 1000);
-						if (!current.pausedAt) void audio.play().catch((error) => { if (error.name !== 'AbortError') fail(); });
+						if (!current.pausedAt) {
+							void audio
+								.play()
+								.then(() => {
+									// Mientras cargaba el salto, la Jam siguió avanzando: al arrancar de verdad se
+									// re-alinea una vez. Si no, uno arrancaba 1-3 s atrás y tardaba en alcanzar.
+									if (signal.aborted) return;
+									const latest = jams.current[channelId];
+									if (!latest || latest.pausedAt || latest.playbackId !== playbackId) return;
+									const expected = currentPositionMs(latest);
+									if (Math.abs(audio.currentTime * 1000 - expected) > 300) seekMusic(audio, expected / 1000);
+								})
+								.catch((error) => { if (error.name !== 'AbortError') fail(); });
+						}
 						setPlayback({key, phase: 'ready'});
 					},
 					onEnded: () => {
 						const current = jams.current[channelId];
-						if (current.track?.id !== track.id || current.playbackId !== playbackId) return;
+						if (!current || current.track?.id !== track.id || current.playbackId !== playbackId) return;
 						if (!current.pausedAt && hostFor(channelId) === meId) applyCommand(channelId, {kind: 'skip'});
 					},
 					onError: fail,
@@ -224,6 +242,7 @@ export function useMusicJam(
 		const audio = currentMusicAudio();
 		if (!key || !channelId || !audio || audio.readyState < 1) return;
 		const current = jams.current[channelId];
+		if (!current) return;
 		seekMusic(audio, currentPositionMs(current) / 1000);
 		if (current.pausedAt) audio.pause();
 		else if (audio.paused && !audio.ended) {
@@ -237,18 +256,31 @@ export function useMusicJam(
 		const timer = setInterval(() => {
 			const audio = currentMusicAudio();
 			const current = jams.current[channelId];
-			if (!audio || audio.readyState < 1 || current.pausedAt || current.track?.id !== track?.id || current.playbackId !== playbackId) return;
+			if (!audio || !current || audio.readyState < 1 || current.pausedAt || current.track?.id !== track?.id || current.playbackId !== playbackId) return;
 			if (audio.ended) {
 				if (hostFor(channelId) === meId) applyCommand(channelId, {kind: 'skip'});
 				return;
 			}
+			// Cargando (buffer vacío tras un salto): medir ahora daría un desvío falso.
+			if (audio.seeking || audio.readyState < 3) return;
 			const expected = currentPositionMs(current);
 			const action = musicSyncAction(audio.currentTime * 1000 - expected);
-			audio.playbackRate = action.kind === 'nudge' ? action.rate : 1;
+			const rate = action.kind === 'nudge' ? action.rate : 1;
+			if (audio.playbackRate !== rate) audio.playbackRate = rate;
 			if (action.kind === 'seek') seekMusic(audio, expected / 1000);
-		}, 3000);
+		}, 1500);
 		return () => clearInterval(timer);
 	}, [applyCommand, channelId, hostFor, key, meId, playbackId, track?.id]);
+
+	// El próximo tema se resuelve por adelantado (yt-dlp tarda 2-4 s): así el "siguiente" arranca
+	// casi al instante en vez de quedarse en "Cargando audio…".
+	const nextTrack = musicState.queue[0];
+	const nextTarget = nextTrack ? nextTrack.url || nextTrack.id : null;
+	useEffect(() => {
+		if (!channelId || !nextTarget) return;
+		const timer = setTimeout(() => getDesktopTransport()?.prefetchAudio?.(nextTarget), 1500);
+		return () => clearTimeout(timer);
+	}, [channelId, nextTarget]);
 
 	return {
 		musicState,

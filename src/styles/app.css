@@ -6662,3 +6662,403 @@ body.no-cosmetic-anim .avatar-effect::after {
 	color: var(--text-link, var(--spotify-green));
 	text-decoration: underline;
 }
+
+/* ==========================================================================
+   Pulido general (interfaz más prolija y estable)
+   Va al final a propósito: refina lo de arriba sin tocar cada bloque.
+   ========================================================================== */
+
+/* ---------- Foco visible con teclado (accesibilidad) ---------- */
+
+button:focus-visible,
+[role='button']:focus-visible,
+a:focus-visible,
+input[type='range']:focus-visible,
+.channel:focus-visible,
+.member:focus-visible {
+	outline: 2px solid color-mix(in srgb, var(--brand-primary) 80%, white);
+	outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/* ---------- Transiciones suaves en lo que se toca seguido ---------- */
+
+.channel,
+.member,
+.icon-btn,
+.voice-mini,
+.call-control,
+.music-row,
+.music-row-action,
+.music-skip,
+.music-play,
+.composer-btn,
+.message {
+	transition:
+		background-color var(--transition-fast),
+		color var(--transition-fast),
+		border-color var(--transition-fast),
+		box-shadow var(--transition-fast),
+		opacity var(--transition-fast),
+		transform var(--transition-fast);
+}
+
+.call-control:active,
+.voice-mini:active,
+.music-play:active:not(:disabled),
+.composer-btn:active {
+	transform: scale(0.94);
+}
+
+.music-play:hover:not(:disabled) {
+	transform: scale(1.06);
+}
+
+/* El anillo de "hablando" aparece y se va con un fundido, no de golpe. */
+.pcard,
+.voice-member .avatar,
+.voice-member {
+	transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+/* Canal con mensajes sin leer: nombre en blanco y en negrita, como Discord. */
+.channel.is-unread:not(.is-active) .channel-name {
+	color: var(--text-primary);
+	font-weight: 600;
+}
+
+/* ---------- Menús y diálogos: aparecen con una animación corta ---------- */
+
+@keyframes pc-pop-in {
+	from {
+		opacity: 0;
+		transform: translateY(4px) scale(0.98);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+
+.context-menu,
+.call-menu,
+.call-sound,
+.dialog,
+.mention-picker {
+	animation: pc-pop-in 120ms ease-out;
+	transform-origin: top left;
+}
+
+/* ---------- Chat ---------- */
+
+.chat {
+	position: relative;
+}
+
+.chat-welcome {
+	padding: 2rem 1rem 0.5rem;
+}
+
+.chat-welcome .chat-intro-icon {
+	width: 4.25rem;
+	height: 4.25rem;
+	margin: 0 0 1rem;
+	border-radius: var(--radius-full);
+}
+
+.chat-welcome h2 {
+	font-size: 1.75rem;
+	font-weight: 800;
+	letter-spacing: -0.01em;
+	color: var(--text-primary);
+	margin-bottom: 0.375rem;
+}
+
+.chat-welcome p {
+	color: var(--text-tertiary);
+	font-size: 0.9375rem;
+}
+
+.messages > .divider:first-child {
+	margin-top: 0.5rem;
+}
+
+.divider {
+	text-transform: capitalize;
+	letter-spacing: 0.01em;
+}
+
+/* Botón "Ir al presente": flota arriba del cuadro de escribir cuando estás leyendo más arriba. */
+.chat-jump {
+	position: absolute;
+	left: 50%;
+	bottom: 5.25rem;
+	transform: translateX(-50%);
+	z-index: 5;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.4375rem 0.875rem;
+	border-radius: var(--radius-full);
+	background-color: var(--brand-primary);
+	color: var(--text-on-brand-primary);
+	font-size: 0.8125rem;
+	font-weight: 600;
+	box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.35));
+	animation: pc-jump-in 160ms ease-out;
+	white-space: nowrap;
+}
+
+@keyframes pc-jump-in {
+	from {
+		opacity: 0;
+		transform: translate(-50%, 6px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(-50%);
+	}
+}
+
+.chat-jump span {
+	opacity: 0.85;
+	font-weight: 500;
+	padding-left: 0.5rem;
+	border-left: 1px solid color-mix(in srgb, var(--text-on-brand-primary) 35%, transparent);
+}
+
+.chat-jump:hover {
+	filter: brightness(1.08);
+}
+
+/* YouTube: miniatura con botón de play (el reproductor carga recién al tocar). */
+.embed-player-poster {
+	position: relative;
+	display: grid;
+	place-items: center;
+	padding: 0;
+	overflow: hidden;
+	cursor: pointer;
+}
+
+.embed-player-poster img {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	transition: transform 200ms ease, filter 200ms ease;
+}
+
+.embed-player-poster:hover img {
+	transform: scale(1.02);
+	filter: brightness(0.85);
+}
+
+.embed-play-badge {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 3.5rem;
+	height: 2.5rem;
+	border-radius: 0.75rem;
+	background-color: rgba(0, 0, 0, 0.72);
+	color: #fff;
+	transition: background-color 150ms ease, transform 150ms ease;
+}
+
+.embed-player-poster:hover .embed-play-badge {
+	background-color: #ff0000;
+	transform: scale(1.06);
+}
+
+/* ---------- Llamada ---------- */
+
+.pcard-live {
+	position: absolute;
+	top: 0.5rem;
+	left: 0.5rem;
+	padding: 0.0625rem 0.375rem;
+	border-radius: var(--radius-sm);
+	background-color: var(--status-dnd);
+	color: #fff;
+	font-size: 0.625rem;
+	font-weight: 800;
+	letter-spacing: 0.04em;
+}
+
+.pcard.has-video:hover {
+	border-color: color-mix(in srgb, var(--brand-primary) 60%, var(--border-color));
+}
+
+@keyframes pc-signal-pulse {
+	0%,
+	100% {
+		opacity: 1;
+	}
+	50% {
+		opacity: 0.45;
+	}
+}
+
+.voice-panel-signal.is-recovering {
+	animation: pc-signal-pulse 1.2s ease-in-out infinite;
+}
+
+/* ---------- Música ---------- */
+
+.music-bar-center {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.25rem;
+	min-width: min(26rem, 40vw);
+}
+
+.music-progress {
+	display: flex;
+	align-items: center;
+	gap: 0.5rem;
+	width: 100%;
+	font-size: 0.6875rem;
+	color: var(--text-tertiary);
+	font-variant-numeric: tabular-nums;
+}
+
+.music-progress-track {
+	position: relative;
+	flex: 1;
+	height: 4px;
+	border-radius: var(--radius-full);
+	background-color: var(--background-modifier-accent, var(--background-tertiary));
+	overflow: hidden;
+}
+
+.music-progress-fill {
+	position: absolute;
+	inset: 0 auto 0 0;
+	border-radius: inherit;
+	background-color: var(--text-secondary);
+	transition: width 500ms linear;
+}
+
+.music-bar:hover .music-progress-fill {
+	background-color: var(--brand-primary);
+}
+
+.music-row.is-playing {
+	background-color: color-mix(in srgb, var(--brand-primary) 12%, transparent);
+}
+
+.music-row.is-playing .music-row-title {
+	color: var(--brand-primary-light, var(--brand-primary));
+}
+
+.music-list.is-refreshing {
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+/* Ecualizador animado al lado del tema que suena. */
+.music-eq {
+	display: inline-flex;
+	align-items: flex-end;
+	gap: 2px;
+	height: 0.75rem;
+	margin-right: 0.4375rem;
+	vertical-align: baseline;
+}
+
+.music-eq i {
+	width: 3px;
+	height: 100%;
+	border-radius: 1px;
+	background-color: currentColor;
+	animation: pc-eq 900ms ease-in-out infinite;
+	transform-origin: bottom;
+}
+
+.music-eq i:nth-child(2) {
+	animation-delay: -300ms;
+}
+
+.music-eq i:nth-child(3) {
+	animation-delay: -600ms;
+}
+
+@keyframes pc-eq {
+	0%,
+	100% {
+		transform: scaleY(0.3);
+	}
+	50% {
+		transform: scaleY(1);
+	}
+}
+
+/* ---------- Esqueletos de carga ---------- */
+
+@keyframes pc-shimmer {
+	from {
+		background-position: 150% 0;
+	}
+	to {
+		background-position: -50% 0;
+	}
+}
+
+.skeleton {
+	display: block;
+	border-radius: var(--radius-sm);
+	background: linear-gradient(
+		90deg,
+		var(--background-modifier-hover) 25%,
+		color-mix(in srgb, var(--text-primary) 9%, transparent) 50%,
+		var(--background-modifier-hover) 75%
+	);
+	background-size: 200% 100%;
+	animation: pc-shimmer 1.2s ease-in-out infinite;
+}
+
+.skeleton-art {
+	width: 2.75rem;
+	height: 2.75rem;
+	flex-shrink: 0;
+}
+
+.skeleton-line {
+	height: 0.75rem;
+	margin: 0.1875rem 0;
+}
+
+.skeleton-line.is-short {
+	width: 35%;
+	height: 0.625rem;
+}
+
+.music-row.is-skeleton:hover {
+	background: none;
+}
+
+/* ---------- Sin animaciones para quien lo pide ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+	.context-menu,
+	.call-menu,
+	.call-sound,
+	.dialog,
+	.mention-picker,
+	.chat-jump,
+	.skeleton,
+	.music-eq i,
+	.voice-panel-signal.is-recovering {
+		animation: none !important;
+	}
+
+	.music-progress-fill {
+		transition: none;
+	}
+}

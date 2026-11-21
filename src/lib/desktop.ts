@@ -112,6 +112,8 @@ interface DesktopTransport {
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;
+	/** Música: resuelve el audio de un tema por adelantado (el próximo de la cola). */
+	prefetchAudio?(target: string): void;
 	shareFile(payload: {filePath: string; name: string; mime: string; size: number}): Promise<string | null>;
 	shareBuffer(payload: {name: string; mime: string; data: ArrayBuffer}): Promise<string | null>;
 	/** Guarda un asset del perfil (avatar o banner, incluido GIF animado) y lo sirve por P2P. */

@@ -1,0 +1,692 @@
+{
+ "version": 1,
+ "currency": {
+  "name": "Pelamonedas",
+  "startCoins": 500
+ },
+ "avatar": {
+  "glb": "models/avatar_modular.glb",
+  "bodies": [
+   "M",
+   "F"
+  ],
+  "palettes": {
+   "hair": [
+    "#1a1210",
+    "#3b2418",
+    "#5c3a21",
+    "#8a5a2b",
+    "#c48a45",
+    "#e6c27a",
+    "#f2e2b0",
+    "#b8b8bc",
+    "#f4f4f4",
+    "#a8322a",
+    "#e2572d",
+    "#ff8fb8",
+    "#b06cff",
+    "#4f7dff",
+    "#3fc2c9",
+    "#5ccf6b"
+   ],
+   "skin": [
+    "#fde3d0",
+    "#fbd2b4",
+    "#f3bd96",
+    "#e0a476",
+    "#c9875a",
+    "#a86a43",
+    "#86512f",
+    "#5e3720",
+    "#3f2415"
+   ],
+   "clothes": [
+    "#f4f4f4",
+    "#222026",
+    "#8a5cff",
+    "#f5b326",
+    "#ff7350",
+    "#6bc7ff",
+    "#d91f2e",
+    "#66e6b3",
+    "#ff8fb8",
+    "#2f3b78",
+    "#4a7a46",
+    "#8a5a2b",
+    "#f2e2b0",
+    "#3fc2c9"
+   ]
+  },
+  "looks": {
+   "nico": {
+    "body": "M",
+    "hair": "hair_spiky",
+    "eyes": "eyes_dot",
+    "brows": "brows_thick",
+    "mouth": "mouth_smile",
+    "top": "top_hoodie",
+    "bottom": "bottom_pants",
+    "shoes": "shoes_sneakers"
+   },
+   "sofi": {
+    "body": "F",
+    "hair": "hair_ponytail",
+    "eyes": "eyes_lash",
+    "brows": "brows_arch",
+    "mouth": "mouth_smile",
+    "cheeks": "cheeks_blush",
+    "top": "top_tee",
+    "bottom": "bottom_skirt",
+    "shoes": "shoes_sneakers"
+   },
+   "lu": {
+    "body": "F",
+    "hair": "hair_buns",
+    "eyes": "eyes_big",
+    "brows": "brows_line",
+    "mouth": "mouth_grin",
+    "cheeks": "cheeks_blush",
+    "top": "top_dress",
+    "shoes": "shoes_boots"
+   },
+   "tomi": {
+    "body": "M",
+    "hair": "hair_curly",
+    "eyes": "eyes_happy",
+    "brows": "brows_line",
+    "mouth": "mouth_grin",
+    "top": "top_tee",
+    "bottom": "bottom_shorts",
+    "shoes": "shoes_sneakers"
+   },
+   "mar": {
+    "body": "F",
+    "hair": "hair_long",
+    "eyes": "eyes_lash",
+    "brows": "brows_line",
+    "mouth": "mouth_neutral",
+    "top": "top_hoodie",
+    "bottom": "bottom_pants",
+    "shoes": "shoes_boots"
+   },
+   "juan": {
+    "body": "M",
+    "hair": "hair_bowl",
+    "eyes": "eyes_dot",
+    "brows": "brows_line",
+    "mouth": "mouth_neutral",
+    "top": "top_tank",
+    "bottom": "bottom_shorts",
+    "shoes": "shoes_sneakers"
+   }
+  }
+ },
+ "shops": {
+  "clothes": {
+   "title": "Ropa y estilo",
+   "sections": [
+    "hair",
+    "eyes",
+    "brows",
+    "mouth",
+    "cheeks",
+    "top",
+    "bottom",
+    "shoes",
+    "hat",
+    "costume"
+   ]
+  },
+  "furniture": {
+   "title": "Muebles",
+   "sections": [
+    "asientos",
+    "deco",
+    "dormitorio",
+    "luces",
+    "mesas"
+   ]
+  }
+ },
+ "items": [
+  {
+   "id": "top_tee",
+   "name": "Remera",
+   "slot": "top",
+   "price": 0,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Tee_M",
+    "Top_Tee_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "top_tank",
+   "name": "Musculosa",
+   "slot": "top",
+   "price": 150,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Tank_M",
+    "Top_Tank_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "top_hoodie",
+   "name": "Buzo con capucha",
+   "slot": "top",
+   "price": 150,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Hoodie_M",
+    "Top_Hoodie_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "top_dress",
+   "name": "Vestido",
+   "slot": "top",
+   "price": 150,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Dress_M",
+    "Top_Dress_F"
+   ],
+   "hides": "bottom",
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "bottom_pants",
+   "name": "Pantalón",
+   "slot": "bottom",
+   "price": 0,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Pants_M",
+    "Bottom_Pants_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "bottom_shorts",
+   "name": "Bermuda",
+   "slot": "bottom",
+   "price": 120,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Shorts_M",
+    "Bottom_Shorts_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "bottom_skirt",
+   "name": "Pollera",
+   "slot": "bottom",
+   "price": 120,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Skirt_M",
+    "Bottom_Skirt_F"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "eyes_dot",
+   "name": "Ojitos",
+   "slot": "eyes",
+   "price": 0,
+   "recolor": null,
+   "meshes": [
+    "Eyes_Dot"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "eyes_lash",
+   "name": "Pestañas",
+   "slot": "eyes",
+   "price": 60,
+   "recolor": null,
+   "meshes": [
+    "Eyes_Lash"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "eyes_happy",
+   "name": "Ojos felices",
+   "slot": "eyes",
+   "price": 60,
+   "recolor": null,
+   "meshes": [
+    "Eyes_Happy"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "eyes_big",
+   "name": "Ojos grandes",
+   "slot": "eyes",
+   "price": 60,
+   "recolor": null,
+   "meshes": [
+    "Eyes_Big"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "brows_line",
+   "name": "Cejas finas",
+   "slot": "brows",
+   "price": 0,
+   "recolor": null,
+   "meshes": [
+    "Brows_Line"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "brows_thick",
+   "name": "Cejas gruesas",
+   "slot": "brows",
+   "price": 40,
+   "recolor": null,
+   "meshes": [
+    "Brows_Thick"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "brows_arch",
+   "name": "Cejas arqueadas",
+   "slot": "brows",
+   "price": 40,
+   "recolor": null,
+   "meshes": [
+    "Brows_Arch"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "mouth_neutral",
+   "name": "Boca tranqui",
+   "slot": "mouth",
+   "price": 0,
+   "recolor": null,
+   "meshes": [
+    "Mouth_Neutral"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "mouth_smile",
+   "name": "Sonrisa",
+   "slot": "mouth",
+   "price": 60,
+   "recolor": null,
+   "meshes": [
+    "Mouth_Smile"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "mouth_grin",
+   "name": "Sonrisota",
+   "slot": "mouth",
+   "price": 60,
+   "recolor": null,
+   "meshes": [
+    "Mouth_Grin"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "cheeks_blush",
+   "name": "Cachetes rosados",
+   "slot": "cheeks",
+   "price": 50,
+   "recolor": null,
+   "meshes": [
+    "Cheeks_Blush"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_bowl",
+   "name": "Flequillo clásico",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Bowl"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_spiky",
+   "name": "Pinchos",
+   "slot": "hair",
+   "price": 120,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Spiky"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_long",
+   "name": "Pelo largo",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Long"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_ponytail",
+   "name": "Colita",
+   "slot": "hair",
+   "price": 120,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Ponytail"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_buns",
+   "name": "Dos rodetes",
+   "slot": "hair",
+   "price": 120,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Buns"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_curly",
+   "name": "Rulos",
+   "slot": "hair",
+   "price": 120,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Curly"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "shoes_sneakers",
+   "name": "Zapatillas",
+   "slot": "shoes",
+   "price": 0,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Sneakers"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "shoes_boots",
+   "name": "Botas",
+   "slot": "shoes",
+   "price": 100,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Boots"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "costume_cone",
+   "name": "Cono de tránsito",
+   "slot": "hat",
+   "price": 250,
+   "glb": "models/costume_cone.glb",
+   "attach": "head"
+  },
+  {
+   "id": "costume_frog",
+   "name": "Gorro de rana",
+   "slot": "hat",
+   "price": 300,
+   "glb": "models/costume_frog.glb",
+   "attach": "head"
+  },
+  {
+   "id": "costume_pirate",
+   "name": "Sombrero pirata",
+   "slot": "hat",
+   "price": 300,
+   "glb": "models/costume_pirate.glb",
+   "attach": "head"
+  },
+  {
+   "id": "costume_hotdog",
+   "name": "Traje de pancho",
+   "slot": "costume",
+   "price": 450,
+   "glb": "models/costume_hotdog.glb",
+   "attach": "spine",
+   "hides": [
+    "top",
+    "hat"
+   ]
+  },
+  {
+   "id": "sofa",
+   "name": "Sillón de 3",
+   "price": 400,
+   "category": "asientos",
+   "glb": "models/furniture/sofa.glb",
+   "seats": 3,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#8a5cff",
+   "slot": "furniture"
+  },
+  {
+   "id": "loveseat",
+   "name": "Sillón de 2",
+   "price": 300,
+   "category": "asientos",
+   "glb": "models/furniture/loveseat.glb",
+   "seats": 2,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326",
+   "slot": "furniture"
+  },
+  {
+   "id": "armchair",
+   "name": "Sillón individual",
+   "price": 220,
+   "category": "asientos",
+   "glb": "models/furniture/armchair.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326",
+   "slot": "furniture"
+  },
+  {
+   "id": "pouf",
+   "name": "Puf",
+   "price": 90,
+   "category": "asientos",
+   "glb": "models/furniture/pouf.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#ff7350",
+   "slot": "furniture"
+  },
+  {
+   "id": "beanbag",
+   "name": "Puf gigante",
+   "price": 160,
+   "category": "asientos",
+   "glb": "models/furniture/beanbag.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#6bc7ff",
+   "slot": "furniture"
+  },
+  {
+   "id": "bed",
+   "name": "Cama",
+   "price": 380,
+   "category": "dormitorio",
+   "glb": "models/furniture/bed.glb",
+   "seats": 1,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#6bc7ff",
+   "slot": "furniture"
+  },
+  {
+   "id": "coffee_table",
+   "name": "Mesa ratona",
+   "price": 150,
+   "category": "mesas",
+   "glb": "models/furniture/coffee_table.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "side_table",
+   "name": "Mesita",
+   "price": 80,
+   "category": "mesas",
+   "glb": "models/furniture/side_table.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "table_lamp",
+   "name": "Lámpara de mesa",
+   "price": 70,
+   "category": "luces",
+   "glb": "models/furniture/table_lamp.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326",
+   "slot": "furniture"
+  },
+  {
+   "id": "floor_lamp",
+   "name": "Lámpara de pie",
+   "price": 120,
+   "category": "luces",
+   "glb": "models/furniture/floor_lamp.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#f5b326",
+   "slot": "furniture"
+  },
+  {
+   "id": "neon_moon",
+   "name": "Neón de luna",
+   "price": 200,
+   "category": "luces",
+   "glb": "models/furniture/neon_moon.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "fireplace",
+   "name": "Chimenea",
+   "price": 450,
+   "category": "luces",
+   "glb": "models/furniture/fireplace.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "plant",
+   "name": "Planta",
+   "price": 60,
+   "category": "deco",
+   "glb": "models/furniture/plant.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#ff7350",
+   "slot": "furniture"
+  },
+  {
+   "id": "bookshelf",
+   "name": "Biblioteca",
+   "price": 260,
+   "category": "deco",
+   "glb": "models/furniture/bookshelf.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#9c6236",
+   "slot": "furniture"
+  },
+  {
+   "id": "rug",
+   "name": "Alfombra redonda",
+   "price": 110,
+   "category": "deco",
+   "glb": "models/furniture/rug.glb",
+   "seats": 0,
+   "recolor": [
+    "Base",
+    "BaseLight"
+   ],
+   "defaultColor": "#5c428f",
+   "slot": "furniture"
+  },
+  {
+   "id": "tv",
+   "name": "Tele",
+   "price": 500,
+   "category": "deco",
+   "glb": "models/furniture/tv.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  }
+ ]
+}
