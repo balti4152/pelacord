@@ -216,32 +216,24 @@ def anim_idle(rig):
 
 
 def anim_walk(rig):
-	"""Caminata chibi (loop de 24 cuadros = 1 s, dos pasos): saltarina y contenta.
-
-	Para que el loop no "frene": TODAS las curvas arrancan y terminan en un extremo (donde la
-	velocidad es cero), así el último cuadro empalma con el primero sin tironeo.
-	  - Piernas y brazos: extremos en los contactos (1, 13, 25).
-	  - Rebote: abajo en cada contacto (1, 13, 25), arriba en cada cruce (7, 19).
-	  - Bamboleo de cadera y cabeza: un lado por paso, extremos en los contactos.
-	"""
+	"""Dos pasos en un segundo, con el empalme en mitad del balanceo."""
 	new_action(rig, 'Walk')
-	for f, side in ((1, 1), (13, -1), (25, 1)):
-		key(rig, f, 'leg_L', rot=(-36 * side, 0, -2))
-		key(rig, f, 'leg_R', rot=(36 * side, 0, 2))
-		# Brazos un poco hacia adelante y abiertos, balanceo amplio (más "muñequito" que soldado).
-		key(rig, f, 'arm_L', rot=(46 * side - 8, 0, -18))
-		key(rig, f, 'arm_R', rot=(-46 * side - 8, 0, 18))
-		key(rig, f, 'spine', rot=(4, 6 * side, 0))
-		key(rig, f, 'head', rot=(-2, -4 * side, -5 * side))
-	for f, side in ((1, 1), (13, -1), (25, 1)):
-		key(rig, f, 'hips', rot=(0, 0, 7 * side))
-	for f, up in ((1, -0.018), (7, 0.055), (13, -0.018), (19, 0.055), (25, -0.018)):
-		key(rig, f, 'hips', loc=(0, up, 0))
-	# La cabeza asiente un toque con cada rebote (va un poco atrasada: se siente blandita).
-	for f, nod in ((3, 3), (9, -3), (15, 3), (21, -3)):
-		pb = rig.pose.bones['head']
-		pb.rotation_euler.x = DEG(nod - 2)
-		pb.keyframe_insert('rotation_euler', index=0, frame=f)
+	for frame in range(25):
+		# Se repite la fase inicial en el último fotograma, sin cuadros inmóviles al exportar.
+		phase = math.tau * ((frame % 24) / 24 + .25)
+		stride, swing = math.cos(phase), math.sin(phase)
+		key(rig, frame, 'leg_L', rot=(-33 * stride, 0, -2))
+		key(rig, frame, 'leg_R', rot=(33 * stride, 0, 2))
+		key(rig, frame, 'arm_L', rot=(30 * stride - 7, 0, -13))
+		key(rig, frame, 'arm_R', rot=(-30 * stride - 7, 0, 13))
+		key(rig, frame, 'hips', rot=(0, 0, 4 * stride), loc=(.010 * stride, .012 - .027 * math.cos(2 * phase), 0))
+		key(rig, frame, 'spine', rot=(4, 3.5 * stride, 1.5 * swing))
+		key(rig, frame, 'head', rot=(-2 + 2 * math.sin(2 * phase - .45), -2.5 * stride, -2.4 * swing))
+		for side, suffix in ((1, 'L'), (-1, 'R')):
+			if 'knee_' + suffix in rig.pose.bones:
+				bend = 11 - 9 * side * stride + 17 * max(0, side * swing) ** 2
+				key(rig, frame, 'knee_' + suffix, rot=(bend, 0, 0))
+				key(rig, frame, 'elbow_' + suffix, rot=(-11 - 3 * side * stride, 0, 0))
 
 
 def anim_run(rig):
@@ -258,6 +250,19 @@ def anim_run(rig):
 	# Abajo en cada pisada (1, 8, 15) y arriba en el aire (4, 11): arranca y termina en un extremo.
 	for f, up in ((1, -0.045), (4, 0.09), (8, -0.045), (11, 0.09), (15, -0.045)):
 		key(rig, f, 'hips', loc=(0, up, 0))
+
+
+def anim_jump(rig):
+	"""En el aire (loop de 12 cuadros): piernitas recogidas, brazos arriba y un pataleo cartoon."""
+	new_action(rig, 'Jump')
+	for f, k in ((1, 0), (7, 1), (13, 0)):
+		key(rig, f, 'leg_L', rot=(-48 - 10 * k, 0, -6))
+		key(rig, f, 'leg_R', rot=(-30 + 10 * k, 0, 6))
+		key(rig, f, 'arm_L', rot=(-10, 0, -140 - 12 * k))
+		key(rig, f, 'arm_R', rot=(-10, 0, 140 + 12 * k))
+		key(rig, f, 'spine', rot=(-6, 0, 0))
+		key(rig, f, 'head', rot=(-10 - 4 * k, 0, 0))
+		key(rig, f, 'hips', loc=(0, 0.04 * k, 0))
 
 
 def anim_sit(rig):
@@ -403,7 +408,7 @@ def anim_shrug(rig):
 		key(rig, f, 'head', rot=(0, 0, 12 * k))
 
 
-ANIMATIONS = (anim_idle, anim_walk, anim_run, anim_sit, anim_talk, anim_blink, anim_wave, anim_slap, anim_dance, anim_fish, anim_robot, anim_clap, anim_cheer, anim_bow, anim_shrug)
+ANIMATIONS = (anim_idle, anim_walk, anim_run, anim_jump, anim_sit, anim_talk, anim_blink, anim_wave, anim_slap, anim_dance, anim_fish, anim_robot, anim_clap, anim_cheer, anim_bow, anim_shrug)
 
 
 def build(colors=None, suffix=''):

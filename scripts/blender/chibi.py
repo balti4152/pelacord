@@ -173,7 +173,8 @@ class Chibi:
 			key = tuple(round(c, 6) for c in raw)
 			if key not in unique:
 				unique[key] = len(vertices)
-				vertices.append(pos + normal.normalized() * offset)
+				ease = offset(raw) if callable(offset) else offset
+				vertices.append(pos + normal.normalized() * ease)
 				weights.append(w)
 			return unique[key]
 
@@ -247,13 +248,7 @@ def animate(rig):
 	rig.animation_data_create()
 	for make in avatar.ANIMATIONS:
 		make(rig)
-		if make is avatar.anim_walk:
-			for frame, a, b in ((1, 8, 28), (7, 32, 7), (13, 28, 8), (19, 7, 32), (25, 8, 28)):
-				avatar.key(rig, frame, 'knee_L', rot=(a, 0, 0))
-				avatar.key(rig, frame, 'knee_R', rot=(b, 0, 0))
-				avatar.key(rig, frame, 'elbow_L', rot=(-11, 0, 0))
-				avatar.key(rig, frame, 'elbow_R', rot=(-11, 0, 0))
-		elif make is avatar.anim_sit:
+		if make is avatar.anim_sit:
 			for frame in (1, 25):
 				avatar.key(rig, frame, 'knee_L', rot=(40, 0, 0))
 				avatar.key(rig, frame, 'knee_R', rot=(40, 0, 0))

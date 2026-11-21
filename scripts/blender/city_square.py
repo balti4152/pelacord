@@ -9,7 +9,7 @@ from organic import line, loft, sweep
 import toy
 
 
-def cobbled_square():
+def cobbled_square(district=False):
 	rng = random.Random(214)
 	materials = [toy.material(f'Cobble {i}', color, roughness=.80) for i, color in enumerate((
 		(.71,.57,.60), (.79,.64,.63), (.71,.60,.67), (.66,.55,.63), (.81,.69,.65),
@@ -60,6 +60,18 @@ def cobbled_square():
 			entry = y > 4.27 and y < 7.60 and abs(x) < 2.92
 			if forecourt or sidewalk or entry:
 				brick(x,y,.595,.397,0)
+	if district:
+		for j in range(-54, 2):
+			y = j*.43
+			for i in range(-37, 38):
+				x = (i+.5*(j%2))*.615
+				boulevard = -18.0 < y < -12.28 and abs(x) < 22.95
+				sides = -13.0 <= y < -.60 and 13.45 < abs(x) < 16.24
+				castle = -23.45 < y <= -18 and abs(x) < 5.34
+				terraces = -19.65 < y <= -18 and 12.37 < abs(x) < 21.33
+				smith = -6.48 < y < -3.3 and 15.40 <= x < 23.3
+				if boulevard or sides or castle or terraces or smith:
+					brick(x,y,.615,.43,0)
 	obj = toy._new_mesh_object('Plaza cobblestones', bm)
 	for material in materials:
 		obj.data.materials.append(material)

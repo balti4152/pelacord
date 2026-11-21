@@ -115,7 +115,7 @@ def build_city():
 	toy.rounded_box('SidePathL',size=(4.45,11.0,.025),loc=(-9.03,-.55,-.009),radius=.01,mat=path)
 	toy.rounded_box('SidePathR',size=(4.45,11.0,.025),loc=(9.03,-.55,-.009),radius=.01,mat=path)
 	toy.rounded_box('TrailCamp',size=(2.4,6,.047),loc=(-9.5,7.5,-.010),rot=(0,0,DEG(35)),radius=.018,mat=path)
-	cobbled_square()
+	cobbled_square(district=True)
 	fountain()
 
 	# Locales: cine, tienda y casa de juegos al fondo; living a la izquierda; mi casa a la derecha.
@@ -126,6 +126,8 @@ def build_city():
 	facade('MyHouse', 13.0, 1.0, 4.5, 4.0, 3.24, -90, 'house')
 	for x, y in ((-4.03,-7.8),(4.03,-7.8),(-7.8,3.55),(7.8,3.55)):
 		garden_bed(x,y,1.55,.77)
+	import district
+	district.add_district(street_lamp)
 
 	# Sendero al campamento con cartel de madera.
 	wood = toy.material('SignWood', 'wood')
@@ -157,7 +159,7 @@ def build_city():
 		(6.49,-6.18,.84),(9.61,-6.18,.9),(-2.42,-1.15,.67),(2.39,.96,.69),
 		(-7.7,3.3,.89),(7.8,3.5,.87),(-5.8,6.4,.64),(5.1,6.4,.71))):
 		flower_pot(f'Hydrangeas {i}',x,y,size,i+61,pink=i%3!=2)
-	for i,(x,y,sz) in enumerate(((-19,-20,7.2),(-7,-25,8.5),(5,-23,7.8),(17,-24,9.1))):
+	for i,(x,y,sz) in enumerate(((-23,-31,7.2),(-9,-34,8.5),(6,-31,7.8),(23,-32,9.1))):
 		mat = toy.material('Distant park '+str(i), ((.53,.62,.45),(.56,.63,.47),(.49,.57,.43),(.51,.61,.44))[i])
 		toy.sphere(f'Park hill {i}',radius=sz,scale=(1.40,.75,.41),loc=(x,y,-.60),mat=mat,segments=29,rings=16)
 	cloud = toy.material('Peach cloud',(.99,.81,.72),roughness=.92,emission=.21)
@@ -528,7 +530,12 @@ def build_port():
 	return 'room_port.glb'
 
 
-PLACES = {'city': build_city, 'games': build_games, 'port': build_port}
+from district import build_casino, build_restaurant, build_smithy
+from garden_models import build_farm_props, build_yard
+
+PLACES = {'city': build_city, 'games': build_games, 'port': build_port,
+	'restaurant': build_restaurant, 'casino': build_casino, 'smithy': build_smithy,
+	'yard': build_yard, 'farm': build_farm_props}
 
 if __name__ == '__main__':
 	for key, make in PLACES.items():

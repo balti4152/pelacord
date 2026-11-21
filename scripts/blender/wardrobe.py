@@ -21,6 +21,7 @@ import bpy
 
 sys.path.insert(0, os.path.dirname(__file__))
 from chibi import Chibi, animate  # noqa: E402
+import fashion  # noqa: E402
 import hair_assets  # noqa: E402
 from organic import ellipsoid, line, loft, sweep  # noqa: E402
 import toy  # noqa: E402
@@ -361,11 +362,13 @@ def shoes(rig, m, prefix=''):
 	return out
 
 
-def wardrobe(base, rig, kind, m, prefix=''):
+def wardrobe(base, rig, kind, m, prefix='', extra=None):
 	return [
 		body_parts(base, rig, kind, m, prefix),
 		*tops(base, rig, kind, m, prefix),
 		*bottoms(base, rig, kind, m, prefix),
+		*(fashion.tops(base, rig, kind, m, prefix, part, sewn, folded_skirt, extra) if extra else ()),
+		*(fashion.bottoms(base, rig, kind, m, prefix, part, sewn, extra) if extra else ()),
 	]
 
 
@@ -383,7 +386,9 @@ def build_modular():
 		m = mats()
 		rig = base.rig()
 		rig.name = 'AvatarModular'
-		parts = wardrobe(base, rig, 'M', m) + wardrobe(base, rig, 'F', m) + details(base, rig, m)
+		extra = fashion.fabrics()
+		parts = wardrobe(base, rig, 'M', m, extra=extra) + wardrobe(base, rig, 'F', m, extra=extra)
+		parts += details(base, rig, m) + fashion.accessories(rig, m, '', part, extra)
 		animate(rig)
 		return rig, parts
 	finally:
@@ -467,9 +472,11 @@ def wardrobe_catalog(parts):
 			if item in seen:
 				seen[item]['meshes'].append(mesh.name)
 			continue
+		name, price = fashion.ITEMS.get(item, (ITEM_NAMES.get(item, item),
+			0 if slot == 'hair' or item in FREE else PRICES.get(slot, 100)))
 		seen[item] = {
-			'id': item, 'name': ITEM_NAMES.get(item, item), 'slot': slot,
-			'price': 0 if slot == 'hair' or item in FREE else PRICES.get(slot, 100),
+			'id': item, 'name': name, 'slot': slot,
+			'price': price,
 			'recolor': {'hair': 'Hair', 'top': 'Top', 'bottom': 'Bottom', 'shoes': 'Shoes'}.get(slot),
 			'meshes': [mesh.name],
 		}

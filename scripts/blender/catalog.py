@@ -33,7 +33,7 @@ def main():
 		'currency': {'name': 'Pelamonedas', 'startCoins': START_COINS},
 		'avatar': {'glb': 'models/avatar_modular.glb', 'bodies': ['M', 'F'], 'palettes': wardrobe['palettes'], 'looks': wardrobe['looks']},
 		'shops': {
-			'clothes': {'title': 'Ropa y estilo', 'sections': ['hair', 'eyes', 'brows', 'mouth', 'cheeks', 'top', 'bottom', 'shoes', 'hat', 'costume']},
+			'clothes': {'title': 'Ropa y estilo', 'sections': ['top', 'bottom', 'shoes', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume']},
 			'furniture': {'title': 'Muebles', 'sections': sorted({item['category'] for item in furniture['items']})},
 		},
 		'items': clothes + COSTUMES + [{**item, 'slot': 'furniture'} for item in furniture['items']],

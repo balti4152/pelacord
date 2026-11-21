@@ -7,11 +7,13 @@
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {getDesktopTransport} from '@/lib/desktop';
 import {isPetId, type PetId} from '@/world/petCatalog';
+import {makeFarm, readFarm, type Farm, type FarmLand} from '@/world/farmData';
+import {readBlackjack, type Blackjack} from '@/world/blackjackSave';
 
 // ------------------------------------------------------------------ tipos ---
 
 export type Body = 'M' | 'F';
-export type Slot = 'hair' | 'eyes' | 'brows' | 'mouth' | 'cheeks' | 'top' | 'bottom' | 'shoes' | 'hat' | 'costume';
+export type Slot = 'hair' | 'eyes' | 'brows' | 'mouth' | 'cheeks' | 'top' | 'bottom' | 'shoes' | 'hat' | 'facewear' | 'back' | 'costume';
 export type ColorKey = 'skin' | 'hair' | 'top' | 'bottom' | 'shoes' | 'sole';
 
 export interface Look {
@@ -25,6 +27,8 @@ export interface Look {
 	bottom: string;
 	shoes: string;
 	hat: string | null;
+	facewear?: string | null;
+	back?: string | null;
 	costume: string | null;
 	colors: Record<ColorKey, string>;
 }
@@ -50,9 +54,9 @@ export interface Catalog {
 	items: CatalogItem[];
 }
 
-export type RoomId = 'city' | 'living' | 'cinema' | 'campfire' | 'shop' | 'games' | 'port' | `house:${string}`;
+export type RoomId = 'city' | 'living' | 'cinema' | 'campfire' | 'shop' | 'games' | 'port' | 'arena' | 'casino' | 'restaurant' | 'smithy' | `house:${string}` | `yard:${string}`;
 
-export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string; glb: string; icon: string}> = [
+export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}` | `yard:${string}`>; name: string; glb: string; icon: string}> = [
 	{id: 'city', name: 'Ciudad', glb: 'models/room_city.glb', icon: 'map'},
 	{id: 'living', name: 'Living', glb: 'models/room_living.glb', icon: 'sofa'},
 	{id: 'cinema', name: 'Cine', glb: 'models/room_cinema.glb', icon: 'clapperboard'},
@@ -60,8 +64,13 @@ export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string;
 	{id: 'shop', name: 'Tienda', glb: 'models/room_shop.glb', icon: 'store'},
 	{id: 'games', name: 'Casa de juegos', glb: 'models/room_games.glb', icon: 'dice'},
 	{id: 'port', name: 'Puerto', glb: 'models/room_port.glb', icon: 'anchor'},
+	{id: 'arena', name: 'Arena', glb: 'models/room_arena.glb', icon: 'trophy'},
+	{id: 'casino', name: 'Casino', glb: 'models/room_casino.glb', icon: 'dice'},
+	{id: 'restaurant', name: 'Restaurante', glb: 'models/room_restaurant.glb', icon: 'store'},
+	{id: 'smithy', name: 'Herrería', glb: 'models/room_smithy.glb', icon: 'store'},
 ];
 export const HOUSE_GLB = 'models/room_house.glb';
+export const YARD_GLB = 'models/room_yard.glb';
 
 export interface PlacedFurniture {
 	uid: string;
@@ -73,7 +82,7 @@ export interface PlacedFurniture {
 	rot: number;
 }
 
-export type Anim = 'idle' | 'walk' | 'run' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
 
 /** Lo que cada uno anuncia del mundo. */
 export interface PlayerState {
@@ -91,8 +100,11 @@ export interface PlayerState {
 	tz?: number;
 	look: Look;
 	house: PlacedFurniture[];
+	garden?: FarmLand;
 	equippedPet?: PetId | null;
 	t: number;
+	/** Altura (para ver caerse a los demás en los juegos de la Arena). */
+	y?: number;
 	/** Está en la parte 2D de PelaCord: su personaje queda quieto, gris y medio transparente. */
 	away?: boolean;
 }
@@ -134,11 +146,12 @@ export function useCatalog(): Catalog | null {
 
 export const SLOT_LABEL: Record<string, string> = {
 	hair: 'Pelo', eyes: 'Ojos', brows: 'Cejas', mouth: 'Boca', cheeks: 'Cachetes', top: 'Arriba',
-	bottom: 'Abajo', shoes: 'Calzado', hat: 'Sombreros', costume: 'Disfraces', furniture: 'Muebles',
+	bottom: 'Abajo', shoes: 'Calzado', hat: 'Sombreros', facewear: 'Lentes y más', back: 'Bolsos y alas',
+	costume: 'Disfraces', furniture: 'Muebles',
 };
 export const SLOT_EMOJI: Record<string, string> = {
 	hair: '💇', eyes: '👀', brows: '🤨', mouth: '😄', cheeks: '😊', top: '👕', bottom: '👖', shoes: '👟',
-	hat: '🎩', costume: '🌭', asientos: '🛋️', dormitorio: '🛏️', mesas: '🪵', luces: '💡', deco: '🪴',
+	hat: '🎩', facewear: '👓', back: '🎒', costume: '🌭', asientos: '🛋️', dormitorio: '🛏️', mesas: '🪵', luces: '💡', deco: '🪴',
 };
 
 // ----------------------------------------------------------------- perfil ---
@@ -165,6 +178,8 @@ export interface WorldProfile {
 	captureSpheres: number;
 	pets: Record<string, number>;
 	equippedPet: PetId | null;
+	farm: Farm;
+	blackjack?: Blackjack | null;
 }
 
 const PROFILE_KEY = 'pelacord.world.v1';
@@ -172,7 +187,7 @@ const START_COINS = 500;
 
 export const DEFAULT_LOOK: Look = {
 	body: 'M', hair: 'hair_bowl', eyes: 'eyes_dot', brows: 'brows_line', mouth: 'mouth_smile', cheeks: null,
-	top: 'top_tee', bottom: 'bottom_pants', shoes: 'shoes_sneakers', hat: null, costume: null,
+	top: 'top_tee', bottom: 'bottom_pants', shoes: 'shoes_sneakers', hat: null, facewear: null, back: null, costume: null,
 	colors: {skin: '#f3bd96', hair: '#3b2418', top: '#8a5cff', bottom: '#2f3b78', shoes: '#f4f4f4', sole: '#ff7350'},
 };
 
@@ -197,12 +212,14 @@ function readProfile(): WorldProfile {
 				captureSpheres: Number.isSafeInteger(parsed.captureSpheres) ? Math.max(0, parsed.captureSpheres!) : 0,
 				pets,
 				equippedPet: isPetId(parsed.equippedPet) && pets[parsed.equippedPet] ? parsed.equippedPet : null,
+				farm: readFarm(parsed.farm),
+				blackjack: readBlackjack(parsed.blackjack),
 			};
 		}
 	} catch {
 		// perfil roto: se arranca de cero
 	}
-	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false, fish: {}, fishBest: {}, rods: ['bambu'], rod: 'bambu', bait: {}, activeBait: null, captureSpheres: 0, pets: {}, equippedPet: null};
+	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false, fish: {}, fishBest: {}, rods: ['bambu'], rod: 'bambu', bait: {}, activeBait: null, captureSpheres: 0, pets: {}, equippedPet: null, farm: makeFarm()};
 }
 
 let profile: WorldProfile = typeof localStorage === 'undefined' ? readProfile() : readProfile();

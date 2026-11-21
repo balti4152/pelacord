@@ -6,6 +6,7 @@
 import * as THREE from 'three';
 import {CSS2DObject} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {type Card, CARD_COLOR_HEX, canPlay, cuatroDrop, type TableSession} from '@/world/tableGames';
+import {worldSounds} from '@/world/worldSounds';
 
 const CARD_W = 0.11;
 const CARD_H = 0.16;
@@ -176,6 +177,7 @@ function label(text: string, active: boolean): CSS2DObject {
 
 /** Todo lo de la mesa se ve 1.45 veces más grande (antes quedaba chiquito en el medio). */
 const SCALE = 1.45;
+const DEAL_DURATION = .34;
 
 interface Tween {
 	obj: THREE.Object3D;
@@ -201,6 +203,10 @@ export class TableView {
 	private confetti: Array<{mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; life: number}> = [];
 	private lastWinner: string | null = null;
 	private lastSessionId = '';
+	private soundedSession: TableSession | null = null;
+	private dealAt: number | null = null;
+	private dealtSession = '';
+	private layout = '';
 	private time = 0;
 
 	constructor(root: THREE.Object3D) {
@@ -276,6 +282,10 @@ export class TableView {
 			if (tw.t >= 1) tw.obj.scale.setScalar(1);
 			return tw.t < 1;
 		});
+		if (this.dealAt !== null && this.time >= this.dealAt) {
+			this.dealAt = null;
+			worldSounds.play('dealCards');
+		}
 		for (const p of this.pulses) {
 			const s = 1 + Math.sin(this.time * 5) * 0.12;
 			p.scale.set(s, s, s);
@@ -316,11 +326,51 @@ export class TableView {
 		}
 	}
 
+	private soundMoves(session: TableSession | null, me: string): void {
+		const previous = this.soundedSession;
+		this.soundedSession = session;
+		if (!session) {
+			this.dealAt = null;
+			return;
+		}
+		if (session.id !== previous?.id) {
+			this.dealAt = null;
+			if (session.note === '¡Arranca!') {
+				if (session.game === 'cards') {
+					if (this.dealtSession !== session.id) {
+						this.dealtSession = session.id;
+						this.dealAt = this.time + DEAL_DURATION;
+					}
+				} else worldSounds.play('confirm', .75);
+			}
+			return;
+		}
+		if (session === previous) return;
+		if (session.game === 'cards') {
+			if (session.discard?.at(-1)?.id !== previous.discard?.at(-1)?.id) worldSounds.play('playCard');
+			else if (session.deck?.length !== previous.deck?.length) worldSounds.play('drawCard');
+		} else if (session.game === 'memo') {
+			if (session.revealed?.some((index) => !previous.revealed?.includes(index))) worldSounds.play('flipCard');
+			if (Object.keys(session.matched ?? {}).length > Object.keys(previous.matched ?? {}).length) worldSounds.play('confirm', .65);
+		} else if (session.board?.some((cell, i) => cell !== previous.board?.[i])) {
+			worldSounds.play('tile');
+		}
+		if (session.winner && !previous.winner) {
+			worldSounds.play(session.winner === me ? 'reward' : 'confirm');
+		} else if (session.draw && !previous.draw) {
+			worldSounds.play('confirm');
+		}
+	}
+
 	/**
 	 * Redibuja la partida. `angleOf(player)` = ángulo de la silla de cada jugador alrededor de la
 	 * mesa; todo se rota para que MI silla quede en +Z (adelante, hacia la cámara).
 	 */
 	render(session: TableSession | null, me: string, angleOf: (player: string) => number, names: (id: string) => string): void {
+		const layout = session ? JSON.stringify([me, session.players.map((id) => [id, angleOf(id), names(id)])]) : '';
+		if (session === this.soundedSession && layout === this.layout) return;
+		this.layout = layout;
+		this.soundMoves(session, me);
 		this.clear();
 		if (!session) {
 			this.lastWinner = null;
@@ -355,13 +405,13 @@ export class TableView {
 			}
 		});
 
-		if (session.game === 'cards') this.renderCards(session, me, local, myTurn);
+		if (session.game === 'cards') this.renderCards(session, me, local, myTurn, this.dealAt !== null);
 		else if (session.game === 'tateti') this.renderTateti(session, myTurn);
 		else if (session.game === 'cuatro') this.renderCuatro(session, myTurn);
 		else this.renderMemo(session, myTurn);
 	}
 
-	private renderCards(s: TableSession, me: string, local: (p: string) => number, myTurn: boolean): void {
+	private renderCards(s: TableSession, me: string, local: (p: string) => number, myTurn: boolean, dealing: boolean): void {
 		const back = cardBack();
 		// Mazo para levantar.
 		const pile = new THREE.Group();
@@ -386,7 +436,7 @@ export class TableView {
 			const owner = s.players[(s.turn - (s.direction ?? 1) + s.players.length * 4) % s.players.length];
 			const a = local(owner);
 			const from = new THREE.Vector3(Math.sin(a) * 0.62, 0.25, Math.cos(a) * 0.62);
-			this.animate(m, `card:${card.id}`, {from, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, a + 2.4, 0)), arc: 0.22, dur: 0.45});
+			this.animate(m, `card:${card.id}`, {from: dealing ? deckPos : from, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, a + 2.4, 0)), arc: 0.22, dur: dealing ? DEAL_DURATION : .45});
 		});
 		const colorRing = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 8, 40), new THREE.MeshBasicMaterial({color: CARD_COLOR_HEX[s.color ?? 'r']}));
 		colorRing.rotation.x = -Math.PI / 2;
@@ -414,7 +464,7 @@ export class TableView {
 					this.group.add(holder);
 					// Las que levanto salen volando del mazo; las que puedo jugar flotan un poquito.
 					const baseY = holder.position.y;
-					this.animate(holder, `card:${card.id}`, {from: deckPos, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI, 0, 0)), arc: 0.2, dur: 0.42, delay: i * 0.015});
+					this.animate(holder, `card:${card.id}`, {from: deckPos, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI, 0, 0)), arc: 0.2, dur: dealing ? DEAL_DURATION : .42, delay: dealing ? 0 : i * .015});
 					if (playable) {
 						holder.userData.baseY = baseY;
 						holder.userData.phase = i * 0.7;
@@ -430,7 +480,7 @@ export class TableView {
 					m.position.set(Math.sin(a) * 0.72 + Math.cos(a) * off, 0.01 + i * 0.001, Math.cos(a) * 0.72 - Math.sin(a) * off);
 					m.rotation.y = a + off * 3;
 					this.group.add(m);
-					this.animate(m, `back:${player}:${i}`, {from: deckPos, arc: 0.15, dur: 0.4});
+					this.animate(m, `back:${player}:${i}`, {from: deckPos, arc: 0.15, dur: dealing ? DEAL_DURATION : .4});
 				}
 			}
 		}

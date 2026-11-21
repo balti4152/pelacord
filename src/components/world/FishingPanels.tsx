@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {Anchor, BookOpen, Check, Coins, Fish, Gem, ShoppingBag, Sparkles, Star, X} from 'lucide-react';
 import {useProfile} from '@/world/core';
+import {worldSounds} from '@/world/worldSounds';
 import {
 	BAITS, buyBait, buyRod, FISH, type FishKind, fishById, RARITY_COLOR, type RodKind, RODS, sellFish, setActiveBait,
 } from '@/world/fish';
@@ -77,7 +78,10 @@ export function FishingGame({fish, rod, onDone}: {fish: FishKind; rod: RodKind; 
 				if (!chest.shown && elapsed >= chest.at) chest.shown = true;
 				if (chest.shown) {
 					chest.fill = Math.min(1, Math.max(0, chest.fill + (covers(chest.y) ? 0.65 : -0.25) * dt));
-					if (chest.fill >= 1) chest.got = true;
+					if (chest.fill >= 1) {
+						chest.got = true;
+						worldSounds.play('notice');
+					}
 				}
 			}
 			if (barRef.current) {
@@ -157,11 +161,15 @@ export function FishMarketPanel({onClose, onSold}: {onClose: () => void; onSold:
 	const sell = (id: string | 'all') => {
 		const earned = sellFish(id);
 		setLast(earned);
-		if (earned) onSold(earned);
+		if (earned) {
+			worldSounds.play('sell');
+			onSold(earned);
+		}
 	};
-	const attempt = (fn: () => string | null) => {
+	const attempt = (fn: () => string | null, equip = false) => {
 		const result = fn();
 		setError(result ?? '');
+		worldSounds.play(result ? 'error' : equip ? 'confirm' : 'purchase');
 	};
 	const album = FISH.filter((f) => !f.junk);
 	const known = album.filter((f) => (profile.fishBest[f.id] ?? 0) > 0).length;
@@ -225,7 +233,7 @@ export function FishMarketPanel({onClose, onSold}: {onClose: () => void; onSold:
 										{using ? (
 											<span className="t-btn is-soft is-small is-static"><Check size={13} strokeWidth={3} /> En uso</span>
 										) : owned ? (
-											<button type="button" className="t-btn is-soft is-small" onClick={() => attempt(() => buyRod(rod.id))}>Usar</button>
+											<button type="button" className="t-btn is-soft is-small" onClick={() => attempt(() => buyRod(rod.id), true)}>Usar</button>
 										) : (
 											<button type="button" className="t-btn is-primary is-small" onClick={() => attempt(() => buyRod(rod.id))}><Coins size={13} strokeWidth={3} /> {rod.price}</button>
 										)}
@@ -246,7 +254,7 @@ export function FishMarketPanel({onClose, onSold}: {onClose: () => void; onSold:
 											<small>{bait.desc} ({bait.pack} por paquete)</small>
 										</span>
 										{count > 0 ? (
-											<button type="button" className={`t-btn is-small ${active ? 'is-primary' : 'is-soft'}`} onClick={() => setActiveBait(active ? null : bait.id)}>{active ? 'Puesta' : 'Poner'}</button>
+											<button type="button" className={`t-btn is-small ${active ? 'is-primary' : 'is-soft'}`} onClick={() => { setActiveBait(active ? null : bait.id); worldSounds.play('select'); }}>{active ? 'Puesta' : 'Poner'}</button>
 										) : null}
 										<button type="button" className="t-btn is-primary is-small" onClick={() => attempt(() => buyBait(bait.id))}><Coins size={13} strokeWidth={3} /> {bait.price}</button>
 									</li>

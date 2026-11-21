@@ -414,6 +414,17 @@ def build_house():
 	toy.rounded_box('HouseTvStand', size=(2.2, 0.5, 0.5), loc=(1.3, -3.7, 0.25), radius=0.08, mat=toy.material('HouseTvStand', 'wood'))
 	toy.point_light('HouseFill', (0, 0.5, 3.0), color=(1.0, 0.85, 0.75), energy=320, radius=2.0)
 	toy.point_light('HouseFillFront', (0, 4.2, 2.3), color=(1.0, 0.88, 0.78), energy=260, radius=2.0)
+	from district import disco_ball
+	disco_ball()
+	# Puerta lateral al patio; la entrada principal conserva la salida a la plaza.
+	door_mat = toy.material('Garden door', (.26,.57,.52), roughness=.60)
+	toy.rounded_box('Yard door trim', size=(1.65,.12,2.72), loc=(-3.13,-3.84,1.40), radius=.22, mat=frame)
+	toy.rounded_box('Yard door', size=(1.36,.11,2.43), loc=(-3.13,-3.75,1.35), radius=.20, mat=door_mat)
+	toy.rounded_box('Yard door glass', size=(.83,.09,.63), loc=(-3.13,-3.674,1.80), radius=.12,
+		mat=toy.material('Garden pane',(.65,.84,.77),emission=.20))
+	toy.sphere('Yard door latch',radius=.064,loc=(-2.66,-3.64,1.21),mat=toy.material('House latch','gold'))
+	yard = toy.empty('Door_yard',loc=(-3.13,-2.72,0),rot=(0,0,DEG(180)))
+	yard['pelacord_door'] = 'yard'
 	toy.empty('Spawn', loc=(0, 3.0, 0))
 	return 'room_house.glb'
 

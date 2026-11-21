@@ -79,6 +79,150 @@
    ]
   },
   {
+   "id": "top_bomber",
+   "name": "Campera bomber",
+   "slot": "top",
+   "price": 160,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Bomber_M",
+    "Top_Bomber_F"
+   ]
+  },
+  {
+   "id": "top_varsity",
+   "name": "Campera universitaria",
+   "slot": "top",
+   "price": 180,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Varsity_M",
+    "Top_Varsity_F"
+   ]
+  },
+  {
+   "id": "top_raincoat",
+   "name": "Piloto de lluvia",
+   "slot": "top",
+   "price": 200,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Raincoat_M",
+    "Top_Raincoat_F"
+   ]
+  },
+  {
+   "id": "top_sailor",
+   "name": "Remera marinera",
+   "slot": "top",
+   "price": 125,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Sailor_M",
+    "Top_Sailor_F"
+   ]
+  },
+  {
+   "id": "top_puffer",
+   "name": "Campera inflable",
+   "slot": "top",
+   "price": 220,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Puffer_M",
+    "Top_Puffer_F"
+   ]
+  },
+  {
+   "id": "top_kimono",
+   "name": "Chaqueta cruzada",
+   "slot": "top",
+   "price": 165,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Kimono_M",
+    "Top_Kimono_F"
+   ]
+  },
+  {
+   "id": "top_pinafore",
+   "name": "Vestido jardinero",
+   "slot": "top",
+   "price": 210,
+   "recolor": "Top",
+   "meshes": [
+    "Top_Pinafore_M",
+    "Top_Pinafore_F"
+   ],
+   "hides": "bottom"
+  },
+  {
+   "id": "bottom_cargo",
+   "name": "Pantalón cargo",
+   "slot": "bottom",
+   "price": 160,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Cargo_M",
+    "Bottom_Cargo_F"
+   ]
+  },
+  {
+   "id": "bottom_jogger",
+   "name": "Jogger deportivo",
+   "slot": "bottom",
+   "price": 130,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Jogger_M",
+    "Bottom_Jogger_F"
+   ]
+  },
+  {
+   "id": "bottom_flare",
+   "name": "Pantalón oxford",
+   "slot": "bottom",
+   "price": 155,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Flare_M",
+    "Bottom_Flare_F"
+   ]
+  },
+  {
+   "id": "bottom_culotte",
+   "name": "Pantalón culotte",
+   "slot": "bottom",
+   "price": 145,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Culotte_M",
+    "Bottom_Culotte_F"
+   ]
+  },
+  {
+   "id": "bottom_pleats",
+   "name": "Pollera tableada",
+   "slot": "bottom",
+   "price": 145,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Pleats_M",
+    "Bottom_Pleats_F"
+   ]
+  },
+  {
+   "id": "bottom_runner",
+   "name": "Short de running",
+   "slot": "bottom",
+   "price": 100,
+   "recolor": "Bottom",
+   "meshes": [
+    "Bottom_Runner_M",
+    "Bottom_Runner_F"
+   ]
+  },
+  {
    "id": "eyes_dot",
    "name": "Ojitos",
    "slot": "eyes",
@@ -249,26 +393,6 @@
    ]
   },
   {
-   "id": "shoes_sneakers",
-   "name": "Zapatillas",
-   "slot": "shoes",
-   "price": 0,
-   "recolor": "Shoes",
-   "meshes": [
-    "Shoes_Sneakers"
-   ]
-  },
-  {
-   "id": "shoes_boots",
-   "name": "Botas",
-   "slot": "shoes",
-   "price": 100,
-   "recolor": "Shoes",
-   "meshes": [
-    "Shoes_Boots"
-   ]
-  },
-  {
    "id": "hair_anime",
    "name": "Corto en capas",
    "slot": "hair",
@@ -326,6 +450,252 @@
    "recolor": "Hair",
    "meshes": [
     "Hair_Wavy"
+   ]
+  },
+  {
+   "id": "shoes_sneakers",
+   "name": "Zapatillas",
+   "slot": "shoes",
+   "price": 0,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Sneakers"
+   ]
+  },
+  {
+   "id": "shoes_boots",
+   "name": "Botas",
+   "slot": "shoes",
+   "price": 100,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Boots"
+   ]
+  },
+  {
+   "id": "shoes_skate",
+   "name": "Zapatillas de skate",
+   "slot": "shoes",
+   "price": 125,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Skate"
+   ]
+  },
+  {
+   "id": "shoes_high",
+   "name": "Zapatillas de caña alta",
+   "slot": "shoes",
+   "price": 155,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_High"
+   ]
+  },
+  {
+   "id": "shoes_runner",
+   "name": "Zapatillas de running",
+   "slot": "shoes",
+   "price": 150,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Runner"
+   ]
+  },
+  {
+   "id": "shoes_hiker",
+   "name": "Botas de montaña",
+   "slot": "shoes",
+   "price": 180,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Hiker"
+   ]
+  },
+  {
+   "id": "shoes_rain",
+   "name": "Botas de lluvia",
+   "slot": "shoes",
+   "price": 135,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Rain"
+   ]
+  },
+  {
+   "id": "shoes_maryjane",
+   "name": "Merceditas",
+   "slot": "shoes",
+   "price": 135,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Maryjane"
+   ]
+  },
+  {
+   "id": "shoes_sandals",
+   "name": "Sandalias",
+   "slot": "shoes",
+   "price": 110,
+   "recolor": "Shoes",
+   "meshes": [
+    "Shoes_Sandals"
+   ]
+  },
+  {
+   "id": "hat_knit",
+   "name": "Gorro tejido con pompón",
+   "slot": "hat",
+   "price": 140,
+   "recolor": null,
+   "meshes": [
+    "Hat_Knit"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "hat_cap",
+   "name": "Gorra con visera",
+   "slot": "hat",
+   "price": 125,
+   "recolor": null,
+   "meshes": [
+    "Hat_Cap"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "hat_bucket",
+   "name": "Piluso",
+   "slot": "hat",
+   "price": 150,
+   "recolor": null,
+   "meshes": [
+    "Hat_Bucket"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "hat_beret",
+   "name": "Boina",
+   "slot": "hat",
+   "price": 145,
+   "recolor": null,
+   "meshes": [
+    "Hat_Beret"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "hat_sun",
+   "name": "Sombrero de verano",
+   "slot": "hat",
+   "price": 185,
+   "recolor": null,
+   "meshes": [
+    "Hat_Sun"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "hat_cat",
+   "name": "Gorrito con orejas",
+   "slot": "hat",
+   "price": 170,
+   "recolor": null,
+   "meshes": [
+    "Hat_Cat"
+   ],
+   "hides": "hair"
+  },
+  {
+   "id": "facewear_round",
+   "name": "Anteojos redondos",
+   "slot": "facewear",
+   "price": 100,
+   "recolor": null,
+   "meshes": [
+    "Facewear_Round"
+   ]
+  },
+  {
+   "id": "facewear_stars",
+   "name": "Lentes de estrella",
+   "slot": "facewear",
+   "price": 150,
+   "recolor": null,
+   "meshes": [
+    "Facewear_Stars"
+   ]
+  },
+  {
+   "id": "facewear_sun",
+   "name": "Lentes de sol",
+   "slot": "facewear",
+   "price": 140,
+   "recolor": null,
+   "meshes": [
+    "Facewear_Sun"
+   ]
+  },
+  {
+   "id": "facewear_goggles",
+   "name": "Antiparras retro",
+   "slot": "facewear",
+   "price": 175,
+   "recolor": null,
+   "meshes": [
+    "Facewear_Goggles"
+   ]
+  },
+  {
+   "id": "facewear_bandage",
+   "name": "Curita de corazón",
+   "slot": "facewear",
+   "price": 65,
+   "recolor": null,
+   "meshes": [
+    "Facewear_Bandage"
+   ]
+  },
+  {
+   "id": "back_daypack",
+   "name": "Mochila de excursión",
+   "slot": "back",
+   "price": 185,
+   "recolor": null,
+   "meshes": [
+    "Back_Daypack"
+   ]
+  },
+  {
+   "id": "back_sling",
+   "name": "Riñonera cruzada",
+   "slot": "back",
+   "price": 125,
+   "recolor": null,
+   "meshes": [
+    "Back_Sling"
+   ]
+  },
+  {
+   "id": "back_satchel",
+   "name": "Bolso de cartero",
+   "slot": "back",
+   "price": 165,
+   "recolor": null,
+   "meshes": [
+    "Back_Satchel"
+   ]
+  },
+  {
+   "id": "back_wings",
+   "name": "Alitas de mariposa",
+   "slot": "back",
+   "price": 240,
+   "recolor": null,
+   "meshes": [
+    "Back_Wings"
    ]
   }
  ],

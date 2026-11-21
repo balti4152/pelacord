@@ -4,6 +4,7 @@
  * 15 segundos, se va.
  */
 import * as THREE from 'three';
+import {worldSounds} from '@/world/worldSounds';
 import {loadGLB} from '@/world/avatars';
 import type {RoomId} from '@/world/core';
 import {PETS, type PetId} from '@/world/petCatalog';
@@ -142,6 +143,7 @@ export class CityPets {
 		this.root.add(orb, pulse);
 		this.cooldownUntil.set(pet.id, performance.now() + COOLDOWN_MS);
 		this.capture = {pet, orb, pulse, start, end, time: 0};
+		worldSounds.play('throw');
 		pet.model.play('Startled');
 		return pet.species;
 	}
@@ -251,6 +253,7 @@ export class CityPets {
 			orb.scale.setScalar(Math.min(1, Math.max(.001, (1 - impact) * 3)));
 		}
 		if (capture.time >= CAPTURE_TIME) {
+			worldSounds.play('reward', .9);
 			orb.removeFromParent();
 			pulse.removeFromParent();
 			this.capture = null;

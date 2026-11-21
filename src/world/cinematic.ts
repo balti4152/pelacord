@@ -93,9 +93,9 @@ export class Cinematic {
 	}
 
 	/** El desenfoque y el brillo van sólo afuera; adentro queda la imagen limpia (con el color y la viñeta). */
-	setOutdoor(outdoor: boolean): void {
+	setOutdoor(outdoor: boolean, bloom = outdoor): void {
 		if (this.bokeh) this.bokeh.enabled = outdoor;
-		if (this.bloom) this.bloom.enabled = outdoor;
+		if (this.bloom) this.bloom.enabled = bloom;
 	}
 
 	setSize(width: number, height: number): void {

@@ -19,9 +19,10 @@ interface Preview {
 
 type PreviewFocus = 'face' | 'hair' | 'bottom' | 'item';
 
-function focusFor(slot: CatalogItem['slot']): PreviewFocus {
-	if (slot === 'hair' || slot === 'bottom') return slot;
-	return ['eyes', 'brows', 'mouth', 'cheeks'].includes(slot) ? 'face' : 'item';
+function focusFor(item: CatalogItem, avatarUrl: string): PreviewFocus {
+	if (item.slot === 'hair' || item.slot === 'bottom') return item.slot;
+	if (item.slot === 'hat' && item.glb === avatarUrl) return 'hair';
+	return ['eyes', 'brows', 'mouth', 'cheeks', 'facewear'].includes(item.slot) ? 'face' : 'item';
 }
 
 function matchesBody(node: THREE.Object3D, body: Look['body']): boolean {
@@ -69,7 +70,7 @@ function lowerBodyGeometry(body: THREE.SkinnedMesh): THREE.BufferGeometry {
 }
 
 async function buildProduct(item: CatalogItem, avatarUrl: string, look: Look, focus: PreviewFocus, furnitureColor?: string): Promise<THREE.Group> {
-	const standalone = item.slot === 'furniture' || item.slot === 'hat' || item.slot === 'costume';
+	const standalone = Boolean(item.glb && item.glb !== avatarUrl);
 	const url = standalone ? item.glb : avatarUrl;
 	if (!url) throw new Error('Artículo sin modelo');
 	const {scene} = await loadGLB(url);
@@ -198,7 +199,7 @@ class ProductPreviewRenderer {
 		const target = canvas.getContext('2d');
 		if (!target) return () => undefined;
 		const preview: Preview = {target, model: null, visible: false, lastFrame: -Infinity,
-			focus: focusFor(item.slot), angleTime: 0, painted};
+			focus: focusFor(item, avatarUrl), angleTime: 0, painted};
 		this.previews.add(preview);
 		let requested = false;
 		const observer = new IntersectionObserver(([entry]) => {

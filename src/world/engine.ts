@@ -10,6 +10,7 @@ import {CSS2DObject, CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRend
 import {Avatar, type BaseAnim, loadGLB} from '@/world/avatars';
 import {Ambience} from '@/world/ambience';
 import {Dust} from '@/world/dust';
+import {worldSounds} from '@/world/worldSounds';
 import {Cinematic} from '@/world/cinematic';
 import {CameraOcclusion} from '@/world/cameraOcclusion';
 import {furnitureColor} from '@/world/furnitureColors';
@@ -17,7 +18,11 @@ import {CAPTURE_RANGE, CityPets} from '@/world/cityPets';
 import {isPetId, type PetId} from '@/world/petCatalog';
 import {PetCompanion} from '@/world/petCompanion';
 import {Npcs} from '@/world/npcs';
-import {type Anim, type Catalog, type Emote, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId} from '@/world/core';
+import {type Anim, type Catalog, type Emote, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId, YARD_GLB} from '@/world/core';
+import {GardenView} from '@/world/gardenView';
+import {type FarmAction, type FarmLand, inLot} from '@/world/farmData';
+import {RoomEffects} from '@/world/roomEffects';
+import type {Spin} from '@/world/casino';
 import {iconSvg} from '@/world/icons';
 
 const WALK_SPEED = 2.5;
@@ -36,6 +41,8 @@ interface Bounds {
 	obstacles: Array<{x: number; z: number; r: number}>;
 	/** Zonas caminables sueltas (por ejemplo costanera + muelle): se queda en la más cercana. */
 	rects?: Array<[number, number, number, number]>;
+	/** Zonas caminables redondas (centro x, centro z, radio): se suman a `rects`. */
+	circles?: Array<[number, number, number]>;
 	/** Cajas que no se pueden atravesar (los edificios de la ciudad), calculadas del modelo. */
 	solids?: Array<[number, number, number, number]>;
 }
@@ -47,7 +54,7 @@ const isMoving = (anim: Anim): boolean => anim === 'walk' || anim === 'run';
 
 const box = (minX: number, maxX: number, minZ: number, maxZ: number, obstacles: Bounds['obstacles'] = []): Bounds => ({kind: 'box', minX, maxX, minZ, maxZ, radius: 0, obstacles});
 const BOUNDS: Record<string, Bounds> = {
-	city: box(-15.5, 15.5, -11.5, 6.6, [{x: 0, z: 0, r: 2.05}]),
+	city: box(-24, 24, -11.5, 23.6, [{x: 0, z: 0, r: 2.05}]),
 	living: box(-3.6, 3.6, -3.3, 3.1, [{x: 0.1, z: 0.1, r: 0.6}]),
 	cinema: box(-4.1, 4.1, -5.2, 4.0),
 	campfire: {kind: 'circle', minX: 0, maxX: 0, minZ: 0, maxZ: 0, radius: 4.6, obstacles: [{x: 0, z: 0, r: 0.85}]},
@@ -57,8 +64,36 @@ const BOUNDS: Record<string, Bounds> = {
 		...box(-7.2, 7.2, -5.0, 3.6, [{x: 4.8, z: -2.35, r: 1.45}, {x: -6.2, z: -4.5, r: 0.6}, {x: -4.9, z: -4.9, r: 0.4}, {x: 6.7, z: -4.6, r: 0.4}, {x: 3.0, z: -1.7, r: 0.45}]),
 		rects: [[-7.2, 7.2, -5.0, -1.6], [-2.55, -0.45, -1.6, 3.6]],
 	},
+	// Arena: el lobby (abajo), las rampas y el campo redondo del centro.
+	arena: {
+		...box(-10.8, 10.8, -16.2, 9.0),
+		rects: [[-10.6, 10.6, -16.0, -10.3], [-1.15, 1.15, -10.6, -8.3]],
+		circles: [[0, 0, 8.7]],
+	},
 	house: box(-4.1, 4.1, -3.7, 3.6),
+	yard: box(-7.68, 7.68, -7.86, 7.85),
+	restaurant: box(-5, 5, -4.4, 4.4),
+	casino: box(-7.55, 7.55, -6.2, 6.2),
+	smithy: box(-4, 4, -4.12, 4.12),
 };
+
+/** Lo que un juego de la Arena le cambia al motor (ver party.ts). */
+export interface WorldMode {
+	/** Límites propios (el campo del juego). */
+	clamp?(p: THREE.Vector3): THREE.Vector3;
+	/** ¿Hay piso acá? Si no, me caigo. */
+	support?(x: number, z: number): boolean;
+	/** Varios pisos: la altura del piso que hay debajo de (x, y, z), o null si no hay ninguno. */
+	ground?(x: number, z: number, y: number): number | null;
+	/** Cada cuadro, después de moverme. */
+	update?(dt: number): void;
+	/** Quieto (cuenta regresiva, eliminado mirando). */
+	frozen?(): boolean;
+	/** Tecla E / Espacio dentro del juego (devuelve true si la usó). */
+	action?(): boolean;
+	speed?: number;
+	wideCamera?: boolean;
+}
 
 export type Interaction =
 	| {kind: 'seat'; id: string; label: string}
@@ -72,7 +107,7 @@ export type Interaction =
 	| {kind: 'stand'; label: string};
 
 export interface EngineCallbacks {
-	onLocalChange(state: {x: number; z: number; ry: number; anim: Anim; seat: string | null; tx: number; tz: number}): void;
+	onLocalChange(state: {x: number; z: number; ry: number; anim: Anim; seat: string | null; tx: number; tz: number; y?: number}): void;
 	onDoor(room: RoomId): void;
 	onInteract(action: Interaction): void;
 	onTable(seatIndex: number | null): void;
@@ -81,8 +116,11 @@ export interface EngineCallbacks {
 	onFurniturePick(uid: string): void;
 	/** Mientras pesca: E / clic para recoger (lo maneja WorldView con el minijuego). */
 	onFishAction?(): void;
+	/** Clic: empujar al que tengas cerca. */
+	onShove?(): void;
 	/** Entró o salió el modo "ver la tele" (cámara cerca de la pantalla). */
 	onTvView?(on: boolean): void;
+	onGroundAction?(x: number, z: number): boolean;
 }
 
 interface Actor {
@@ -113,7 +151,17 @@ interface Door {
 	name: string;
 }
 
-const ROOM_TITLES: Record<string, string> = {living: 'el Living', cinema: 'el Cine', campfire: 'el Campamento', shop: 'la Tienda', games: 'la Casa de juegos', house: 'Mi casa', port: 'el Puerto'};
+const DOOR_LABELS: Record<string, string> = {living: 'al Living', cinema: 'al Cine', campfire: 'al Campamento', shop: 'a la Tienda', games: 'a la Casa de juegos', house: 'a mi casa', port: 'al Puerto', arena: 'a la Arena', yard: 'al patio', casino: 'al Casino', restaurant: 'al Restaurante', smithy: 'a la Herrería'};
+const HOTSPOT_LABELS: Record<string, string> = {
+	clothes: 'Ver ropa', furniture: 'Ver muebles', fitting: 'Probador', fishmarket: 'Vender pescado', 'arena-admin': 'Jugar en la Arena',
+	'casino-blackjack': 'Jugar blackjack', 'casino-roulette': 'Jugar ruleta', 'casino-slots': 'Jugar tragamonedas',
+	'restaurant-menu': 'Ver el menú', 'smith-upgrades': 'Mejorar herramientas', 'garden-land': 'Ampliar la huerta',
+};
+const HOTSPOT_ICONS: Record<string, string> = {
+	furniture: 'sofa', fitting: 'mirror', fishmarket: 'fish', 'arena-admin': 'crown',
+	'casino-blackjack': 'dice', 'casino-roulette': 'dice', 'casino-slots': 'dice',
+	'restaurant-menu': 'utensils', 'smith-upgrades': 'hammer', 'garden-land': 'sprout',
+};
 
 function makeLabel(name: string, color: string, avatarUrl?: string): {el: HTMLDivElement; obj: CSS2DObject} {
 	const el = document.createElement('div');
@@ -177,6 +225,8 @@ export class WorldEngine {
 	private occlusion = new CameraOcclusion();
 	/** Lo que pone el juego de mesa (cartas, fichas) sobre la mesa. */
 	readonly tableRoot = new THREE.Group();
+	/** Lo que pone cada juego de la Arena (pisos, obstáculos, pelota…). */
+	readonly partyRoot = new THREE.Group();
 	private seats: Seat[] = [];
 	private doors: Door[] = [];
 	private hotspots: Array<{kind: string; pos: THREE.Vector3}> = [];
@@ -189,12 +239,19 @@ export class WorldEngine {
 		this.pets.onAppear = cb;
 	}
 	private ambience: Ambience;
+	readonly garden = new GardenView();
+	private gardenLand: FarmLand | null = null;
+	private gardenTool = false;
+	private effects: RoomEffects;
+	private screening = false;
+	private loadedRoom: RoomId | null = null;
 	private active = true;
+	private controlsBlocked = false;
 	/** Suena música en la tele de esta sala: los que están quietos bailan. */
 	private musicOn = false;
 	/** Modo "ver la tele": la cámara se acerca y deja la pantalla grande (se sale al moverse). */
 	private tvView = false;
-	private fishing: {spot: THREE.Vector3; dir: THREE.Vector3; bite: boolean; rod: THREE.Object3D; line: THREE.Line; bobber: THREE.Mesh; started: number} | null = null;
+	private fishing: {spot: THREE.Vector3; dir: THREE.Vector3; bite: boolean; landed: boolean; rod: THREE.Object3D; line: THREE.Line; bobber: THREE.Mesh; started: number} | null = null;
 	private fishSpots: Array<{pos: THREE.Vector3; dir: THREE.Vector3}> = [];
 	private me: Actor | null = null;
 	private meId = '';
@@ -245,7 +302,7 @@ export class WorldEngine {
 		this.labels.domElement.className = 'w-labels';
 		container.append(this.labels.domElement);
 
-		this.scene.add(this.roomGroup, this.furnitureGroup, this.actorsGroup, this.tableRoot);
+		this.scene.add(this.roomGroup, this.furnitureGroup, this.actorsGroup, this.tableRoot, this.partyRoot);
 		this.skyFill = new THREE.HemisphereLight(0xd9ccff, 0x3a2552, 1.25);
 		this.scene.add(this.skyFill);
 		const sun = new THREE.DirectionalLight(0xfff0dd, 1.5);
@@ -257,6 +314,8 @@ export class WorldEngine {
 		sun.shadow.bias = -0.0008;
 		this.scene.add(sun, sun.target);
 		this.sun = sun;
+		this.scene.add(this.garden.root);
+		this.effects = new RoomEffects(this.scene, this.sun, this.skyFill);
 
 		this.npcs = new Npcs((id, name, color, look, label) => this.createActor(id, name, color, look, undefined, label));
 		this.ambience = new Ambience(this.scene, this.sun, this.skyFill);
@@ -271,7 +330,9 @@ export class WorldEngine {
 		const canvas = this.renderer.domElement;
 		canvas.addEventListener('pointerdown', this.onPointerDown);
 		canvas.addEventListener('pointerup', this.onPointerUp);
+		canvas.addEventListener('contextmenu', this.onContextMenu);
 		canvas.addEventListener('pointermove', this.onPointerMove);
+		canvas.addEventListener('pointerleave', () => this.garden.point());
 		canvas.addEventListener('wheel', this.onWheel, {passive: true});
 		window.addEventListener('keydown', this.onKeyDown);
 		window.addEventListener('keyup', this.onKeyUp);
@@ -294,14 +355,19 @@ export class WorldEngine {
 	async loadRoom(room: RoomId, house: PlacedFurniture[] | null, fromRoom: RoomId | null = null): Promise<void> {
 		const token = ++this.loadToken;
 		this.room = room;
+		this.current = null;
+		this.prompt.visible = false;
 		const isHouse = room.startsWith('house:');
+		const isYard = room.startsWith('yard:');
 		const def = ROOMS.find((r) => r.id === room);
-		const gltf = await loadGLB(isHouse ? HOUSE_GLB : (def?.glb ?? ROOMS[0].glb));
+		const gltf = await loadGLB(isHouse ? HOUSE_GLB : isYard ? YARD_GLB : (def?.glb ?? ROOMS[0].glb));
 		if (token !== this.loadToken || this.disposed) return;
 		this.clearRoom();
+		this.loadedRoom = room;
 		const scene = gltf.scene.clone(true);
-		this.bounds = BOUNDS[isHouse ? 'house' : room] ?? BOUNDS.living;
-		this.prepareScene(scene, false);
+		this.bounds = BOUNDS[isHouse ? 'house' : isYard ? 'yard' : room] ?? BOUNDS.living;
+		const localLightScale = room === 'casino' ? 0.23 : room === 'smithy' ? 0.18 : 1;
+		this.prepareScene(scene, false, localLightScale);
 		this.bounds = {...this.bounds, solids: this.findSolids(scene)};
 		this.limitLights(scene, 6);
 		this.roomGroup.add(scene);
@@ -312,6 +378,24 @@ export class WorldEngine {
 		else this.spawn.set(0, 0, -3);
 		this.collectSeats(scene, '');
 		this.collectMarkers(scene);
+		this.zonesArmed = false;
+		if (room === 'city') {
+			this.addArenaGate(scene);
+			this.faceSignsToCamera(scene);
+		}
+		if (room === 'arena') {
+			// La gelatina del pozo era un disco: cerca del borde de abajo la cámara veía su borde contra
+			// el cielo y parecía que "cambiaba el piso". Más ancha, nunca se le ve el borde; y sin sombras,
+			// no cambia de color mientras caminás.
+			scene.traverse((o) => {
+				if (!/^GooPool/.test(o.name)) return;
+				o.scale.x *= 4;
+				o.scale.z *= 4;
+				o.traverse((m) => {
+					m.receiveShadow = false;
+				});
+			});
+		}
 		this.screenMesh = (scene.getObjectByName('Screen') as THREE.Mesh) ?? null;
 		this.screenOriginal = this.screenMesh ? (this.screenMesh.material as THREE.Material) : null;
 		if (this.screenMesh) planarScreenUv(this.screenMesh.geometry);
@@ -332,16 +416,21 @@ export class WorldEngine {
 		this.roomGroup.add(this.pets.root);
 		void this.pets.enterRoom(room);
 		this.ambience.setup(room, scene);
+		this.effects.enter(room, scene);
+		if (isYard) this.garden.set(this.gardenLand);
+		worldSounds.enter(room);
 		// Color del polvo según el piso.
 		this.dust.setTint(room === 'port' ? 0xf2e2c4 : room === 'campfire' ? 0xd9c2a3 : room === 'city' ? 0xe6d3c4 : 0xe4d6ea);
 		this.stopFishing();
 		this.setTvView(false);
 		this.sun.position.set(-4, room === 'city' ? 16 : 10, -6);
 		if (isHouse) await this.setHouse(house ?? []);
+		if (token !== this.loadToken || this.disposed) return;
 		if (this.me) {
 			const arrival = room === 'city' && fromRoom ? this.doors.find((d) => d.room === (fromRoom.startsWith('house:') ? 'house' : fromRoom)) : null;
 			this.me.companion?.reset();
-			this.me.pos.copy(arrival ? arrival.pos : this.spawn);
+			const backyardDoor = isHouse && fromRoom?.startsWith('yard:') ? this.doors.find((d) => d.name === 'yard') : undefined;
+			this.me.pos.copy(arrival ? arrival.pos : backyardDoor ? backyardDoor.pos.clone().add(new THREE.Vector3(0, 0, -0.7)) : this.spawn);
 			this.me.target.copy(this.me.pos);
 			this.me.ry = arrival ? arrival.ry : 0;
 			this.me.seat = null;
@@ -351,6 +440,51 @@ export class WorldEngine {
 			this.announce(true);
 			this.camPos.copy(this.cameraGoal());
 		}
+		for (const fn of this.roomReady) fn(room);
+	}
+
+	/** Avisos de "terminó de cargar la sala" (la Arena vuelve a esconder su piso si hay un juego). */
+	readonly roomReady = new Set<(room: RoomId) => void>();
+
+	/**
+	 * Los carteles de abajo (Campamento, Puerto) miraban hacia la plaza y desde la cámara (que está
+	 * siempre adelante) no se leían. Se reemplaza el texto por un cartel que siempre mira a la cámara.
+	 */
+	private faceSignsToCamera(root: THREE.Object3D): void {
+		// Se da vuelta el cartel de madera (tabla, poste y letras) 180° sobre su eje: así el lado
+		// escrito queda mirando a la cámara. Sin carteles nuevos encima.
+		for (const prefix of ['CampSign', 'PortSign']) {
+			const parts: THREE.Object3D[] = [];
+			root.traverse((obj) => {
+				if (obj.name.startsWith(prefix) && obj.parent && !obj.parent.name.startsWith(prefix)) parts.push(obj);
+			});
+			const board = parts.find((p) => /Board/.test(p.name)) ?? parts[0];
+			if (!board) continue;
+			const pivot = board.position.clone();
+			// Giro alrededor del eje VERTICAL del mundo (rotation.y giraba sobre el eje propio de las
+			// letras, que están acostadas, y quedaban espejadas).
+			const yaw = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
+			for (const part of parts) {
+				const offset = part.position.clone().sub(pivot);
+				part.position.set(pivot.x - offset.x, part.position.y, pivot.z - offset.z);
+				part.quaternion.premultiply(yaw);
+			}
+		}
+		root.updateMatrixWorld(true);
+	}
+
+	/** La entrada a la Arena es el castillo del fondo de la plaza: se entra por el arco (con E o
+	 * caminando hacia adentro). Al volver, aparecés adelante del arco mirando a la plaza. */
+	private addArenaGate(scene: THREE.Object3D): void {
+		let arch: THREE.Object3D | null = null;
+		scene.traverse((o) => {
+			if (!arch && /^Castle[_ ]?arch/i.test(o.name)) arch = o;
+		});
+		const box = arch ? new THREE.Box3().setFromObject(arch) : null;
+		const x = box ? (box.min.x + box.max.x) / 2 : 0;
+		// El arco: el borde que da a la plaza (la cámara mira desde -Z).
+		const front = box ? box.min.z : 19.8;
+		this.doors.push({room: 'arena', pos: new THREE.Vector3(x, 0, front - 0.9), ry: Math.PI, name: 'arena'});
 	}
 
 	/** Cajas en el piso de los edificios (sin contar lo que está alto, como toldos y carteles). */
@@ -358,7 +492,7 @@ export class WorldEngine {
 		root.updateMatrixWorld(true);
 		const solids: Array<[number, number, number, number]> = [];
 		root.traverse((obj) => {
-			if (!SOLID_NAMES.test(obj.name)) return;
+			if (!SOLID_NAMES.test(obj.name) && obj.userData.pelacord_solid !== true) return;
 			const v = new THREE.Vector3();
 			let minX = Infinity;
 			let maxX = -Infinity;
@@ -387,6 +521,8 @@ export class WorldEngine {
 
 	private clearRoom(): void {
 		this.occlusion.clear();
+		this.effects.clear();
+		this.garden.set(null);
 		this.pets.clear();
 		this.roomGroup.clear();
 		this.furnitureGroup.clear();
@@ -401,7 +537,7 @@ export class WorldEngine {
 		this.current = null;
 	}
 
-	private prepareScene(root: THREE.Object3D, isFurniture: boolean): void {
+	private prepareScene(root: THREE.Object3D, isFurniture: boolean, localLightScale = 1): void {
 		root.traverse((obj) => {
 			const mesh = obj as THREE.Mesh;
 			if (mesh.isMesh) {
@@ -410,7 +546,7 @@ export class WorldEngine {
 			}
 			const light = obj as THREE.Light;
 			if ((light as THREE.PointLight).isPointLight || (light as THREE.SpotLight).isSpotLight) {
-				light.intensity *= POINT_LIGHT_SCALE;
+				light.intensity *= POINT_LIGHT_SCALE * localLightScale;
 				(light as THREE.PointLight).distance = 10;
 				(light as THREE.PointLight).decay = 1.6;
 				light.castShadow = false;
@@ -459,7 +595,8 @@ export class WorldEngine {
 				const pos = obj.getWorldPosition(new THREE.Vector3());
 				pos.y = 0;
 				const dir = obj.getWorldDirection(new THREE.Vector3());
-				this.doors.push({room: (door === 'house' ? `house:${this.meId}` : door) as RoomId, pos, ry: Math.atan2(dir.x, dir.z), name: door});
+				const destination = door === 'house' ? `house:${this.meId}` : door === 'yard' && this.room?.startsWith('house:') ? `yard:${this.room.slice(6)}` : door;
+				this.doors.push({room: destination as RoomId, pos, ry: Math.atan2(dir.x, dir.z), name: door});
 			}
 			const hotspot = obj.userData?.pelacord_hotspot as string | undefined;
 			if (hotspot === 'fish') {
@@ -576,7 +713,7 @@ export class WorldEngine {
 			this.setCompanion(actor, s.equippedPet);
 			actor.labelEl.querySelector('.w-name-text')!.textContent = name;
 			setLabelFace(actor.labelEl, name, info[s.id]?.avatarUrl);
-			const reported = new THREE.Vector3(s.x, 0, s.z);
+			const reported = new THREE.Vector3(s.x, s.y ?? 0, s.z);
 			// Sentado: se usa el asiento de verdad (con su altura y hacia dónde mira). Antes quedaba a la
 			// altura del piso y se veía hundido en el sillón.
 			const seat = s.anim === 'sit' && s.seat ? this.seats.find((x) => x.id === s.seat) : undefined;
@@ -586,7 +723,7 @@ export class WorldEngine {
 				s = {...s, ry: Math.atan2(dir.x, dir.z)};
 			}
 			if (actor.pos.distanceTo(reported) > 2 || s.anim === 'sit') actor.pos.copy(reported);
-			actor.target.set(s.tx ?? s.x, 0, s.tz ?? s.z);
+			actor.target.set(s.tx ?? s.x, s.y ?? 0, s.tz ?? s.z);
 			if (!isMoving(s.anim)) actor.target.copy(reported);
 			if (!isMoving(s.anim)) actor.ry = s.ry;
 		}
@@ -837,12 +974,33 @@ export class WorldEngine {
 		this.musicOn = on;
 	}
 
+	setScreening(on: boolean): void {
+		this.screening = on;
+	}
+
+	playCasino(spin: Spin): void {
+		this.effects.play(spin);
+	}
+
+	setGarden(land: FarmLand | null, action: FarmAction): void {
+		this.gardenLand = land;
+		this.gardenTool = action !== 'walk';
+		if (this.loadedRoom?.startsWith('yard:')) this.garden.set(land);
+		if (!this.gardenTool) this.garden.point();
+	}
+
 	/** Pausa el mundo (cuando se pasa a la parte 2D de PelaCord): no dibuja ni escucha el teclado. */
 	setActive(on: boolean): void {
 		this.active = on;
 		this.keys.clear();
 		if (!on) this.stopFishing();
 		this.labels.domElement.style.display = on ? '' : 'none';
+	}
+
+	setControlsBlocked(blocked: boolean): void {
+		this.controlsBlocked = blocked;
+		this.keys.clear();
+		this.pointerDown = null;
 	}
 
 	// ------------------------------------------------------------- pesca ---
@@ -899,7 +1057,8 @@ export class WorldEngine {
 		const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({color: 0xf4f0ff, transparent: true, opacity: 0.8}));
 		line.frustumCulled = false;
 		this.scene.add(line);
-		this.fishing = {spot: spot.pos.clone(), dir: spot.dir.clone(), bite: false, rod, line, bobber, started: this.clock.elapsedTime};
+		this.fishing = {spot: spot.pos.clone(), dir: spot.dir.clone(), bite: false, landed: false, rod, line, bobber, started: this.clock.elapsedTime};
+		worldSounds.play('throw', .75);
 		this.announce(true);
 		this.cb.onFishAction?.();
 	}
@@ -907,6 +1066,7 @@ export class WorldEngine {
 	/** Pica un pez: el corcho se hunde y aparece el "!". */
 	setBite(on: boolean): void {
 		if (!this.fishing || !this.me) return;
+		if (on && !this.fishing.bite) worldSounds.play('bite');
 		this.fishing.bite = on;
 		if (on) this.pop(this.me, iconSvg('alert', 34), null);
 	}
@@ -946,6 +1106,10 @@ export class WorldEngine {
 		if (!f || !this.me) return;
 		const bob = f.bite ? -0.1 + Math.sin(t * 22) * 0.05 : Math.sin(t * 2.4) * 0.025;
 		const settle = Math.min(1, (t - f.started) * 2.5);
+		if (settle === 1 && !f.landed) {
+			f.landed = true;
+			worldSounds.play('splash');
+		}
 		f.bobber.position.y = THREE.MathUtils.lerp(0.9, 0.04, settle) + bob;
 		const tip = new THREE.Vector3(0, 1.62, 0);
 		f.rod.localToWorld(tip);
@@ -987,6 +1151,7 @@ export class WorldEngine {
 
 	rotateGhost(): void {
 		if (!this.decorating) return;
+		worldSounds.play('highlight');
 		this.decorating.rot = (this.decorating.rot + Math.PI / 4) % (Math.PI * 2);
 		if (this.ghost) this.ghost.rotation.y = this.decorating.rot;
 	}
@@ -996,11 +1161,23 @@ export class WorldEngine {
 	private onKeyDown = (event: KeyboardEvent): void => {
 		const target = event.target as HTMLElement | null;
 		if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
-		if (!this.active) return;
+		if (!this.active || this.controlsBlocked) return;
 		const key = event.key.toLowerCase();
 		if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(key)) {
 			this.keys.add(key);
 			if (key.startsWith('arrow')) event.preventDefault();
+		}
+		// En un juego de la Arena, E / Espacio es la acción del juego (empujar, agarrar la cola…).
+		// Espacio: saltar (en todo el mundo).
+		if (key === ' ' && !event.repeat) {
+			event.preventDefault();
+			this.jump();
+			return;
+		}
+		if (key === 'e' && !event.repeat && this.mode?.action?.()) {
+			worldSounds.play('throw', .76);
+			event.preventDefault();
+			return;
 		}
 		if (key === 'e' && !event.repeat) this.interact();
 		if (key === 'r' && this.decorating) this.rotateGhost();
@@ -1013,11 +1190,21 @@ export class WorldEngine {
 	private onBlur = (): void => this.keys.clear();
 
 	private onPointerDown = (event: PointerEvent): void => {
+		if (this.controlsBlocked) return;
 		this.pointerDown = {x: event.clientX, y: event.clientY};
 		this.renderer.domElement.focus();
 	};
 
 	private onPointerMove = (event: PointerEvent): void => {
+		if (this.gardenTool && this.loadedRoom?.startsWith('yard:') && this.gardenLand) {
+			const point = this.floorPoint(event);
+			if (!point) this.garden.point();
+			else {
+				const x = Math.round(point.x);
+				const z = Math.round(point.z);
+				this.garden.point(x, z, inLot(this.gardenLand.level, x, z) && Boolean(this.me && Math.hypot(x - this.me.pos.x, z - this.me.pos.z) <= 2.8));
+			}
+		}
 		if (!this.ghost) return;
 		const point = this.floorPoint(event);
 		if (point) this.ghost.position.copy(point);
@@ -1061,10 +1248,23 @@ export class WorldEngine {
 		if (b.kind === 'circle') {
 			const length = Math.hypot(point.x, point.z);
 			if (length > b.radius) point.multiplyScalar(b.radius / length);
-		} else if (b.rects) {
+		} else if (b.rects || b.circles) {
 			let best: [number, number] | null = null;
 			let bestD = Infinity;
-			for (const [x1, x2, z1, z2] of b.rects) {
+			for (const [cx, cz, r] of b.circles ?? []) {
+				const dx = point.x - cx;
+				const dz = point.z - cz;
+				const len = Math.hypot(dx, dz);
+				const k = len > r ? r / len : 1;
+				const x = cx + dx * k;
+				const z = cz + dz * k;
+				const d = (x - point.x) ** 2 + (z - point.z) ** 2;
+				if (d < bestD) {
+					bestD = d;
+					best = [x, z];
+				}
+			}
+			for (const [x1, x2, z1, z2] of b.rects ?? []) {
 				const x = THREE.MathUtils.clamp(point.x, x1, x2);
 				const z = THREE.MathUtils.clamp(point.z, z1, z2);
 				const d = (x - point.x) ** 2 + (z - point.z) ** 2;
@@ -1118,7 +1318,10 @@ export class WorldEngine {
 		this.raycaster.setFromCamera(this.ndc(event), this.camera);
 		if (this.decorating) {
 			const point = this.floorPoint(event);
-			if (point) this.cb.onPlace(point.x, point.z, this.decorating.rot);
+			if (point) {
+				worldSounds.play('place');
+				this.cb.onPlace(point.x, point.z, this.decorating.rot);
+			}
 			return;
 		}
 		if (this.room === `house:${this.meId}` && this.furnitureClickable.size && this.editMode) {
@@ -1129,23 +1332,86 @@ export class WorldEngine {
 				return;
 			}
 		}
+		// El clic NO camina (se camina con WASD): el clic empuja al que tengas cerca.
+		if (this.gardenTool && this.loadedRoom?.startsWith('yard:') && this.room === this.loadedRoom) {
+			const point = this.floorPoint(event);
+			if (point && this.cb.onGroundAction?.(point.x, point.z)) return;
+		}
+		if (this.mode?.action?.()) return;
+		this.cb.onShove?.();
+	};
+
+	/** Clic derecho sobre alguien: su tarjetita (ir a su casa). */
+	private onContextMenu = (event: MouseEvent): void => {
+		event.preventDefault();
+		this.raycaster.setFromCamera(this.ndc(event as PointerEvent), this.camera);
 		const actorHits = this.raycaster.intersectObjects([...this.others.values()].map((a) => a.avatar.root), true);
-		if (actorHits.length) {
-			let obj: THREE.Object3D | null = actorHits[0].object;
-			while (obj && !obj.userData.playerId) obj = obj.parent;
-			if (obj?.userData.playerId) {
-				this.cb.onPlayerClick(obj.userData.playerId as string);
-				return;
+		if (!actorHits.length) return;
+		let obj: THREE.Object3D | null = actorHits[0].object;
+		while (obj && !obj.userData.playerId) obj = obj.parent;
+		if (obj?.userData.playerId) this.cb.onPlayerClick(obj.userData.playerId as string);
+	};
+
+	private jumping = false;
+
+	/** Salto: sólo desde el piso (y no sentado ni pescando). */
+	jump(): void {
+		const me = this.me;
+		if (!me || this.falling || me.seat || this.fishing || this.tableSeat !== null || this.mode?.frozen?.()) return;
+		this.falling = true;
+		this.jumping = true;
+		this.fallV = 7.6;
+		me.anim = 'jump';
+		this.announce(true);
+	}
+
+	/** Está en el aire por un salto (para esquivar barras y balas). */
+	isJumping(): boolean {
+		return this.jumping;
+	}
+
+	/** Se activa recién cuando saliste de la zona (si no, al volver del campamento te metía de nuevo). */
+	private zonesArmed = false;
+
+	private checkWalkInZones(actor: Actor): void {
+		let inside: Door | null = null;
+		for (const door of this.doors) {
+			if (door.name === 'arena') {
+				// Castillo: se entra al pasar por debajo del arco.
+				if (actor.pos.z > door.pos.z + 1.2 && Math.abs(actor.pos.x - door.pos.x) < 1.3) inside = door;
+				continue;
+			}
+			if (door.name !== 'campfire' && door.name !== 'port') continue;
+			const near = Math.hypot(actor.pos.x - door.pos.x, actor.pos.z - door.pos.z) < 1.4;
+			// Pasado el cartel, hacia el bosque o el muelle (abajo): también entra.
+			const beyond = actor.pos.z < door.pos.z + 0.4 && Math.abs(actor.pos.x - door.pos.x) < 3;
+			if (near || beyond) inside = door;
+		}
+		if (!inside) {
+			this.zonesArmed = true;
+			return;
+		}
+		if (!this.zonesArmed) return;
+		this.zonesArmed = false;
+		this.cb.onDoor(inside.room);
+	}
+
+	/** El más cercano adelante mío (para empujar): jugador o bot. */
+	shoveTarget(maxDistance = 1.8): {id: string; dx: number; dz: number} | null {
+		if (!this.me) return null;
+		let best: {id: string; dx: number; dz: number} | null = null;
+		let bestD = maxDistance;
+		for (const [id, actor] of [...this.others, ...this.bots]) {
+			const dx = actor.pos.x - this.me.pos.x;
+			const dz = actor.pos.z - this.me.pos.z;
+			const d = Math.hypot(dx, dz);
+			if (d < bestD) {
+				bestD = d;
+				best = {id, dx, dz};
 			}
 		}
-		// Clic en el piso: también se puede caminar con el mouse.
-		const point = this.floorPoint(event);
-		if (point && this.me && !this.me.seat) {
-			this.me.target.copy(point);
-			this.me.anim = 'walk';
-			this.announce(true);
-		}
-	};
+		return best;
+	}
 
 	/** Modo decorar: clic en un mueble lo agarra para moverlo. */
 	editMode = false;
@@ -1173,7 +1439,7 @@ export class WorldEngine {
 			return;
 		}
 		if (action.kind === 'exit') {
-			this.cb.onDoor('city');
+			this.cb.onDoor(this.loadedRoom?.startsWith('yard:') ? `house:${this.loadedRoom.slice(5)}` : 'city');
 			return;
 		}
 		if (action.kind === 'npc') this.npcs.wave(action.npc);
@@ -1189,6 +1455,7 @@ export class WorldEngine {
 
 	private sit(seat: Seat): void {
 		if (!this.me) return;
+		worldSounds.play('fabric');
 		const pos = seat.object.getWorldPosition(new THREE.Vector3());
 		const dir = seat.object.getWorldDirection(new THREE.Vector3());
 		this.me.pos.copy(pos);
@@ -1206,6 +1473,7 @@ export class WorldEngine {
 
 	standUp(): void {
 		if (!this.me?.seat) return;
+		worldSounds.play('fabric', .72);
 		const seat = this.seats.find((s) => s.id === this.me!.seat);
 		const front = this.me.pos.clone();
 		if (seat) front.add(seat.object.getWorldDirection(new THREE.Vector3()).setY(0).normalize().multiplyScalar(0.6));
@@ -1238,7 +1506,129 @@ export class WorldEngine {
 		const now = performance.now();
 		if (!force && now - this.lastAnnounce < 180) return;
 		this.lastAnnounce = now;
-		this.cb.onLocalChange({x: this.me.pos.x, z: this.me.pos.z, ry: this.me.ry, anim: this.me.anim, seat: this.me.seat, tx: this.me.target.x, tz: this.me.target.z});
+		this.cb.onLocalChange({x: this.me.pos.x, z: this.me.pos.z, ry: this.me.ry, anim: this.me.anim, seat: this.me.seat, tx: this.me.target.x, tz: this.me.target.z, y: Math.round(this.me.pos.y * 100) / 100});
+	}
+
+	// ------------------------------------------------------- modo juego ---
+
+	/** Un juego de la Arena: cambia los límites, el piso (para caerse) y agrega su lógica por cuadro. */
+	mode: WorldMode | null = null;
+	/** Cámara más lejos (se ve todo el campo) durante una partida. */
+	partyCamera = false;
+	private meVel = new THREE.Vector3();
+	private fallV = 0;
+	private falling = false;
+	/** Los bots de la Arena (personajes de verdad, manejados por el que organiza la partida). */
+	readonly bots = new Map<string, Actor>();
+
+	setMode(mode: WorldMode | null): void {
+		this.mode = mode;
+		this.partyCamera = Boolean(mode?.wideCamera);
+		this.resetFall();
+	}
+
+	resetFall(): void {
+		this.jumping = false;
+		this.falling = false;
+		this.fallV = 0;
+		this.meVel.set(0, 0, 0);
+		if (this.me) this.me.pos.y = 0;
+	}
+
+	/** Empujón (cachetada, barra que gira, barril…): una velocidad que se va frenando. */
+	push(dx: number, dz: number, strength: number): void {
+		// Sólo suenan los golpes de verdad: los empujoncitos de cada cuadro (el barco inclinado)
+		// hacían sonar 'place' sin parar, re fuerte y trabado. Y como mucho un golpe cada 150 ms.
+		const now = performance.now();
+		if (strength >= 3 && now - this.lastPushSound > 150) {
+			this.lastPushSound = now;
+			worldSounds.play('place', .63);
+		}
+		const len = Math.hypot(dx, dz) || 1;
+		this.meVel.x += (dx / len) * strength;
+		this.meVel.z += (dz / len) * strength;
+	}
+
+	private lastPushSound = 0;
+
+	teleport(x: number, z: number, ry = 0): void {
+		if (!this.me) return;
+		this.resetFall();
+		if (this.me.seat) this.standUp();
+		this.me.pos.set(x, 0, z);
+		this.me.target.copy(this.me.pos);
+		this.me.ry = ry;
+		this.me.anim = 'idle';
+		this.announce(true);
+	}
+
+	myState(): {x: number; y: number; z: number; ry: number; falling: boolean} {
+		const p = this.me?.pos;
+		return {x: p?.x ?? 0, y: p?.y ?? 0, z: p?.z ?? 0, ry: this.me?.ry ?? 0, falling: this.falling};
+	}
+
+	/** Dónde está cada uno (yo, los demás de esta sala y los bots). */
+	allPositions(): Record<string, {x: number; y: number; z: number}> {
+		const out: Record<string, {x: number; y: number; z: number}> = {};
+		if (this.me) out[this.meId] = {x: this.me.pos.x, y: this.me.pos.y, z: this.me.pos.z};
+		for (const [id, a] of this.others) out[id] = {x: a.pos.x, y: a.pos.y, z: a.pos.z};
+		for (const [id, a] of this.bots) out[id] = {x: a.pos.x, y: a.pos.y, z: a.pos.z};
+		return out;
+	}
+
+	/** Crea o mueve un bot. */
+	setBot(id: string, name: string, look: Look, x: number, y: number, z: number, ry: number, anim: Anim): void {
+		let actor = this.bots.get(id);
+		if (!actor) {
+			actor = this.createActor(id, name, '#ffd23f', look);
+			actor.labelEl.classList.add('is-bot');
+			actor.pos.set(x, y, z);
+			this.bots.set(id, actor);
+		}
+		actor.target.set(x, y, z);
+		actor.anim = anim;
+		if (!isMoving(anim)) actor.ry = ry;
+	}
+
+	removeBot(id: string): void {
+		const actor = this.bots.get(id);
+		if (!actor) return;
+		actor.avatar.dispose();
+		this.bots.delete(id);
+	}
+
+	clearBots(): void {
+		for (const id of [...this.bots.keys()]) this.removeBot(id);
+	}
+
+	/** El personaje de alguien (yo, otro jugador o un bot), para colgarle cosas (colas, disfraces). */
+	actorRoot(id: string): THREE.Object3D | null {
+		if (id === this.meId) return this.me?.avatar.root ?? null;
+		return this.others.get(id)?.avatar.root ?? this.bots.get(id)?.avatar.root ?? null;
+	}
+
+	/** Esconde o muestra el cuerpo de alguien (para disfrazarlo de juguete). */
+	setBodyHidden(id: string, hidden: boolean): void {
+		const root = this.actorRoot(id);
+		if (!root) return;
+		for (const child of root.children) if (!(child.userData.partyProp)) child.visible = !hidden;
+	}
+
+	private stepBot(actor: Actor, dt: number): void {
+		const to = actor.target.clone().sub(actor.pos);
+		const flat = Math.hypot(to.x, to.z);
+		actor.pos.lerp(actor.target, Math.min(1, dt * 7));
+		if (flat > 0.04) this.turn(actor, Math.atan2(to.x, to.z), dt);
+		actor.avatar.setBase(flat > 0.04 && isMoving(actor.anim) ? (actor.anim as BaseAnim) : actor.anim === 'walk' || actor.anim === 'run' ? 'idle' : (actor.anim as BaseAnim));
+		this.place(actor, dt);
+	}
+
+	/** Mueve respetando el modo de juego (si hay) y sin perder la altura (para caerse). */
+	private clampMove(p: THREE.Vector3): THREE.Vector3 {
+		const y = p.y;
+		const out = this.mode?.clamp ? this.mode.clamp(p) : this.clamp(p);
+		out.y = y;
+		return out;
 	}
 
 	// ------------------------------------------------------------- cuadro ---
@@ -1287,7 +1677,14 @@ export class WorldEngine {
 			const edge = Math.min(1, Math.abs(focus.x) / 14);
 			return new THREE.Vector3(focus.x * .93 + .48, (4.04 + 1.9 * edge ** 4) * this.zoom, focus.z - 8.35 * this.zoom);
 		}
-		if (this.room === 'campfire' || this.room === 'port') {
+		if (this.room === 'arena') {
+			// Arena: más lejos y alta (el campo es grande); en una partida, todavía más (se ve todo).
+			// Si caés a un piso de abajo, la cámara baja con vos.
+			const far = this.partyCamera ? 1.75 : 1.4;
+			const down = Math.max(-8, Math.min(0, focus.y));
+			return new THREE.Vector3(focus.x * 0.85, 5.6 * this.zoom * far + down, focus.z - 7.0 * this.zoom * far);
+		}
+		if (this.room === 'campfire' || this.room === 'port' || this.room?.startsWith('yard:')) {
 			const far = this.room === 'campfire' ? 1.1 : 1.25;
 			return new THREE.Vector3(focus.x, 5.4 * this.zoom * far, focus.z - 7.2 * this.zoom * far);
 		}
@@ -1295,6 +1692,7 @@ export class WorldEngine {
 		// veía el vacío negro de afuera del piso).
 		const b = this.bounds;
 		const z = Math.max(focus.z, b.minZ + 2.4);
+		if (this.room === 'casino') return new THREE.Vector3(focus.x * 0.76, 7.45 * this.zoom, z - 7.35 * this.zoom);
 		return new THREE.Vector3(focus.x * 0.8, 6.3 * this.zoom, z - 6.0 * this.zoom);
 	}
 
@@ -1310,9 +1708,12 @@ export class WorldEngine {
 		const t = this.clock.elapsedTime;
 		if (this.me) this.stepMe(this.me, dt);
 		for (const actor of this.others.values()) this.stepOther(actor, dt);
-		this.npcs.update(dt, this.me?.pos ?? null, this.musicOn, (a, d) => this.turn(a, d.wanted, d.dt));
+		for (const actor of this.bots.values()) this.stepBot(actor, dt);
+		this.npcs.update(dt, this.me?.pos ?? null, this.musicOn, this.camera.position, (a, d) => this.turn(a, d.wanted, d.dt));
 		this.pets.update(dt);
 		const night = this.ambience.update(t);
+		this.garden.tick(dt);
+		this.effects.tick(dt, t, this.musicOn, this.screening);
 		this.dust.update(dt);
 		this.updateFishing(t);
 		for (const tick of this.tickers) tick(dt);
@@ -1336,23 +1737,25 @@ export class WorldEngine {
 		const goal = this.cameraGoal();
 		this.camPos.lerp(goal, 1 - Math.pow(0.0015, dt));
 		this.camera.position.copy(this.camPos);
-		const inside = this.room !== 'city' && this.room !== 'campfire' && this.room !== 'port';
+		const inside = this.room !== 'city' && this.room !== 'campfire' && this.room !== 'port' && this.room !== 'arena' && !this.room?.startsWith('yard:');
 		const city = this.room === 'city';
 		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + .9 : (this.me?.pos.z ?? 0) + (city ? 2.15 : .6);
 		const tvCam = this.tvView ? this.tvCamera() : null;
-		const lookGoal = tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), city ? 1.65 : .6, lookZ);
+		const lookGoal = tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-8, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
 		this.camLook.lerp(lookGoal, 1 - Math.pow(0.0015, dt));
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
 		this.sun.position.set((this.me?.pos.x ?? 0) - (city ? 8.4 : 4), city ? 10.8 : 12, (this.me?.pos.z ?? 0) - 6);
 		this.occlusion.update(this.camera.position, this.tvView || this.tableSeat !== null ? null : this.me?.pos ?? null, dt);
 
+		if (this.controlsBlocked) return;
 		// Enfoque en mi personaje: afuera el fondo se desenfoca más; en la mesa o mirando la tele, casi nada.
 		if (this.fx) {
 			const focusAt = this.tvView || this.tableSeat !== null ? this.camLook : (this.me?.pos ?? this.camLook);
-			const outdoor = this.room === 'city' || this.room === 'port' || this.room === 'campfire';
+			const outdoor = !inside;
 			// Adentro (casas, locales) nada de desenfoque ni brillo: encandilaba todo.
-			this.fx.setOutdoor(outdoor);
+			// En la Arena, sin brillo (bloom): los pisos claros quedaban encandilados y no se veía nada.
+			this.fx.setOutdoor(outdoor, outdoor && this.room !== 'arena');
 			this.fx.setFocus(this.camera.position.distanceTo(focusAt), this.tvView || this.tableSeat !== null ? 0.15 : 1, night);
 			this.fx.render(this.scene, this.camera);
 		} else this.renderer.render(this.scene, this.camera);
@@ -1368,14 +1771,20 @@ export class WorldEngine {
 		if (this.keys.has('a') || this.keys.has('arrowleft')) ix += 1;
 		if (this.keys.has('d') || this.keys.has('arrowright')) ix -= 1;
 		const typing = this.decorating !== null;
+		// En un juego: congelado en la cuenta regresiva o si te caíste.
+		// Quieto en la cuenta regresiva o cayendo al pozo; en un salto sí se puede dirigir en el aire.
+		if (this.mode?.frozen?.() || (this.falling && !this.jumping) || actor.pos.y < -0.6) {
+			ix = 0;
+			iz = 0;
+		}
 		if ((ix || iz) && !typing && this.tableSeat === null) {
 			if (actor.seat) this.standUp();
 			if (this.fishing) this.stopFishing();
 			this.setTvView(false);
 			const length = Math.hypot(ix, iz);
-			const speed = this.keys.has('shift') ? RUN_SPEED : WALK_SPEED;
+			const speed = (this.keys.has('shift') ? RUN_SPEED : WALK_SPEED) * (this.mode?.speed ?? 1);
 			const next = actor.pos.clone().add(new THREE.Vector3((ix / length) * speed * dt, 0, (iz / length) * speed * dt));
-			actor.pos.copy(this.clamp(next));
+			actor.pos.copy(this.clampMove(next));
 			actor.target.copy(actor.pos).add(new THREE.Vector3((ix / length) * 0.8, 0, (iz / length) * 0.8));
 			this.turn(actor, Math.atan2(ix, iz), dt);
 			// Con Shift corre (otra animación, no la misma caminata apurada).
@@ -1398,12 +1807,59 @@ export class WorldEngine {
 				this.announce(true);
 			} else {
 				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, WALK_SPEED * dt)));
-				actor.pos.copy(this.clamp(actor.pos));
+				actor.pos.copy(this.clampMove(actor.pos));
 				this.turn(actor, Math.atan2(toTarget.x, toTarget.z), dt);
 				this.announce();
 			}
 		}
-		actor.avatar.setBase(this.visualAnim(actor.anim));
+		// Física de los juegos: empujones que se frenan y caerse si no hay piso.
+		// Campamento y puerto: se entra con sólo bajar caminando a esa zona (sin apretar E).
+		if (this.room === 'city') this.checkWalkInZones(actor);
+		// Empujones (cachetadas, barras, barriles): en todo el mundo, no sólo en la Arena.
+		if (this.meVel.lengthSq() > 1e-4) {
+			if (actor.seat) this.standUp();
+			actor.pos.copy(this.clampMove(actor.pos.clone().addScaledVector(this.meVel, dt)));
+			this.meVel.multiplyScalar(Math.pow(0.03, dt));
+			this.announce();
+		}
+		if (this.mode?.ground) {
+			// Con varios pisos: caés hasta el de abajo (y si no hay ninguno, seguís cayendo).
+			const floorY = this.mode.ground(actor.pos.x, actor.pos.z, actor.pos.y);
+			if (floorY === null || actor.pos.y > floorY + 0.02) {
+				this.falling = true;
+				this.fallV -= 22 * dt;
+				actor.pos.y += this.fallV * dt;
+				if (floorY !== null && actor.pos.y <= floorY) {
+					actor.pos.y = floorY;
+					this.fallV = 0;
+					this.falling = false;
+				}
+				this.announce();
+			} else actor.pos.y = floorY;
+			this.mode.update?.(dt);
+		} else {
+			const supported = this.mode?.support ? this.mode.support(actor.pos.x, actor.pos.z) : true;
+			if ((!supported && actor.pos.y <= 0.05) || this.falling) {
+				if (!this.falling && !this.jumping) worldSounds.play('cancel', .78);
+				this.falling = true;
+				this.fallV -= 22 * dt;
+				actor.pos.y += this.fallV * dt;
+				// Aterriza de un salto si hay piso abajo.
+				if (supported && actor.pos.y <= 0 && this.fallV <= 0) {
+					actor.pos.y = 0;
+					this.fallV = 0;
+					this.falling = false;
+				}
+				this.announce();
+			}
+			this.mode?.update?.(dt);
+		}
+		if (this.jumping && !this.falling) {
+			this.jumping = false;
+			if (actor.anim === 'jump') actor.anim = 'idle';
+			this.announce(true);
+		}
+		actor.avatar.setBase(this.falling ? 'jump' : this.visualAnim(actor.anim));
 		this.place(actor, dt);
 	}
 
@@ -1483,6 +1939,7 @@ export class WorldEngine {
 
 	/** Busca lo más cercano con lo que se puede interactuar y muestra el cartel "E …". */
 	private updatePrompt(taken: Set<string>): void {
+		if (this.room !== this.loadedRoom) return;
 		const me = this.me;
 		let best: {action: Interaction; at: THREE.Vector3; d: number} | null = null;
 		// `bonus` acerca virtualmente: los asientos ganan sobre los carteles que están al lado.
@@ -1503,8 +1960,8 @@ export class WorldEngine {
 					const p = seat.object.getWorldPosition(new THREE.Vector3());
 					consider({kind: 'seat', id: seat.id, label: seat.table !== null ? 'Sentarte a jugar' : 'Sentarte'}, p.clone().setY(p.y + 0.55), SEAT_RANGE, 0.6);
 				}
-				for (const door of this.doors) consider({kind: 'door', room: door.room, label: `Entrar a ${ROOM_TITLES[door.name] ?? door.name}`}, door.pos.clone().setY(2.4), DOOR_RANGE);
-				if (this.exitPoint) consider({kind: 'exit', label: 'Salir a la ciudad'}, this.exitPoint.clone().setY(1.6), 1.3);
+				for (const door of this.doors) consider({kind: 'door', room: door.room, label: `Entrar ${DOOR_LABELS[door.name] ?? 'a ' + door.name}`}, door.pos.clone().setY(2.4), DOOR_RANGE);
+				if (this.exitPoint) consider({kind: 'exit', label: this.loadedRoom?.startsWith('yard:') ? 'Volver a casa' : 'Salir a la ciudad'}, this.exitPoint.clone().setY(1.6), 1.3);
 				if (this.tvPoint) consider({kind: 'tv', label: 'Usar la tele'}, this.tvPoint.clone().setY(1.6), 1.8);
 				for (const npc of this.npcs.talkers()) consider({kind: 'npc', npc: npc.kind, label: npc.label}, npc.pos.clone().setY(2.2), 2.2);
 				const spot = this.nearestFishSpot();
@@ -1513,8 +1970,9 @@ export class WorldEngine {
 					for (const pet of this.pets.targets()) consider({kind: 'pet', id: pet.id, label: `Atrapar a ${pet.name}`}, pet.position, CAPTURE_RANGE);
 				}
 				for (const h of this.hotspots) {
-					const label = h.kind === 'clothes' ? 'Ver ropa' : h.kind === 'furniture' ? 'Ver muebles' : h.kind === 'fitting' ? 'Probador' : h.kind === 'fishmarket' ? 'Vender pescado' : 'Caja';
-					consider({kind: 'hotspot', hotspot: h.kind, label}, h.pos.clone().setY(1.7), 1.25);
+					const label = HOTSPOT_LABELS[h.kind] ?? 'Caja';
+					const bonus = h.kind.startsWith('casino-') ? 0.4 : 0;
+					consider({kind: 'hotspot', hotspot: h.kind, label}, h.pos.clone().setY(1.7), 1.25, bonus);
 				}
 			}
 		}
@@ -1526,7 +1984,9 @@ export class WorldEngine {
 		}
 		const key = `${found.action.kind}:${found.action.label}`;
 		if (!this.current || `${this.current.kind}:${this.current.label}` !== key) {
-			const icon = found.action.kind === 'seat' ? 'sofa' : found.action.kind === 'door' ? 'door' : found.action.kind === 'exit' ? 'exit' : found.action.kind === 'tv' ? 'tv' : found.action.kind === 'npc' ? 'chat' : found.action.kind === 'fish' ? 'fish' : found.action.kind === 'pet' ? 'paw' : found.action.kind === 'hotspot' ? ((found.action as {hotspot: string}).hotspot === 'fishmarket' ? 'fish' : 'shirt') : 'sofa';
+			const icon = found.action.kind === 'hotspot' ? HOTSPOT_ICONS[found.action.hotspot] ?? 'shirt' :
+				found.action.kind === 'npc' ? 'chat' : found.action.kind === 'pet' ? 'paw' :
+				found.action.kind === 'seat' || found.action.kind === 'stand' ? 'sofa' : found.action.kind;
 			this.promptEl.innerHTML = `<kbd>E</kbd><span class="w-prompt-icon">${iconSvg(icon, 15)}</span><span>${found.action.label}</span>`;
 		}
 		this.current = found.action;
@@ -1562,6 +2022,9 @@ export class WorldEngine {
 		this.npcs.dispose();
 		this.pets.dispose();
 		this.ambience.dispose();
+		this.effects.dispose();
+		this.garden.dispose();
+		worldSounds.leave();
 		this.dust.dispose();
 		this.occlusion.clear();
 		for (const actor of this.others.values()) {

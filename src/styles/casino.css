@@ -1,0 +1,319 @@
+.pc-casino-screen {
+	--pc-gold: #ecc995;
+	--pc-gold-dark: #846044;
+	--pc-ink: #1a101b;
+	--pc-cream: #fff1db;
+	--pc-muted: #ddc6b7;
+	position: fixed;
+	inset: 0;
+	z-index: 22;
+	container-type: inline-size;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
+	color: var(--pc-cream);
+	background: radial-gradient(ellipse at 46% 17%, #553244, #21131f 68%);
+	font-family: var(--t-font);
+}
+
+.pc-casino-screen.is-slots { background: radial-gradient(ellipse at 78% 40%, #804052, transparent 58%), linear-gradient(150deg, #40233b, #180f20 77%); }
+.pc-casino-screen.is-roulette { background: radial-gradient(ellipse at 50% -6%, #653746, #2c1925 69%, #1c161d); }
+.pc-casino-screen.is-blackjack { background: radial-gradient(ellipse at 52% 22%, #493340, #1c151e 73%); }
+
+.pc-casino-head, .pc-casino-controls {
+	display: flex;
+	align-items: center;
+	gap: clamp(.5rem, 2.1cqi, 1.5rem);
+	padding: .7rem clamp(.75rem, 4.4cqi, 4rem);
+	background: #1a121cde;
+	border-bottom: 1px solid #d9ab7861;
+	position: relative;
+	z-index: 2;
+}
+.pc-casino-head { justify-content: space-between; }
+.pc-casino-head nav { display: flex; align-items: center; gap: .3rem; }
+.pc-casino-head button, .pc-roulette-reset button, .pc-blackjack-actions button {
+	display: inline-flex;
+	justify-content: center;
+	align-items: center;
+	gap: .4rem;
+	border: 1px solid transparent;
+	min-height: 39px;
+	padding: .38rem .7rem;
+	border-radius: 9px;
+	color: var(--pc-muted);
+	font-weight: 600;
+	white-space: nowrap;
+}
+.pc-casino-head nav button[aria-pressed="true"] { color: var(--pc-cream); background: #643445; border-color: #e6ba86ab; }
+.pc-casino-head .pc-casino-back { padding-inline: 0; color: var(--pc-cream); }
+.pc-casino-screen button:hover:not(:disabled), .pc-paytable summary:hover { filter: brightness(1.22); }
+.pc-casino-screen button:focus-visible, .pc-paytable summary:focus-visible { outline: 2px solid #ffe0ac; outline-offset: 3px; }
+.pc-casino-screen button:disabled { opacity: .53; cursor: default; }
+.pc-casino-balance { display: flex; gap: .44rem; align-items: center; color: #f2d19b; font-variant-numeric: tabular-nums; font-size: 1rem; font-weight: 650; }
+
+.pc-casino-stage { align-content: safe center; display: grid; overflow: auto; padding: clamp(.6rem, 2svh, 1.4rem) clamp(.65rem, 5cqi, 5rem); }
+.pc-casino-stage h2 { margin: 0; line-height: 1.02; font-size: clamp(1.7rem, 4.8cqi, 3.6rem); font-weight: 680; letter-spacing: -.035em; }
+.pc-casino-controls { justify-content: space-between; border-top: 1px solid #d9ab7861; border-bottom: 0; }
+.pc-chip-tray { display: flex; gap: .36rem; align-items: center; }
+.pc-chip-tray button { min-width: 42px; border-radius: 999px; padding: .22rem; }
+.pc-chip-tray button[aria-pressed="true"] { outline: 2px solid #f4d7aa; outline-offset: 1px; background: #f5d29b24; }
+.pc-chip {
+	position: relative;
+	display: inline-grid;
+	place-items: center;
+	width: clamp(34px, 5.1cqi, 48px);
+	aspect-ratio: 1;
+	border-radius: 50%;
+	isolation: isolate;
+	background: repeating-conic-gradient(var(--chip) 0deg 38deg, #f3d9ac 38deg 60deg);
+	color: #fff9eb;
+	font-weight: 750;
+	font-variant-numeric: tabular-nums;
+	box-shadow: 0 3px 2px #100a16, inset 0 0 0 1px #ffe8bc8a;
+}
+.pc-chip::before { content: ""; position: absolute; inset: 13%; z-index: -1; border: 1px solid #f1dfbdc4; border-radius: 50%; background: var(--chip); }
+.pc-chip.pc-chip-small { width: clamp(17px, 3.05cqi, 30px); font-size: clamp(.48rem, 1.5cqi, .72rem); box-shadow: 0 2px 3px #0009; }
+.pc-casino-wager { margin-right: auto; display: grid; gap: .13rem; white-space: nowrap; }
+.pc-casino-wager span { color: var(--pc-muted); font-size: .82rem; }
+.pc-casino-wager strong { color: #ffe7bc; font-size: 1.22rem; line-height: 1; font-variant-numeric: tabular-nums; }
+.pc-casino-controls .pc-casino-primary {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: .45rem;
+	min-width: 110px;
+	min-height: 44px;
+	padding: .62rem 1.3rem;
+	border: 1px solid #ffe0ad;
+	border-radius: 12px;
+	background: linear-gradient(#f5d49e, #d8a469);
+	color: #311b28;
+	font-weight: 750;
+	box-shadow: inset 0 1px #fff0cb, 0 4px 0 #885a48;
+}
+.pc-roulette-reset { display: flex; gap: .22rem; }
+.pc-roulette-reset button, .pc-blackjack-actions button { padding: .42rem .62rem; color: var(--pc-cream); background: #3c2b3b; border-color: #d0a58452; }
+
+.pc-slots {
+	display: grid;
+	grid-template-columns: minmax(0, 3.7fr) minmax(128px, 1.15fr);
+	align-items: center;
+	gap: clamp(.65rem, 3cqi, 2.65rem);
+	width: min(100%, 1190px);
+	margin: auto;
+}
+.pc-slots-game { min-width: 0; }
+.pc-slots-title { display: flex; justify-content: center; align-items: center; gap: .65rem; margin: 0 0 .8rem; color: #f5d39d; }
+.pc-slots-title h2 { text-shadow: 0 4px 0 #6a3138, 0 5px 4px #211326; }
+.pc-slot-frame {
+	--tile: clamp(37px, min(12.3cqi, 16svh), 118px);
+	position: relative;
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: clamp(.2rem, .85cqi, .7rem);
+	padding: clamp(.35rem, 1.05cqi, .8rem);
+	border: 2px solid #f7d59b;
+	border-radius: clamp(12px, 2.35cqi, 25px);
+	background: linear-gradient(164deg, #eac48d, #9e624e 24%, #e5b783 61%, #764b47);
+	box-shadow: 0 8px 0 #432838, 0 20px 45px #160c1b95, inset 0 0 0 2px #a37254;
+}
+.pc-slot-reel { position: relative; display: grid; grid-template-rows: repeat(3, var(--tile)); overflow: hidden; isolation: isolate; border: 1px solid #352034; border-radius: 9px; background: #311b31; }
+.pc-slot-cell {
+	display: grid;
+	place-items: center;
+	min-height: 0;
+	border-bottom: 1px solid #7c4b56;
+	background: radial-gradient(ellipse, #5b344b, #321d33);
+}
+.pc-slot-cell:last-child { border-bottom: 0; }
+.pc-slot-cell.is-payline { background: radial-gradient(ellipse at center, #854a5b, #583242); box-shadow: inset 0 1px #f5c58f85, inset 0 -1px #f5c58f85; }
+.pc-slot-cell.is-match { box-shadow: inset 0 0 0 2px #ffe6a8, inset 0 0 16px #edaf5f81; }
+.pc-slot-cell img, .pc-slot-strip img { width: 100%; height: 100%; max-width: 117px; object-fit: contain; user-select: none; pointer-events: none; }
+.pc-slot-strip { position: absolute; inset: 0 0 auto; display: grid; justify-items: center; z-index: 1; animation: pc-reel .29s linear infinite; }
+.pc-slot-strip img { height: var(--tile); }
+.pc-slot-reel:nth-child(2n) .pc-slot-strip { animation-duration: .34s; }
+@keyframes pc-reel { to { transform: translateY(-50%); } }
+.pc-slots-caption { text-align: center; margin: .9rem 0 0; color: #f8e1c4; min-height: 1.2em; }
+.pc-slots-side { display: grid; justify-items: center; align-content: center; min-width: 0; }
+.pc-mascot { width: 115%; max-width: 330px; max-height: 44svh; object-fit: contain; filter: drop-shadow(0 8px 16px #0f0810ba); user-select: none; }
+.pc-paytable { position: relative; color: var(--pc-cream); text-align: center; }
+.pc-paytable summary { cursor: pointer; list-style-position: inside; padding: .38rem .65rem; border: 1px solid #e6bf837b; border-radius: 9px; background: #382335; }
+.pc-paytable-grid {
+	position: absolute;
+	z-index: 2;
+	bottom: calc(100% + .6rem);
+	right: 0;
+	width: min(250px, 76cqi);
+	display: grid;
+	gap: .2rem;
+	grid-template-columns: repeat(3, 1fr);
+	padding: .6rem;
+	border: 1px solid #e6bf83;
+	border-radius: 12px;
+	box-shadow: 0 10px 35px #1b1022;
+	background: #382335;
+}
+.pc-paytable-grid span { display: flex; align-items: center; gap: .16rem; justify-content: center; font-size: .85rem; }
+.pc-paytable-grid img { width: 32px; height: 32px; object-fit: contain; }
+.pc-paytable-grid p { grid-column: 1 / -1; color: var(--pc-muted); line-height: 1.35; font-size: .78rem; margin: .3rem 0 0; }
+.pc-slot-confetti { position: absolute; left: 50%; top: 50%; z-index: 2; pointer-events: none; }
+.pc-slot-confetti i { position: absolute; width: 7px; height: 7px; background: #ffd891; border-radius: 1px; animation: pc-confetti 1s ease-out both; }
+.pc-slot-confetti i:nth-child(3n) { background: #f3a7b3; }
+.pc-slot-confetti i:nth-child(3n + 1) { background: #b5e3ce; }
+@keyframes pc-confetti { to { transform: rotate(var(--turn)) translateX(var(--reach)) rotate(190deg); opacity: 0; } }
+
+.pc-roulette { align-self: center; justify-self: center; width: min(100%, 1120px); }
+.pc-roulette-top { display: grid; grid-template-columns: minmax(102px, 1fr) minmax(0, 2fr) minmax(112px, 1fr); align-items: center; gap: .4rem; }
+.pc-roulette-title h2 { color: #ffe4b9; }
+.pc-roulette-title > span { display: block; margin-top: .35rem; color: var(--pc-muted); }
+.pc-wheel { position: relative; height: clamp(138px, 36svh, 375px); min-width: 0; isolation: isolate; }
+.pc-wheel canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; filter: drop-shadow(0 13px 13px #110a12c2); }
+.pc-wheel-fallback {
+	position: absolute;
+	inset: 9% auto 8% 50%;
+	aspect-ratio: 1;
+	transform: translateX(-50%) scaleY(.83);
+	border: .85rem solid #5b3440;
+	border-radius: 50%;
+	background: radial-gradient(ellipse, #2c1d28 55%, transparent 56%), repeating-conic-gradient(#a84049 0deg 4.85deg, #25232d 4.85deg 9.7deg);
+	box-shadow: 0 0 0 2px #e1ad75, 0 13px 13px #130a13;
+	pointer-events: none;
+}
+.pc-wheel[data-ready="true"] .pc-wheel-fallback { display: none; }
+.pc-results { color: var(--pc-muted); text-align: right; font-size: .88rem; }
+.pc-results p { margin: 0 0 .55rem; display: flex; align-items: center; gap: .48rem; justify-content: flex-end; }
+.pc-result-badge { display: inline-grid; place-items: center; min-width: 1.95rem; aspect-ratio: 1; border-radius: 50%; background: #332635; border: 1px solid #e5bd87b2; color: var(--pc-cream); font-weight: 700; }
+.pc-result-badge.is-green { background: #286554; }
+.pc-result-badge.is-red { background: #a94553; }
+.pc-recent { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .23rem; }
+.pc-recent .pc-result-badge { min-width: 1.44rem; font-size: .72rem; }
+
+.pc-betting-felt {
+	padding: clamp(.32rem, 1.4cqi, 1.15rem);
+	border: 1px solid #b8826b;
+	border-radius: 20px;
+	background: radial-gradient(ellipse at 50% 23%, #387865, #214d46 85%);
+	box-shadow: inset 0 0 0 2px #e5c09535, 0 5px 0 #4f2d3a, 0 15px 23px #150d14ac;
+}
+.pc-betting-grid { display: grid; grid-template-columns: .8fr repeat(12, 1fr) 1.14fr; grid-template-rows: repeat(5, clamp(31px, 6.4svh, 60px)); gap: clamp(.08rem, .32cqi, .32rem); }
+.pc-square {
+	position: relative;
+	min-width: 0;
+	padding: .1rem;
+	border: 1px solid #ecc995ba;
+	border-radius: 5px;
+	background: #204c43;
+	color: #fff5e3;
+	font-size: clamp(.62rem, 1.75cqi, 1.18rem);
+	font-weight: 670;
+	font-variant-numeric: tabular-nums;
+	line-height: 1;
+	white-space: nowrap;
+}
+.pc-square.is-red { background: #a84553; }
+.pc-square.is-black { background: #2a2531; }
+.pc-square.is-green { background: #236851; }
+.pc-square.is-result { background: #fff0b2; color: #2c1724; border-color: #ffeea9; box-shadow: 0 0 0 1px #f9cb84, 0 0 10px #f9e293a1; }
+.pc-square.pc-zero { grid-column: 1; grid-row: 1 / span 3; }
+.pc-square.pc-column, .pc-square.pc-dozen { font-size: clamp(.54rem, 1.46cqi, .94rem); }
+.pc-square .pc-chip-small { position: absolute; inset: auto -.08rem -.08rem auto; }
+.pc-betting-grid .pc-square:disabled { opacity: .86; }
+
+.pc-blackjack { align-self: center; justify-self: center; width: min(100%, 1160px); }
+.pc-blackjack-table {
+	position: relative;
+	isolation: isolate;
+	display: grid;
+	gap: .48rem;
+	justify-items: center;
+	align-items: center;
+	padding: clamp(1.1rem, 2.8svh, 2rem) .65rem clamp(1.1rem, 4svh, 2.4rem);
+	border: 8px solid #8d513f;
+	border-radius: 33% 33% 26% 26% / 21% 21% 31% 31%;
+	background: radial-gradient(ellipse at 50% 38%, #42846d, #22584b 66%, #164339);
+	box-shadow: 0 0 0 2px #e0ad76, inset 0 0 0 3px #ccad72, inset 0 0 52px #112d28a8, 0 15px 26px #0d0716a8;
+}
+.pc-blackjack-table::before {
+	content: "";
+	position: absolute;
+	z-index: -1;
+	inset: 13% 10% 12%;
+	border: 1px solid #f1deb093;
+	border-radius: 50%;
+	pointer-events: none;
+}
+.pc-blackjack-deck {
+	position: absolute;
+	top: 15%;
+	right: 13%;
+	display: grid;
+	place-items: center;
+	width: clamp(31px, 6cqi, 60px);
+	aspect-ratio: .72;
+	color: #f5d9ad;
+	border: 2px solid #f5dfaf;
+	border-radius: 6px;
+	transform: rotate(13deg);
+	background: repeating-linear-gradient(42deg, #51314b 0 5px, #6d3c52 5px 10px);
+	box-shadow: 3px 3px 0 #f9ecce, 6px 6px 0 #3c3636;
+}
+.pc-hand-area { display: grid; justify-items: center; gap: .36rem; padding: .12rem .3rem; }
+.pc-hand-area > span { display: flex; align-items: center; gap: .4rem; color: #fff1d0; font-size: .9rem; }
+.pc-hand-area > span strong { padding: .08rem .38rem; background: #1b3e38; border-radius: 999px; border: 1px solid #d8bf85; }
+.pc-hand { display: flex; flex-wrap: wrap; justify-content: center; gap: .3rem; }
+.pc-playing-card, .pc-empty-cards {
+	width: clamp(35px, min(9cqi, 10.3svh), 81px);
+	aspect-ratio: .71;
+	border-radius: 7px;
+}
+.pc-playing-card {
+	display: grid;
+	grid-template-rows: auto 1fr auto;
+	padding: .22rem .30rem;
+	background: #ffefda;
+	color: #292234;
+	border: 1px solid #d8bd99;
+	box-shadow: 0 3px 0 #173a31, 0 6px 8px #15272380;
+	animation: pc-card-deal .27s ease-out both;
+}
+.pc-playing-card b { justify-self: center; align-self: center; font-size: clamp(1.02rem, 3.3cqi, 2.05rem); line-height: .9; }
+.pc-playing-card small { display: grid; font-family: Georgia, serif; font-size: clamp(.65rem, 1.5cqi, .88rem); font-weight: 700; line-height: .83; }
+.pc-playing-card small:last-child { justify-self: end; transform: rotate(180deg); }
+.pc-playing-card small i { font-style: normal; }
+.pc-playing-card.is-red { color: #a63446; }
+.pc-playing-card.is-back { display: grid; place-items: center; color: #ffdfac; background: repeating-linear-gradient(40deg, #733b55 0 7px, #563249 7px 14px); }
+.pc-empty-cards { width: calc(clamp(35px, min(9cqi, 10.3svh), 81px) * 2 + .3rem); aspect-ratio: 1.46; border: 1px dashed #eadbbe7e; background: #1f413a31; }
+.pc-table-mark { display: grid; justify-items: center; gap: .16rem; color: #f0d39e; }
+.pc-table-mark h2 { font-size: clamp(1.45rem, 3.35cqi, 2.65rem); }
+.pc-table-mark span { font-size: clamp(.68rem, 1.6cqi, .9rem); }
+.pc-blackjack-status { text-align: center; color: #f6e5c6; margin: .85rem 0 0; min-height: 1.05rem; }
+.pc-blackjack-actions { display: flex; justify-content: flex-end; gap: .42rem; flex-wrap: wrap; }
+@keyframes pc-card-deal { from { transform: translateY(-17px) rotate(-6deg); opacity: 0; } }
+
+@media (max-width: 650px) {
+	.pc-casino-head { flex-wrap: wrap; padding-block: .42rem; gap: .16rem .4rem; }
+	.pc-casino-head nav { order: 3; flex: 0 0 100%; justify-content: center; }
+	.pc-casino-head nav button { padding-inline: .42rem; font-size: .83rem; min-height: 34px; }
+	.pc-casino-controls { padding-inline: .55rem; gap: .38rem; }
+	.pc-casino-primary { min-width: 67px !important; padding-inline: .58rem !important; }
+	.pc-chip-tray { gap: .05rem; }
+	.pc-chip-tray button { min-width: 32px; padding: .13rem; }
+	.pc-chip-tray .pc-chip { width: 29px; font-size: .76rem; }
+	.pc-casino-wager span { font-size: .68rem; }
+	.pc-roulette-reset { gap: .08rem; }
+	.pc-roulette-reset button { padding: .28rem; }
+	.pc-roulette-top { grid-template-columns: minmax(66px, .8fr) minmax(0, 2fr) minmax(75px, 1fr); }
+	.pc-roulette-top h2 { font-size: clamp(1.18rem, 5.2cqi, 1.75rem); }
+	.pc-wheel { height: clamp(112px, 31svh, 240px); }
+	.pc-results p { flex-direction: column; align-items: flex-end; font-size: .75rem; }
+	.pc-slots { grid-template-columns: 1fr; gap: .5rem; }
+	.pc-slots-side { margin: auto; grid-template-columns: auto auto; }
+	.pc-mascot { width: 80px; max-height: 13svh; }
+	.pc-paytable-grid { left: auto; right: 0; transform: translateX(27%); }
+	.pc-blackjack-table { border-width: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.pc-slot-strip, .pc-playing-card { animation: none; }
+	.pc-slot-confetti { display: none; }
+}
+

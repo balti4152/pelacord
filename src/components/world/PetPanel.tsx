@@ -4,6 +4,7 @@ import {Panel} from '@/components/world/WorldPanels';
 import {useProfile} from '@/world/core';
 import {PETS, type PetId} from '@/world/petCatalog';
 import {buyCaptureSphere, equipPet, SPHERE_PRICE} from '@/world/pets';
+import {worldSounds} from '@/world/worldSounds';
 
 export function PetPanel({shop, onClose, onBack}: {shop: boolean; onClose: () => void; onBack?: () => void}): JSX.Element {
 	const profile = useProfile();
@@ -23,7 +24,10 @@ export function PetPanel({shop, onClose, onBack}: {shop: boolean; onClose: () =>
 						<h3>Esfera de captura</h3>
 						<p>Acercate a una mascota en la ciudad y presioná <kbd>E</kbd> para atraparla.</p>
 						<button type="button" className="t-btn is-primary" disabled={profile.coins < SPHERE_PRICE} onClick={() => {
-							if (buyCaptureSphere()) setMessage('Guardaste una esfera en tu inventario.');
+							if (buyCaptureSphere()) {
+								worldSounds.play('purchase');
+								setMessage('Guardaste una esfera en tu inventario.');
+							} else worldSounds.play('locked');
 						}}><Coins size={16} /> Comprar por {SPHERE_PRICE}</button>
 						{profile.coins < SPHERE_PRICE ? <small>Te faltan {SPHERE_PRICE - profile.coins} pelamonedas.</small> : null}
 					</div>
@@ -44,7 +48,7 @@ export function PetPanel({shop, onClose, onBack}: {shop: boolean; onClose: () =>
 								<span className="t-pet-count">{equipped ? 'Te acompaña' : count ? '×' + count : 'Por descubrir'}</span>
 								{count > 0 ? <button type="button" className={`t-btn is-small ${equipped ? 'is-soft' : 'is-primary'}`}
 									aria-label={`${equipped ? 'Guardar' : 'Equipar'} a ${pet.name}`}
-									onClick={() => equipPet(equipped ? null : id)}>{equipped ? 'Guardar' : 'Equipar'}</button> : null}
+									onClick={() => { equipPet(equipped ? null : id); worldSounds.play(equipped ? 'cancel' : 'notice'); }}>{equipped ? 'Guardar' : 'Equipar'}</button> : null}
 							</div>
 						</article>;
 					})}

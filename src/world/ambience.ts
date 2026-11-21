@@ -44,7 +44,43 @@ export class Ambience {
 
 	setup(room: RoomId, root: THREE.Object3D): void {
 		this.clear();
+		const yard = room.startsWith('yard:');
+		if (yard) room = 'city';
+		if (room === 'arena') {
+			// La Arena: siempre de día, cielo celeste brillante (estética de show de juegos).
+			const canvas = document.createElement('canvas');
+			canvas.width = 4;
+			canvas.height = 256;
+			const ctx = canvas.getContext('2d')!;
+			const g = ctx.createLinearGradient(0, 0, 0, 256);
+			g.addColorStop(0, '#3fa4ff');
+			g.addColorStop(0.6, '#8fd3ff');
+			g.addColorStop(1, '#ffd1ef');
+			ctx.fillStyle = g;
+			ctx.fillRect(0, 0, 4, 256);
+			const sky = new THREE.CanvasTexture(canvas);
+			sky.colorSpace = THREE.SRGBColorSpace;
+			this.scene.background = sky;
+			this.scene.fog = null;
+			this.fill.color.set(0xeaf4ff);
+			this.fill.groundColor.set(0xffb3dc);
+			this.fill.intensity = 0.95;
+			this.sun.color.set(0xfff6e8);
+			this.sun.intensity = 1.25;
+			this.sun.shadow.normalBias = 0.02;
+			return;
+		}
 		if (room !== 'city' && room !== 'port' && room !== 'campfire') {
+			if (room === 'casino' || room === 'smithy') {
+				this.scene.background = new THREE.Color(room === 'casino' ? 0x281c26 : 0x312821);
+				this.fill.color.set(0xffeace);
+				this.fill.groundColor.set(0x666477);
+				this.fill.intensity = 0.90;
+				this.sun.color.set(0xffeada);
+				this.sun.intensity = 0.92;
+				this.sun.shadow.normalBias = 0;
+				return;
+			}
 			this.scene.background = new THREE.Color(0x1d1430);
 			this.fill.color.set(0xd9ccff);
 			this.fill.groundColor.set(0x3a2552);
@@ -55,21 +91,24 @@ export class Ambience {
 			return;
 		}
 		this.lighting.enter(room, root);
+		if (yard) return;
 
 		// Halos en las lamparitas (todo lo que se llame Lamp_*, o las luces que quedaron).
 		root.updateMatrixWorld(true);
 		const lamps: THREE.Vector3[] = [];
+		const district: THREE.Vector3[] = [];
 		root.traverse((obj) => {
-			if (/^(Lamp|PierLamp)_\d+$/.test(obj.name)) {
+			if (/^(Lamp|PierLamp|DistrictLamp)_\d+$/.test(obj.name)) {
 				const box = new THREE.Box3().setFromObject(obj);
-				lamps.push(new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y - 0.2, (box.min.z + box.max.z) / 2));
+				const row = obj.name.startsWith('DistrictLamp') ? district : lamps;
+				row.push(new THREE.Vector3((box.min.x + box.max.x) / 2, box.max.y - 0.2, (box.min.z + box.max.z) / 2));
 			}
 			if (/WindowGlow|StreetGlow|Glow/.test(((obj as THREE.Mesh).material as THREE.Material | undefined)?.name ?? '') && /win|Lantern/i.test(obj.name)) {
 				const box = new THREE.Box3().setFromObject(obj);
 				this.halo(box.getCenter(new THREE.Vector3()), 1.4, 0xffc27a, 0.35);
 			}
 		});
-		for (const p of lamps) this.halo(p, room === 'city' ? 1.07 : 2.4, 0xffc070, room === 'city' ? .34 : .75);
+		for (const p of [...lamps, ...district]) this.halo(p, room === 'city' ? 1.07 : 2.4, 0xffc070, room === 'city' ? .34 : .75);
 		// Guirnaldas: entre faroles vecinos (en la ciudad forman un anillo alrededor de la plaza).
 		const city = room === 'city';
 		const palette = city ? CITY_BULB_COLORS : BULB_COLORS;
@@ -77,17 +116,19 @@ export class Ambience {
 			? (a, b) => Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x)
 			: (a, b) => a.x - b.x || a.z - b.z);
 		const points: Array<{p: THREE.Vector3; c: number}> = [];
-		const pairs = ring.length > 2 && city ? ring.length : ring.length - 1;
-		for (let i = 0; i < pairs; i++) {
-			const a = ring[i];
-			const b = ring[(i + 1) % ring.length];
-			if (!a || !b || a.distanceTo(b) > 9) continue;
+		const spans = ring.slice(1).map((p, i) => ({a: ring[i], b: p, max: 9}));
+		if (city && ring.length > 2) spans.push({a: ring[ring.length - 1], b: ring[0], max: 9});
+		district.sort((a, b) => a.x - b.x);
+		spans.push(...district.slice(1).map((p, i) => ({a: district[i], b: p, max: 11.6})));
+		for (const [i, {a, b, max}] of spans.entries()) {
+			const length = a.distanceTo(b);
+			if (length > max) continue;
 			const start = a.clone().add(new THREE.Vector3(0, -.15, 0));
 			const end = b.clone().add(new THREE.Vector3(0, -.15, 0));
 			const middle = start.clone().lerp(end, .5);
 			middle.y -= city ? .88 : 1.4;
 			const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
-			const count = Math.max(6, Math.round(a.distanceTo(b) * (city ? 2.05 : 2.6)));
+			const count = Math.max(6, Math.round(length * (city ? 2.05 : 2.6)));
 			for (let k = 1; k < count; k++) {
 				const p = curve.getPoint(k / count);
 				p.y -= .046;

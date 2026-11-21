@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Tv, User, UserPlus, Volume2, VolumeX, Keyboard, X,
+	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Music, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Sprout, Tv, User, UserPlus, Volume2, VolumeX, Keyboard, X,
 } from 'lucide-react';
 import {EMOTES, type EmoteDef, EmoteMenu} from '@/components/world/EmoteMenu';
 import {MoviePlayer} from '@/components/MoviePlayer';
@@ -16,22 +16,32 @@ import {BAITS, biteWaitMs, currentBait, type FishKind, keepFish, rodById, rollFi
 import {PETS} from '@/world/petCatalog';
 import {recordPetCapture} from '@/world/pets';
 import {spatialVoices, type VoicePlace} from '@/world/spatialAudio';
+import {claimPayout, hostSkip, hostStart, hostStop, PartyRuntime, sendPush, startParty, useParty} from '@/world/party';
+import {ArenaAdminPanel, PartyHud} from '@/components/world/ArenaPanels';
 import {type CardColor, table, useTableSession} from '@/world/tableGames';
 import {TableView} from '@/world/tableView';
 import {currentTrack, startTv, tv, tvPosition, useTvs, volumeForDistance} from '@/world/tv';
 import {tvSpeaker} from '@/world/tvAudio';
+import {worldSounds} from '@/world/worldSounds';
+import {arenaMusic} from '@/world/arenaMusic';
 import {DecoratePanel, EditorPanel, InvitePanel, ShopPanel, TablePanel} from '@/components/world/WorldPanels';
 import {TvPanel} from '@/components/world/TvPanel';
 import {FishingGame, FishMarketPanel} from '@/components/world/FishingPanels';
 import {PetPanel} from '@/components/world/PetPanel';
+import {CasinoPanel} from '@/components/world/CasinoPanel';
+import {FarmLandPanel, FarmShop, FarmToolbar, SmithPanel} from '@/components/world/FarmPanels';
+import {RestaurantPanel} from '@/components/world/RestaurantPanel';
+import {type CasinoGame} from '@/world/casino';
+import {type Crop, type FarmAction, makeFarm, readLand, tend} from '@/world/farmData';
 import {useStore} from '@/state/store';
 
-type Panel = null | 'editor' | 'shop-clothes' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets';
+type Panel = null | 'editor' | 'shop-clothes' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
 const SPATIAL_KEY = 'pelacord.world.spatial';
 const HINT_KEY = 'pelacord.world.hint';
 
 function roomTitle(room: RoomId, owner: string | null, names: Record<string, string>, meId: string): string {
 	if (owner) return owner === meId ? 'Mi casa' : `Casa de ${names[owner] ?? 'un amigo'}`;
+	if (room.startsWith('yard:')) return room.slice(5) === meId ? 'Mi huerta' : `Patio de ${names[room.slice(5)] ?? 'un amigo'}`;
 	return ROOMS.find((r) => r.id === room)?.name ?? 'Ciudad';
 }
 
@@ -52,6 +62,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const localScreen = useLocalScreen();
 	const session = useTableSession();
 	const tvs = useTvs();
+	const party = useParty();
+	const partyRef = useRef<PartyRuntime | null>(null);
+	const [partyOverlay, setPartyOverlay] = useState<string | null>(null);
+	const [dismissedParty, setDismissedParty] = useState('');
 	const hostRef = useRef<HTMLDivElement>(null);
 	const tvHostRef = useRef<HTMLDivElement | null>(null);
 	const engineRef = useRef<WorldEngine | null>(null);
@@ -59,6 +73,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const [room, setRoom] = useState<RoomId>('city');
 	const previousRoom = useRef<RoomId | null>(null);
 	const [panel, setPanel] = useState<Panel>(null);
+	const casinoOpen = !hidden && Boolean(panel?.startsWith('casino-'));
+	const [farmAction, setFarmAction] = useState<FarmAction>('walk');
+	const [farmSeed, setFarmSeed] = useState<Crop>('potato');
+	const groundAction = useRef<(x: number, z: number) => boolean>(() => false);
 	const [tryOn, setTryOn] = useState<CatalogItem | null>(null);
 	const [placing, setPlacing] = useState<PlacedFurniture | null>(null);
 	const [selected, setSelected] = useState<string | null>(null);
@@ -69,6 +87,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const [seated, setSeated] = useState(false);
 	const [myAnim, setMyAnim] = useState<Anim>('idle');
 	const [emoteOpen, setEmoteOpen] = useState(false);
+	const [worldAudio, setWorldAudio] = useState(() => worldSounds.enabled);
+	useEffect(() => arenaMusic.setEnabled(worldAudio), [worldAudio]);
+	const [arenaVolume, setArenaVolume] = useState(() => arenaMusic.getVolume());
+	const soundedOverlay = useRef<string | null>(null);
 	const [tvView, setTvView] = useState(false);
 	const [tvHost, setTvHost] = useState<HTMLElement | null>(null);
 	const tvHostCallback = useCallback((el: HTMLDivElement | null) => {
@@ -127,6 +149,27 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		setTimeout(() => setToast((t) => (t === message ? '' : t)), 3200);
 	}
 	flashRef.current = flash;
+	groundAction.current = (px, pz) => {
+		if (room !== `yard:${state.me.id}` || farmAction === 'walk' || panel) return false;
+		const engine = engineRef.current;
+		if (!engine) return false;
+		const me = engine.myState();
+		const x = Math.round(px);
+		const z = Math.round(pz);
+		if (Math.hypot(x - me.x, z - me.z) > 2.8) {
+			flash('Acercate un poco más a esa parcela.');
+			return true;
+		}
+		const result = tend(getProfile().farm, farmAction, x, z, farmSeed);
+		if (result.farm) {
+			updateProfile({farm: result.farm});
+			engine.garden.animate(farmAction, x, z);
+			announceRef.current();
+		}
+		if (result.sound) worldSounds.play(result.sound);
+		if (result.notice) flash(result.notice);
+		return true;
+	};
 
 	// ------------------------------------------------------------- anuncio --
 
@@ -135,6 +178,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const s: PlayerState = {
 			id: state.me.id, name: state.me.name, color: state.me.avatarColor, room: roomRef.current, ...local.current,
 			look: p.look, house: p.furniture.filter((f) => f.x !== null), equippedPet: p.equippedPet,
+			garden: p.farm.land,
 			t: Date.now(), away: hiddenRef.current,
 		};
 		sendWorld({kind: 'state', s});
@@ -146,6 +190,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 
 	useEffect(() => {
 		startTv(state.me.id);
+		startParty(state.me.id);
 	}, [state.me.id]);
 
 	useEffect(() => {
@@ -159,18 +204,31 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				announceRef.current();
 			},
 			onDoor: (next) => setRoom(next),
+			onGroundAction: (x, z) => groundAction.current(x, z),
 			onInteract: (action: Interaction) => {
 				if (action.kind === 'tv') setPanel('tv');
 				else if (action.kind === 'pet') {
-					if (!getProfile().captureSpheres) flash('Comprá esferas de captura en la tienda.');
+					if (!getProfile().captureSpheres) {
+						worldSounds.play('locked');
+						flash('Comprá esferas de captura en la tienda.');
+					}
 					else {
 						const caught = engineRef.current?.capturePet(action.id, recordPetCapture);
 						if (caught) flash(`¡Atrapaste a ${PETS[caught].name}!`);
 					}
 				}
-				else if (action.kind === 'npc') setPanel(action.npc === 'fish' ? 'fishmarket' : 'shop-clothes');
+				else if (action.kind === 'npc') {
+					worldSounds.play('dialogue');
+					setPanel(action.npc === 'fish' ? 'fishmarket' : 'shop-clothes');
+				}
 				else if (action.kind === 'hotspot') {
 					if (action.hotspot === 'fishmarket') setPanel('fishmarket');
+					else if (action.hotspot === 'arena-admin') setPanel('arena');
+					else if (action.hotspot === 'casino-blackjack' || action.hotspot === 'casino-roulette' || action.hotspot === 'casino-slots' || action.hotspot === 'restaurant-menu' || action.hotspot === 'smith-upgrades') setPanel(action.hotspot);
+					else if (action.hotspot === 'garden-land') {
+						if (roomRef.current === `yard:${state.me.id}`) setPanel('garden-land');
+						else flash('El terreno lo puede ampliar su dueño.');
+					}
 					else setPanel(action.hotspot === 'furniture' ? 'shop-furniture' : action.hotspot === 'fitting' ? 'editor' : 'shop-clothes');
 				}
 			},
@@ -187,13 +245,19 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				if (item) setPlacing(item);
 			},
 			onFishAction: () => fishActionRef.current(),
+			// Clic: cachetada/empujón al que esté cerca (jugador o bot).
+			onShove: () => shoveRef.current(),
 			onTvView: (on) => setTvView(on),
 		});
 		engineRef.current = engine;
 		const tableView = new TableView(engine.tableRoot);
 		tableViewRef.current = tableView;
 		engine.tickers.add((dt) => tableView.tick(dt));
-		engine.onPetAppear = (name) => flashRef.current(`¡Apareció ${name}! Atrapalo antes de que se vaya`);
+		engine.onPetAppear = (name) => {
+			worldSounds.play('notice', .82);
+			flashRef.current(`¡Apareció ${name}! Atrapalo antes de que se vaya`);
+		};
+		partyRef.current = new PartyRuntime(engine, engine.partyRoot);
 		const p = getProfile();
 		void engine.setMe(state.me.id, state.me.name, state.me.avatarColor, p.look, state.me.avatarUrl);
 		engine.setEquippedPet(p.equippedPet);
@@ -203,6 +267,8 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			sendWorld({kind: 'leave', id: state.me.id});
 			tvSpeaker.stop();
 			tableViewRef.current?.dispose();
+			partyRef.current?.dispose();
+			partyRef.current = null;
 			engine.dispose();
 			engineRef.current = null;
 		};
@@ -216,17 +282,40 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	// Pasar a la parte 2D: el mundo se pausa, pero no se pierde dónde estabas.
 	useEffect(() => {
 		engineRef.current?.setActive(!hidden);
+		worldSounds.setActive(!hidden);
 		if (!hidden) engineRef.current?.focus();
 		announceRef.current();
+		return () => worldSounds.setActive(false);
 	}, [hidden]);
+
+	useEffect(() => {
+		worldSounds.setOutputDevice(state.settings.outputDeviceId);
+		arenaMusic.setOutputDevice(state.settings.outputDeviceId);
+	}, [state.settings.outputDeviceId]);
+
+	useEffect(() => {
+		const overlay = hidden ? null : panel ?? (firstTime ? 'editor' : emoteOpen ? 'emotes' : null);
+		const previous = soundedOverlay.current;
+		soundedOverlay.current = overlay;
+		if (hidden || previous === overlay) return;
+		worldSounds.play(overlay ? 'menuOpen' : 'menuClose');
+	}, [panel, firstTime, emoteOpen, hidden]);
 
 	// Cambiar de lugar (puertas de la ciudad, salir, casas).
 	const houseOwner = room.startsWith('house:') ? room.slice(6) : null;
+	const yardOwner = room.startsWith('yard:') ? room.slice(5) : null;
+	const ownsYard = yardOwner === state.me.id;
+	const peerLand = yardOwner ? peers[yardOwner]?.garden : undefined;
+	const yardLand = useMemo(() => ownsYard ? profile.farm.land : yardOwner ? peerLand ? readLand(peerLand) : makeFarm().land : null, [ownsYard, yardOwner, peerLand, profile.farm.land]);
+	useEffect(() => {
+		engineRef.current?.setGarden(yardLand, ownsYard && !panel ? farmAction : 'walk');
+	}, [yardLand, farmAction, ownsYard, panel, catalog]);
 	useEffect(() => {
 		const engine = engineRef.current;
 		if (!engine) return;
 		setPlacing(null);
-		setPanel((p) => (p === 'decorate' || p === 'invite' || p === 'tv' || p === 'fishmarket' ? null : p));
+		setPanel((p) => p === 'editor' || p === 'pets' ? p : null);
+		setFarmAction('walk');
 		cancelFishing();
 		const furniture = houseOwner === state.me.id ? getProfile().furniture : houseOwner ? (peers[houseOwner]?.house ?? []) : null;
 		void engine.loadRoom(room, furniture, previousRoom.current);
@@ -261,6 +350,54 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		engineRef.current?.setSpeaking(new Set(speakingIds));
 	}, [speakingIds]);
 
+	// ------------------------------------------------------------- arena ----
+
+	// Los que están en la Arena (y no en la parte 2D) juegan la próxima partida.
+	const arenaPeople = useMemo(() => {
+		const list = [{id: state.me.id, name: state.me.name}];
+		for (const p of Object.values(peers)) if (p.room === 'arena' && !p.away) list.push({id: p.id, name: names[p.id] ?? p.name});
+		return list;
+	}, [peers, names, state.me.id, state.me.name]);
+	useEffect(() => {
+		partyRef.current?.sync(party, room === 'arena' && !hidden);
+	}, [party, room, hidden, catalog]);
+	// Música de la Arena (según la fase: lobby, presentación, juego, jingle de victoria, podio).
+	useEffect(() => {
+		arenaMusic.update(party, room === 'arena' && !hidden);
+	}, [party, room, hidden]);
+	useEffect(() => () => arenaMusic.update(null, false), []);
+	const soundedParty = useRef<typeof party>(null);
+	useEffect(() => {
+		const previous = soundedParty.current;
+		soundedParty.current = party;
+		if (!party || room !== 'arena' || hidden) return;
+		if (party.id !== previous?.id || party.round !== previous.round || party.phase !== previous.phase) {
+			if (party.phase === 'intro') worldSounds.play('notice');
+			else if (party.phase === 'play') worldSounds.play('confirm');
+			// En resultados suena el jingle de victoria de la música: nada encima.
+		} else if (party.phase === 'play') {
+			const id = state.me.id;
+			if (previous.alive.includes(id) && !party.alive.includes(id)) worldSounds.play('cancel');
+			else if ((party.roundPts[id] ?? 0) > (previous.roundPts[id] ?? 0)) worldSounds.play('coins', .72);
+			else if (!previous.order.includes(id) && party.order.includes(id)) worldSounds.play('confirm');
+		}
+	}, [party, room, hidden, state.me.id]);
+	useEffect(() => {
+		if (!party) return;
+		const timer = window.setInterval(() => setPartyOverlay(partyRef.current?.overlay() ?? null), 250);
+		return () => window.clearInterval(timer);
+	}, [party]);
+	// Premio al terminar (una sola vez por partida).
+	useEffect(() => {
+		if (party?.phase !== 'final') return;
+		const coins = claimPayout(party);
+		if (coins) {
+			// Las monedas suenan después del jingle del podio (no encima).
+			window.setTimeout(() => worldSounds.play('reward'), 4600);
+			flashRef.current(`¡Ganaste ${coins} pelamonedas en la Arena!`);
+		}
+	}, [party?.phase, party]);
+
 	// ------------------------------------------------------------- la tele --
 
 	// La pantalla compartida de ESTA tele: la de quien la puso (si sigue compartiendo).
@@ -272,6 +409,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const engine = engineRef.current;
 		if (!engine) return;
 		engine.setMusicOn(Boolean(track && !myTv?.paused));
+		engine.setScreening(Boolean(screenStream || movieRoom));
 		if (myTv?.mode === 'screen' && screenStream) engine.setScreen({stream: screenStream});
 		else if (myTv?.mode === 'screen') engine.setScreen({title: `Esperando la pantalla de ${nameOf(sharerId ?? '')}…`});
 		else if (movieRoom) engine.setScreen({image: movieRoom.media.poster || null, title: movieRoom.media.title});
@@ -392,6 +530,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			// Hay un ratito para recoger; si no, se escapa y hay que esperar otro.
 			fishTimer.current = window.setTimeout(() => {
 				engineRef.current?.setBite(false);
+				worldSounds.play('cancel', .78);
 				flash('Se escapó... ¡más rápido la próxima!');
 				waitForBite();
 			}, 1200);
@@ -402,11 +541,13 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const phase = fishPhaseRef.current;
 		if (phase === null) waitForBite();
 		else if (phase === 'wait') {
+			worldSounds.play('fabric');
 			cancelFishing();
 			flash('Guardaste la caña');
 		} else if (phase === 'bite') {
 			if (fishTimer.current) window.clearTimeout(fishTimer.current);
 			engineRef.current?.setBite(false);
+			worldSounds.play('catch', .68);
 			setHooked(rollFish(Boolean(engineRef.current?.isDeepSpot())));
 			useBait();
 			setFishPhase('game');
@@ -419,7 +560,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		if (m.room === roomRef.current) engineRef.current?.emote(m.id, m.emote, m.target);
 	}), []);
 
-	useEffect(() => onInvite((m) => setInvite({id: m.id, name: names[m.id] ?? m.name, room: m.room})), [names]);
+	useEffect(() => onInvite((m) => {
+		worldSounds.play('notice');
+		setInvite({id: m.id, name: names[m.id] ?? m.name, room: m.room});
+	}), [names]);
 
 	useEffect(() => {
 		const heartbeat = setInterval(() => announceRef.current(), 2000);
@@ -535,6 +679,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		if (!panel) engineRef.current?.focus();
 	}, [panel]);
 
+	useEffect(() => {
+		engineRef.current?.setControlsBlocked(casinoOpen);
+	}, [casinoOpen, catalog]);
+
 	function emote(kind: Emote): void {
 		const engine = engineRef.current;
 		if (!engine) return;
@@ -544,15 +692,25 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	}
 
 	function pickEmote(def: EmoteDef): void {
+		worldSounds.play(def.id === 'slap' ? 'place' : def.id === 'heart' ? 'notice' : 'dialogue', .72);
 		if (def.loop) engineRef.current?.setLoopEmote(def.id as 'dance' | 'robot' | 'clap');
 		else emote(def.id as Emote);
 	}
+	const shoveRef = useRef<() => void>(() => {});
+	shoveRef.current = () => {
+		const engine = engineRef.current;
+		if (!engine || tableSeat !== null) return;
+		const target = engine.shoveTarget();
+		engine.emote(state.me.id, 'slap', target?.id ?? null);
+		sendWorld({kind: 'emote', id: state.me.id, room, emote: 'slap', target: target?.id ?? null});
+		if (target) sendPush(target.id, target.dx, target.dz, 7);
+	};
 	const pickEmoteRef = useRef(pickEmote);
 	pickEmoteRef.current = pickEmote;
 
 	// Atajos: 1…0 para cada gesto, Q abre el menú.
 	useEffect(() => {
-		if (hidden) return;
+		if (hidden || casinoOpen) return;
 		const onKey = (event: KeyboardEvent) => {
 			const target = event.target as HTMLElement | null;
 			if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
@@ -566,7 +724,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		};
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
-	}, [hidden]);
+	}, [hidden, casinoOpen]);
 
 	function joinVoice(): void {
 		const channel = state.channels.find((c) => c.type === 'voice');
@@ -581,7 +739,11 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const tvOn = myTv && myTv.mode !== 'off';
 
 	return (
-		<div className={`world${hidden ? ' is-hidden' : ''}`} aria-hidden={hidden}>
+		<div className={`world${hidden ? ' is-hidden' : ''}${ownsYard || room === 'shop' ? ' has-farm-access' : ''}`} aria-hidden={hidden} onClickCapture={(event) => {
+			if (!(event.target instanceof Element)) return;
+			const choice = event.target.closest<HTMLButtonElement>('.t-tabs button, .t-swatch, .t-toggle, .t-item, .tg-game, .ar-game, .ar-chip, .ar-stepper button');
+			if (choice && !choice.disabled && !choice.matches('.is-active, .is-picked')) worldSounds.play('select');
+		}}>
 			<div className="world-stage" ref={hostRef} />
 			<div className="w-tv-host" ref={tvHostCallback} />
 			{tvHost && movieRoom && !hidden && joinedMovieId === movieRoom.id ? <MoviePlayer tv={{host: tvHost, volume: movieVolume}} /> : null}
@@ -611,6 +773,26 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 						<button type="button" className="t-pill is-mint" onClick={joinVoice} title="Entrar a la llamada para hablar con los que están en el mundo"><Phone size={16} strokeWidth={2.8} /> Hablar</button>
 					)}
 					<button type="button" className="t-round" title="Mi personaje" onClick={() => { setTryOn(null); setPanel('editor'); }}><User size={18} strokeWidth={2.6} /></button>
+					{room === 'arena' ? (
+						<label className="t-chip t-music-volume" title="Volumen de la música de la Arena (queda guardado)">
+							<Music size={16} strokeWidth={2.8} />
+							<input type="range" min={0} max={100} step={1} value={Math.round(arenaVolume * 100)} aria-label="Volumen de la música de la Arena"
+								onChange={(event) => {
+									const value = Number(event.target.value) / 100;
+									arenaMusic.setVolume(value);
+									setArenaVolume(value);
+								}} />
+						</label>
+					) : null}
+					<button type="button" className={`t-round${worldAudio ? '' : ' is-off'}`} aria-label="Sonidos del mundo" aria-pressed={worldAudio}
+						title={worldAudio ? 'Silenciar sonidos del mundo' : 'Activar sonidos del mundo'} onClick={() => {
+							worldSounds.setEnabled(!worldAudio);
+							arenaMusic.setEnabled(!worldAudio);
+							setWorldAudio(!worldAudio);
+							if (!worldAudio) worldSounds.play('select');
+						}}>
+						{worldAudio ? <Volume2 size={18} strokeWidth={2.6} /> : <VolumeX size={18} strokeWidth={2.6} />}
+					</button>
 					<button type="button" className="t-round is-exit" title="Volver a PelaCord (tu personaje se queda acá)" onClick={onClose}><LogOut size={18} strokeWidth={2.6} /></button>
 					{onQuit ? (
 						<button type="button" className="t-round is-exit" title="Salir del mundo del todo (se cierra y la próxima vez arranca de cero)" onClick={onQuit}><Power size={18} strokeWidth={2.6} /></button>
@@ -624,6 +806,22 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					<button type="button" className="t-pill" onClick={() => setPanel('invite')}><UserPlus size={16} strokeWidth={2.8} /> Invitar</button>
 					<button type="button" className="t-pill" onClick={() => setPanel('shop-furniture')}><Armchair size={16} strokeWidth={2.8} /> Catálogo</button>
 				</div>
+			) : null}
+			{room === 'shop' ? (
+				<div className="t-house-bar"><button type="button" className="t-pill is-mint" onClick={() => setPanel('farm-shop')}><Sprout size={16} /> Tienda de huerta</button></div>
+			) : null}
+			{ownsYard ? (
+				<>
+					<div className="t-house-bar"><button type="button" className="t-pill is-mint" onClick={() => setPanel('garden-land')}><Sprout size={16} /> Ampliar terreno</button></div>
+					{!panel && !firstTime ? <FarmToolbar action={farmAction} seed={farmSeed} onAction={(action) => {
+						setFarmAction(action);
+						worldSounds.play('select');
+						engineRef.current?.focus();
+					}} onSeed={(seed) => {
+						setFarmSeed(seed);
+						engineRef.current?.focus();
+					}} /> : null}
+				</>
 			) : null}
 
 			{/* Sentado frente a una tele: verla de cerca. */}
@@ -669,7 +867,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			{showHint && !firstTime && !hidden ? (
 				<div className="t-hint-card">
 					<Keyboard size={18} strokeWidth={2.6} />
-					<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> caminar · <kbd>Shift</kbd> correr · <kbd>E</kbd> usar · <kbd>Q</kbd> emotes · <kbd>1</kbd>…<kbd>0</kbd> gestos</span>
+					<span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> caminar · <kbd>Shift</kbd> correr · <kbd>Espacio</kbd> saltar · <kbd>E</kbd> usar · <kbd>Q</kbd> emotes · <kbd>1</kbd>…<kbd>0</kbd> gestos</span>
 					<button type="button" className="t-close is-small" aria-label="Ocultar" onClick={() => { setShowHint(false); try { localStorage.setItem(HINT_KEY, '0'); } catch { /* */ } }}><X size={14} strokeWidth={3} /></button>
 				</div>
 			) : null}
@@ -722,10 +920,12 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 						}
 						if (caught) {
 							const {size, record, first} = keepFish(hooked, perfect);
+							worldSounds.play(hooked.junk ? 'catch' : first || record || perfect ? 'reward' : 'confirm');
 							const extra = first ? ' ¡Nuevo en el álbum!' : record ? ' ¡Récord!' : '';
 							flash(hooked.junk ? `Sacaste: ${hooked.name}. Algo es algo...` : `${perfect ? '¡PERFECTO! ' : ''}Pescaste: ${hooked.name}, ${size} cm.${extra}`);
 							cancelFishing(hooked);
 						} else {
+							worldSounds.play('cancel');
 							flash(hooked.junk ? `Se soltó: ${hooked.name}. ¡Mejor!` : `Se escapó: ${hooked.name}. ¡Otra vez!`);
 							engineRef.current?.setBite(false);
 							setHooked(null);
@@ -760,7 +960,32 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			{catalog && panel === 'decorate' ? (
 				<DecoratePanel catalog={catalog} placing={placing} onPlace={(item) => setPlacing(item)} onRotate={() => engineRef.current?.rotateGhost()} onClose={() => { setPlacing(null); setPanel(null); }} />
 			) : null}
+			{panel === 'arena' ? (
+				<ArenaAdminPanel
+					party={party}
+					meId={state.me.id}
+					people={arenaPeople}
+					onStart={(games, bots) => {
+						hostStart({games, bots}, arenaPeople);
+						setPanel(null);
+					}}
+					onSkip={() => hostSkip()}
+					onStop={() => {
+						hostStop();
+						setPanel(null);
+					}}
+					onClose={() => setPanel(null)}
+				/>
+			) : null}
+			{party && room === 'arena' && !hidden && dismissedParty !== `${party.id}:final` ? (
+				<PartyHud party={party} meId={state.me.id} overlay={partyOverlay} onClose={() => setDismissedParty(`${party.id}:final`)} />
+			) : null}
 			{panel === 'fishmarket' ? <FishMarketPanel onClose={() => setPanel(null)} onSold={(c) => flash(`Tano te pagó ${c} pelamonedas`)} /> : null}
+			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)} /> : null}
+			{panel === 'restaurant-menu' ? <RestaurantPanel onClose={() => setPanel(null)} /> : null}
+			{panel === 'farm-shop' ? <FarmShop onClose={() => setPanel(null)} onBack={() => setPanel('shop-clothes')} /> : null}
+			{panel === 'smith-upgrades' ? <SmithPanel onClose={() => setPanel(null)} /> : null}
+			{panel === 'garden-land' && ownsYard ? <FarmLandPanel onClose={() => setPanel(null)} /> : null}
 			{panel === 'invite' ? (
 				<InvitePanel
 					friends={onlineFriends}

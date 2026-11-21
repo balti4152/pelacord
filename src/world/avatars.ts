@@ -26,8 +26,8 @@ export function loadGLB(url: string): Promise<GLTF> {
 
 const AVATAR_URL = 'models/avatar_modular.glb';
 export const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
-export type BaseAnim = 'idle' | 'walk' | 'run' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
-const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', run: 'Run', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
+export type BaseAnim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', run: 'Run', jump: 'Jump', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
 /** Gestos de una sola vez (se mezclan encima de lo que esté haciendo). */
 export type OneShot = 'Wave' | 'Slap' | 'Cheer' | 'Bow' | 'Shrug';
 const ONE_SHOTS = new Set(['Wave', 'Slap', 'Cheer', 'Bow', 'Shrug']);
@@ -43,6 +43,7 @@ const CLIP_BONES: Record<string, string[] | null> = {
 	Idle: null,
 	Walk: null,
 	Run: null,
+	Jump: null,
 	Sit: null,
 	Dance: null,
 	Fish: null,
@@ -185,7 +186,7 @@ export class Avatar {
 		const extras = [look.costume, hidden.has('hat') ? null : look.hat].filter(Boolean) as string[];
 		for (const itemId of extras) {
 			const item = this.catalog.items.find((i) => i.id === itemId);
-			if (!item?.glb) continue;
+			if (!item?.glb || item.glb === this.catalog.avatar.glb) continue;
 			const gltf = await loadGLB(item.glb);
 			if (this.disposed || this.lookKey !== key) return;
 			const costume = gltf.scene.clone(true);

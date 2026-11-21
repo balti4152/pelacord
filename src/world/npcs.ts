@@ -50,7 +50,7 @@ const HAIR_IDS = ['hair_bowl', 'hair_buns', 'hair_curly', 'hair_long', 'hair_pon
 let hairTurn = 0;
 const NAMES = ['Rosa', 'Beto', 'Coca', 'Pocho', 'Nina', 'Lalo', 'Mora', 'Tito', 'Juana', 'Quique'];
 
-function randomLook(next: () => number): Look {
+export function randomLook(next: () => number): Look {
 	const pick = <T,>(list: T[]) => list[Math.floor(next() * list.length)];
 	const body = next() < 0.5 ? 'M' : 'F';
 	return {
@@ -190,8 +190,11 @@ export class Npcs {
 		this.list.find((n) => n.kind === kind)?.actor.avatar.play('Wave');
 	}
 
-	update(dt: number, me: THREE.Vector3 | null, musicOn: boolean, turn: (actor: NpcActor, d: {wanted: number; dt: number}) => void): void {
-		for (const n of this.list) {
+	private danceTime = 0;
+
+	update(dt: number, me: THREE.Vector3 | null, musicOn: boolean, camera: THREE.Vector3, turn: (actor: NpcActor, d: {wanted: number; dt: number}) => void): void {
+		this.danceTime += musicOn ? dt : 0;
+		for (const [index, n] of this.list.entries()) {
 			const a = n.actor;
 			let base: BaseAnim = n.base;
 			if (n.kind === 'walker') {
@@ -220,14 +223,19 @@ export class Npcs {
 				} else {
 					a.pos.copy(n.seat.pos);
 					base = 'sit';
+					a.ry = n.seat.ry;
 				}
 				n.base = base === 'dance' ? 'idle' : 'sit';
-				a.ry = n.seat.ry;
 			} else if ((n.kind === 'shop' || n.kind === 'fish') && me) {
 				const dx = me.x - a.pos.x;
 				const dz = me.z - a.pos.z;
 				if (Math.hypot(dx, dz) < 4) turn(a, {wanted: Math.atan2(dx, dz), dt: dt * 0.25});
 				if (musicOn) base = 'dance';
+			}
+			if (base === 'dance') {
+				const face = Math.atan2(camera.x - a.pos.x, camera.z - a.pos.z);
+				const sway = Math.sin(this.danceTime * 0.75 + index * 1.8) * 0.48;
+				turn(a, {wanted: face + sway, dt});
 			}
 			a.avatar.setBase(base);
 			a.avatar.root.position.copy(a.pos);

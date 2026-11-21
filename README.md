@@ -121,6 +121,10 @@ Para probar la llamada, los cambios de canal y los adjuntos con dos instancias l
   lists your playlists and, when you hit play, resolves each song on YouTube and queues it — Spotify
   never provides the audio here (its API does not expose it).
 
+## World sound effects
+
+Menu and shop sounds are from **Case Portman Audio**. See the [world audio credits](public/sounds/world/CREDITS.md) for the full list of contributors and licenses.
+
 ## Roadmap
 
 1. **Signalling.** WebRTC needs a signalling channel, and a browser cannot accept inbound

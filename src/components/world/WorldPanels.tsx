@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Bed, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Lamp, Lock, Plus, Popcorn, Shirt,
+	Armchair, Backpack, Bed, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
 	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
@@ -9,6 +9,7 @@ import {Avatar} from '@/world/avatars';
 import {ProductPreview} from '@/components/world/ProductPreview';
 import {buy, type Catalog, type CatalogItem, type ColorKey, type Look, owns, type PlacedFurniture, SLOT_LABEL, type Slot, updateProfile, useProfile} from '@/world/core';
 import {CARD_COLOR_HEX, type CardColor, TABLE_GAMES, type TableGameKind, type TableSession} from '@/world/tableGames';
+import {worldSounds} from '@/world/worldSounds';
 
 const HairIcon = createLucideIcon('WorldHair', [
 	['path', {d: 'M4 14V9a8 8 0 0 1 16 0v5M4 13c4-1 7-3 8-6 2 3 4 5 8 6M7 16a5 5 0 0 0 10 0', key: 'hair'}],
@@ -28,7 +29,8 @@ const BottomIcon = createLucideIcon('WorldBottom', [
 
 export const SLOT_ICON: Record<string, LucideIcon> = {
 	hair: HairIcon, eyes: Eye, brows: BrowsIcon, mouth: MouthIcon, cheeks: CheeksIcon, top: Shirt, bottom: BottomIcon, shoes: Footprints,
-	hat: Crown, costume: Popcorn, furniture: Armchair, asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles,
+	hat: Crown, facewear: Glasses, back: Backpack, costume: Popcorn, furniture: Armchair,
+	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles,
 };
 
 // ------------------------------------------------------------ vista previa --
@@ -173,9 +175,9 @@ const EDITOR_TABS: Array<{id: string; label: string; icon: LucideIcon; slots: Sl
 	{id: 'hair', label: 'Pelo', icon: HairIcon, slots: ['hair']},
 	{id: 'face', label: 'Cara', icon: Smile, slots: ['eyes', 'brows', 'mouth', 'cheeks']},
 	{id: 'clothes', label: 'Ropa', icon: Shirt, slots: ['top', 'bottom', 'shoes']},
-	{id: 'extras', label: 'Accesorios', icon: Crown, slots: ['hat', 'costume']},
+	{id: 'extras', label: 'Accesorios', icon: Crown, slots: ['hat', 'facewear', 'back', 'costume']},
 ];
-const OPTIONAL: Slot[] = ['hair', 'cheeks', 'hat', 'costume'];
+const OPTIONAL: Slot[] = ['hair', 'cheeks', 'hat', 'facewear', 'back', 'costume'];
 const COLOR_FOR: Partial<Record<string, Array<{key: ColorKey; label: string; palette: 'hair' | 'skin' | 'clothes'}>>> = {
 	body: [{key: 'skin', label: 'Piel', palette: 'skin'}],
 	hair: [{key: 'hair', label: 'Color de pelo', palette: 'hair'}],
@@ -189,8 +191,9 @@ const COLOR_FOR: Partial<Record<string, Array<{key: ColorKey; label: string; pal
 
 /** Lo que falta comprar del look (para probarse cosas aunque no alcance la plata). */
 function lockedItems(catalog: Catalog, look: Look, owned: string[]): CatalogItem[] {
-	const ids = [look.hair, look.eyes, look.brows, look.mouth, look.cheeks, look.top, look.bottom, look.shoes, look.hat, look.costume].filter(Boolean) as string[];
-	return ids.map((id) => catalog.items.find((i) => i.id === id)).filter((i): i is CatalogItem => Boolean(i && i.price > 0 && !owned.includes(i.id)));
+	const {colors: _colors, body: _body, ...slots} = look;
+	const ids = new Set(Object.values(slots));
+	return catalog.items.filter((item) => ids.has(item.id) && item.price > 0 && !owned.includes(item.id));
 }
 
 export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Catalog; onClose: () => void; firstTime: boolean; tryOn?: CatalogItem | null}): JSX.Element {
@@ -206,6 +209,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 	function save(): void {
 		for (const item of locked) buy(item);
 		updateProfile({look: draft, created: true});
+		worldSounds.play(locked.length ? 'purchase' : 'confirm');
 		onClose();
 	}
 
@@ -230,7 +234,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 							</button>
 						))}
 					</CategoryTabs>
-					<div className="t-scroll">
+					<div key={current.id} className="t-scroll">
 						{current.slots.map((slot) => {
 							const items = catalog.items.filter((i) => i.slot === slot);
 							const Icon = SLOT_ICON[slot] ?? Sparkles;
@@ -292,7 +296,7 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 	const profile = useProfile();
 	const sections = kind === 'furniture'
 		? [...new Set(catalog.items.filter((i) => i.slot === 'furniture').map((i) => i.category ?? 'deco'))]
-		: ['hair', 'eyes', 'brows', 'mouth', 'cheeks', 'top', 'bottom', 'shoes', 'hat', 'costume'];
+		: ['top', 'bottom', 'shoes', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume'];
 	const [section, setSection] = useState(sections[0]);
 	const [message, setMessage] = useState('');
 	const [colorFor, setColorFor] = useState<Record<string, string>>({});
@@ -310,7 +314,7 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 					);
 				})}
 			</CategoryTabs>
-			<div className="t-cards">
+			<div key={section} className="t-cards">
 				{items.map((item) => {
 					const have = item.slot !== 'furniture' && owns(item, profile);
 					const count = item.slot === 'furniture' ? profile.furniture.filter((f) => f.id === item.id).length : 0;
@@ -339,6 +343,7 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 										disabled={profile.coins < item.price}
 										onClick={() => {
 											const problem = buy(item, color);
+											worldSounds.play(problem ? 'error' : 'purchase');
 											setMessage(problem ?? (item.slot === 'furniture' ? `¡${item.name} es tuyo! Ponelo en tu casa con Decorar.` : `¡${item.name} es tuyo!`));
 										}}>
 										{profile.coins < item.price ? 'No alcanza' : 'Comprar'}
