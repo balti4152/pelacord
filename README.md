@@ -77,14 +77,18 @@ Nothing about calls touches Firebase.
 
 ### Descubrimiento automático
 
-No hay que editar ninguna lista. La app anuncia su nombre por broadcast UDP en la red de
-ZeroTier y escucha a los demás. En cuanto dos personas están en la misma red de ZeroTier con la
-app abierta, se ven.
+PelaCord usa broadcast UDP en cada adaptador ZeroTier. Si el descubrimiento no encuentra a un
+amigo, abrí **Ajustes → Red ZeroTier** y guardá la dirección que le muestra PelaCord a esa persona.
+Ambos equipos necesitan estar autorizados en la misma red de ZeroTier.
 
 ### Firewall
 
-Port `7788` (TCP) must be allowed on the ZeroTier interface so peers can reach each other.
-On Windows, allow the app through the firewall for private networks.
+El descubrimiento usa `7787` (UDP). La señalización y la descarga de archivos comparten `7788`
+(TCP) por defecto. Si está ocupado, PelaCord muestra el puerto activo en **Ajustes → Red ZeroTier**.
+En Windows, permití el acceso de PelaCord en la interfaz ZeroTier.
+
+Para probar la llamada, los cambios de canal y los adjuntos con dos instancias locales, ejecutá
+`npm run dev` y, en otra terminal, `node tests/desktop-integration.test.cjs`.
 
 ## Design provenance
 

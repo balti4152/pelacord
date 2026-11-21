@@ -1,20 +1,7 @@
 import {createContext, type Dispatch, type ReactNode, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState} from 'react';
-import {type PeerPresence, getDesktopTransport, peerToParticipant} from '@/lib/desktop';
+import {type PeerPresence, getDesktopTransport, peerToParticipant, presenceSession, voiceSessionId} from '@/lib/desktop';
 import {isRemoteEnabled} from '@/lib/firebase';
-import {
-	EMPTY_MUSIC_STATE,
-	type MusicBroadcast,
-	type MusicCommand,
-	applyMusicCommand,
-	type MusicState,
-	type MusicTrack,
-	currentPositionMs,
-	electHost,
-	expectedJamPositionMs,
-	musicSnapshot,
-	musicStamp,
-	musicSyncAction,
-} from '@/lib/musicQueue';
+import type {MusicState, MusicTrack} from '@/lib/musicQueue';
 import {
 	type MovieMedia,
 	type MovieRoom,
@@ -24,7 +11,8 @@ import {
 	isStale,
 	sortRooms,
 } from '@/lib/movieRooms';
-import {currentMusicAudio, onMusicEnded, onMusicError, playMusic, setMusicOutput, stopMusic} from '@/lib/musicPlayer';
+import {setMusicOutput} from '@/lib/musicPlayer';
+import {useMusicJam} from '@/state/useMusicJam';
 import {migrateProfileAssets} from '@/lib/profileAssets';
 import {getIdentity, saveIdentity} from '@/lib/identity';
 import {DEFAULT_HOTKEYS} from '@/lib/hotkeys';
@@ -214,6 +202,7 @@ type Action =
 	| {type: 'leaveVoice'}
 	| {type: 'minimizeVoice'}
 	| {type: 'openVoiceStage'}
+	| {type: 'setSharing'; sharing: boolean}
 	| {type: 'toggleVoiceFlag'; flag: 'muted' | 'deafened' | 'video' | 'sharing'}
 	| {type: 'addChannel'; channel: Channel}
 	| {type: 'deleteChannel'; channelId: string}
@@ -265,6 +254,8 @@ function reducer(state: AppState, action: Action): AppState {
 			return {...state, settings: {...state.settings, cssVariables}};
 		}
 		case 'joinVoice': {
+			if (!state.channels.some((channel) => channel.id === action.channelId && channel.type === 'voice')) return state;
+			if (state.voice.channelId === action.channelId) return {...state, voice: {...state.voice, stageOpen: true}};
 			// Local membership. Cross-peer membership will come from the ZeroTier presence transport.
 			const voiceMembers: Record<string, VoiceParticipant[]> = {};
 			for (const [channelId, list] of Object.entries(state.voiceMembers)) {
@@ -274,19 +265,21 @@ function reducer(state: AppState, action: Action): AppState {
 				...(voiceMembers[action.channelId] ?? []),
 				toParticipant(state.me, {muted: state.voice.muted, deafened: state.voice.deafened}),
 			];
-			return {...state, voiceMembers, voice: {...state.voice, channelId: action.channelId, stageOpen: false, joinedAt: Date.now()}};
+			return {...state, voiceMembers, voice: {...state.voice, channelId: action.channelId, sharing: false, stageOpen: true, joinedAt: Date.now()}};
 		}
 		case 'leaveVoice': {
 			const voiceMembers: Record<string, VoiceParticipant[]> = {};
 			for (const [channelId, list] of Object.entries(state.voiceMembers)) {
 				voiceMembers[channelId] = list.filter((p) => p.id !== state.me.id);
 			}
-			return {...state, voiceMembers, voice: {channelId: null, muted: false, deafened: false, mutedBeforeDeafen: false, video: false, sharing: false, stageOpen: false, joinedAt: null}};
+			return {...state, voiceMembers, voice: {...state.voice, channelId: null, video: false, sharing: false, stageOpen: false, joinedAt: null}};
 		}
 		case 'minimizeVoice':
 			return {...state, voice: {...state.voice, stageOpen: false}};
 		case 'openVoiceStage':
 			return {...state, voice: {...state.voice, stageOpen: true}};
+		case 'setSharing':
+			return state.voice.sharing === action.sharing ? state : {...state, voice: {...state.voice, sharing: action.sharing}};
 		case 'toggleVoiceFlag': {
 			if (action.flag === 'deafened') {
 				const deafened = !state.voice.deafened;
@@ -504,6 +497,8 @@ interface StoreContextValue {
 	musicState: MusicState;
 	/** Hay una Jam con algo en la cola: es lo que hace que aparezca todo lo de m�sica. */
 	musicActive: boolean;
+	musicPlayback: 'idle' | 'loading' | 'ready' | 'error';
+	musicRetry: () => void;
 	/** La Jam de cada canal de voz (para saber qué canal tiene música). */
 	/** Pone un tema en la Jam (null = cortar). Cualquiera puede, es estilo Jam. */
 	musicPlay: (track: MusicTrack | null, startAtMs?: number) => void;
@@ -720,7 +715,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 					// reconstruyen con el host:puerto de AHORA y, de paso, se migran los que quedaron como
 					// data:/blob: (perfiles viejos). Eso último era el "a un amigo no le aparece mi foto":
 					// un blob: sólo existe en esta máquina y un data: gigante no viaja bien en la presencia.
-					const patch = migrateProfileAssets(meRef.current, `http://${endpoint.host}:${endpoint.port}`);
+					const patch = migrateProfileAssets(meRef.current, `http://127.0.0.1:${endpoint.port}`);
+					if (meRef.current.fileHost !== '127.0.0.1' || meRef.current.filePort !== endpoint.port) {
+						patch.fileHost = '127.0.0.1';
+						patch.filePort = endpoint.port;
+					}
 					if (Object.keys(patch).length > 0) dispatch({type: 'updateProfile', patch});
 				})
 				.catch(() => {});
@@ -746,6 +745,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			// Número de orden: cada presencia que mando sube. Los demás ignoran una que llegue
 			// atrasada (por el camino reenviado de la malla), así no "desaparezco" por un instante.
 			seq: (presenceSeq.current += 1),
+			session: presenceSession,
+			voiceSession: voiceSessionId(voice.joinedAt),
 			color: me.avatarColor,
 			avatarUrl: me.avatarUrl,
 			avatarCrop: me.avatarCrop,
@@ -966,7 +967,11 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			// otro canal (o a desconectado) y la llamada entra en un bucle de desconectar/conectar.
 			const previous = peersRef.current[from];
 			const seq = typeof payload.seq === 'number' ? payload.seq : 0;
-			if (previous && seq > 0 && seq <= (previous.seq ?? 0)) return;
+			if (previous && (payload.session ?? 0) < (previous.session ?? 0)) return;
+			if (previous?.session === payload.session && previous && seq > 0) {
+				if (seq < (previous.seq ?? 0)) return;
+				if (seq === previous.seq && payload.fileHost === previous.fileHost && payload.filePort === previous.filePort) return;
+			}
 			peersRef.current = {...peersRef.current, [from]: payload};
 			lastSeenRef.current[from] = Date.now();
 			applyPresence();
@@ -1004,28 +1009,9 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				kind?: string;
 				channelId?: string;
 				on?: boolean;
-				command?: MusicCommand;
 				movieCommand?: MovieRoomCommand;
 			} | null;
 			if (!command?.kind) return;
-			// Órdenes de la Jam (play, pausa, cola): las aplica sólo el host de turno y las difunde.
-			if (command.kind === 'music' && command.command) {
-				if (currentJamHost() !== meRef.current.id) return;
-				// "Adoptar": el otro sabe de una Jam que yo no (arranqué vacío). Sólo si no tengo nada.
-				if (command.command.kind === 'adopt') {
-					if (musicStateRef.current.track) return;
-					// Lo que llega es una foto del momento (ver musicSnapshot): la posición es "ahora",
-					// así que el arranque pasa a ser ahora con MI reloj.
-					const adoptado = {...command.command.state, hostId: meRef.current.id, startedAt: Date.now()};
-					setMusicState(adoptado);
-					broadcastMusic(adoptado);
-					return;
-				}
-				const next = applyMusicCommand(musicStateRef.current, command.command);
-				setMusicState(next);
-				broadcastMusic(next);
-				return;
-			}
 			// Órdenes de Pelaflix: las aplica sólo el host de esa sala y las difunde.
 			if (command.kind === 'movie' && command.movieCommand) {
 				const mine = myMovieRoomRef.current;
@@ -1058,7 +1044,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		});
 	}, []);
 
-	// Red de seguridad: si no se recibe presencia de alguien en 30 s, se lo considera ido.
+	// La presencia vence si se pierden varios anuncios, incluso para los peers alcanzados por relevo.
 	useEffect(() => {
 		const transport = getDesktopTransport();
 		if (!transport) return;
@@ -1066,7 +1052,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			const now = Date.now();
 			let changed = false;
 			for (const id of Object.keys(peersRef.current)) {
-				if (now - (lastSeenRef.current[id] ?? 0) > 30000) {
+				if (now - (lastSeenRef.current[id] ?? 0) > 15000) {
 					delete peersRef.current[id];
 					delete lastSeenRef.current[id];
 					delete sharingRef.current[id];
@@ -1076,7 +1062,7 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 				}
 			}
 			if (changed) applyPresence();
-		}, 10000);
+		}, 3000);
 		return () => clearInterval(timer);
 	}, [applyPresence]);
 
@@ -1098,13 +1084,13 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		presencePayload,
 	]);
 
-	// Reanuncia la presencia cada 10 s para que quien entra tarde reciba nombre y avatar.
+	// Reafirma la presencia para que una ruta nueva recupere pronto la lista de voz.
 	useEffect(() => {
 		const transport = getDesktopTransport();
 		if (!transport) return;
 		const timer = setInterval(() => {
 			transport.publishPresence(presencePayload());
-		}, 10000);
+		}, 3000);
 		return () => clearInterval(timer);
 	}, [presencePayload]);
 
@@ -1349,332 +1335,17 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		[],
 	);
 
-	// ---------- Música: la Jam (una por canal de voz) ----------
-
-	/**
-	 * La Jam se guarda POR CANAL: así, si te movés de canal, la música se queda donde estaba y
-	 * el host cambia solo entre los que quedaron. Antes era un único estado "de mi canal actual",
-	 * y por eso al moverte se frenaba o se borraba la cola para todos.
-	 */
-	const [musicByChannel, setMusicByChannel] = useState<Record<string, MusicState>>({});
-	const jamChannelId = state.voice.channelId;
-	const musicState = (jamChannelId ? musicByChannel[jamChannelId] : undefined) ?? EMPTY_MUSIC_STATE;
-	const jamChannelRef = useRef<string | null>(jamChannelId);
-	jamChannelRef.current = jamChannelId;
-	/** Última Jam vista de MI canal (para operar sin depender del render). */
-	const musicStateRef = useRef<MusicState>(EMPTY_MUSIC_STATE);
-	// El ref sigue a la Jam del canal: al cambiar de canal apunta a la de ESE canal, y cuando el
-	// estado se confirma queda igual a lo aplicado. No se asigna en el render a propósito (ver
-	// setMusicState): si se asignara ahí, un render en vuelo podría pisar una orden recién aplicada.
-	useEffect(() => {
-		musicStateRef.current = (jamChannelId ? musicByChannel[jamChannelId] : undefined) ?? EMPTY_MUSIC_STATE;
-	}, [jamChannelId, musicByChannel]);
-	/** Cambia la Jam del canal actual. */
-	const setMusicState = useCallback((next: MusicState) => {
-		const channelId = jamChannelRef.current;
-		if (!channelId) return;
-		// Se actualiza el ref EN EL MOMENTO: si llegan dos órdenes seguidas (antes de que React
-		// vuelva a renderizar), la segunda tiene que ver el resultado de la primera. Si no, se
-		// calcula sobre el estado viejo y la PISA — se perdían las canciones de las tandas previas.
-		musicStateRef.current = next;
-		setMusicByChannel((prev) => ({...prev, [channelId]: next}));
+	const jamParticipants = state.voice.channelId ? (state.voiceMembers[state.voice.channelId] ?? []) : [];
+	const {
+		musicState, musicPlayback, musicRetry, musicPlay, musicEnqueue, musicEnqueueMany, musicRemove, musicClearQueue,
+		musicMove, musicSkip, musicTogglePause,
+	} = useMusicJam(state.me.id, state.voice, jamParticipants.map(({id}) => id), peersRef, voiceRef);
+	const musicSetMuted = useCallback((musicMuted: boolean) => {
+		dispatch({type: 'updateSettings', patch: {musicMuted}});
 	}, []);
-	/** Id del tema que estoy reproduciendo LOCALMENTE (para saber si tengo que cambiar de tema). */
-	const playingTrackId = useRef<string | null>(null);
-	/** Reintentos del tema actual (si el audio se corta solo) y un contador para forzar el reinicio. */
-	const musicRetries = useRef(0);
-	const [musicTick, setMusicTick] = useState(0);
-
-	/** Los que están en mi canal de voz: de esta lista sale el host (el id más chico). */
-	const musicParticipants = useMemo(() => {
-		if (!jamChannelId) return [];
-		const ids = (state.voiceMembers[jamChannelId] ?? []).map((participant) => participant.id);
-		if (state.me.id && !ids.includes(state.me.id)) ids.push(state.me.id);
-		return ids;
-	}, [state.voiceMembers, jamChannelId, state.me.id]);
-	const musicParticipantsRef = useRef<string[]>(musicParticipants);
-	musicParticipantsRef.current = musicParticipants;
-	const musicParticipantsKey = musicParticipants.join(',');
-	/**
-	 * El host de la Jam: el que manda el audio y el que aplica las órdenes.
-	 *
-	 * Regla: el id más chico de los que YO veo en el canal. Pero al entrar alguien las listas no
-	 * coinciden por unos segundos, y con 3 personas DOS se creían host: cada uno aplicaba la orden
-	 * en su copia, se pisaban los estados y sonaban cosas distintas. Por eso se RECUERDA al último
-	 * host que difundió (mientras siga en el canal) y, si aparece uno más chico, se adopta ese.
-	 * Así todos convergen al mismo host.
-	 */
-	const jamHostRef = useRef<string | null>(null);
-	const currentJamHost = useCallback((): string | null => {
-		const participants = musicParticipantsRef.current;
-		const remembered = jamHostRef.current;
-		if (remembered && participants.includes(remembered)) return remembered;
-		return electHost(participants);
+	const musicSetVolume = useCallback((musicVolume: number) => {
+		dispatch({type: 'updateSettings', patch: {musicVolume}});
 	}, []);
-	const iAmHost = currentJamHost() === state.me.id;
-
-	/** El host difunde el estado por la malla. No hay Firestore de por medio. */
-	const broadcastMusic = useCallback((next: MusicState) => {
-		const channelId = jamChannelRef.current;
-		if (!channelId) return;
-		// Nunca se difunde una Jam vacía: si no, al volver a un canal con música se borraría para
-		// todos (que era justo el bug de "vuelvo y se frena la música").
-		if (!next.track && next.queue.length === 0) return;
-		// Se manda una FOTO del momento actual (ver musicSnapshot): así cada uno calcula el segundo
-		// con su propio reloj desde que le llegó, y no depende de que los relojes estén iguales.
-		getDesktopTransport()?.sendMusic({channelId, state: {...musicSnapshot(next), hostId: meRef.current.id}});
-	}, []);
-
-	// Se escucha lo que difunde el host de turno (lo de cualquier otro se ignora).
-	useEffect(() => {
-		const transport = getDesktopTransport();
-		if (!transport) return;
-		return transport.onMusic(({from, payload}) => {
-			const data = payload as MusicBroadcast | null;
-			if (!data?.channelId || data.channelId !== jamChannelRef.current) return;
-			const participants = musicParticipantsRef.current;
-			if (!participants.includes(from)) return;
-			const elected = electHost(participants);
-			// Si hay alguien MÁS chico que él en el canal, manda ese: gana el más chico.
-			if (elected && from > elected) return;
-			// Se acepta su estado y queda recordado como host (así no hay dos hosts a la vez).
-			jamHostRef.current = from;
-			setMusicState({...data.state, hostId: from});
-		});
-	}, []);
-
-	// Al salir del canal, la Jam se vacía: no queda una cola vieja para cuando vuelvas.
-	useEffect(() => {
-		if (jamChannelId) return;
-		jamHostRef.current = null;
-		setMusicState(EMPTY_MUSIC_STATE);
-	}, [jamChannelId]);
-
-	/** Manda una orden al host de la Jam (o la aplica y difunde si el host soy yo). */
-	const sendMusicCommand = useCallback(
-		(command: MusicCommand) => {
-			const channelId = jamChannelRef.current;
-			if (!channelId) return;
-			const host = currentJamHost();
-			if (host === meRef.current.id) {
-				const next = applyMusicCommand(musicStateRef.current, command);
-				setMusicState(next);
-				broadcastMusic(next);
-				return;
-			}
-			if (host) getDesktopTransport()?.sendCommand(host, {kind: 'music', command});
-		},
-		[broadcastMusic, currentJamHost],
-	);
-
-	/** Pone un tema (o corta con null). Cualquiera puede: es estilo Jam. */
-	const musicPlay = useCallback(
-		(track: MusicTrack | null, startAtMs = 0) => sendMusicCommand({kind: 'play', track, startAtMs}),
-		[sendMusicCommand],
-	);
-	const musicEnqueue = useCallback(
-		(track: MusicTrack) => sendMusicCommand({kind: 'enqueue', track}),
-		[sendMusicCommand],
-	);
-	/** Agrega una lista entera (por ejemplo, una playlist de Spotify) de una sola vez. */
-	const musicEnqueueMany = useCallback(
-		(tracks: MusicTrack[]) => {
-			if (tracks.length === 0) return;
-			sendMusicCommand({kind: 'enqueueMany', tracks});
-		},
-		[sendMusicCommand],
-	);
-	const musicRemove = useCallback((index: number) => sendMusicCommand({kind: 'remove', index}), [sendMusicCommand]);
-	/** Vacía la cola (lo que está sonando sigue). */
-	const musicClearQueue = useCallback(() => sendMusicCommand({kind: 'clearQueue'}), [sendMusicCommand]);
-	const musicMove = useCallback(
-		(from: number, to: number) => sendMusicCommand({kind: 'move', from, to}),
-		[sendMusicCommand],
-	);
-	const musicSkip = useCallback(() => sendMusicCommand({kind: 'skip'}), [sendMusicCommand]);
-	/** Pausa o retoma: lo aplica el host, así todos siguen en el mismo segundo. */
-	const musicTogglePause = useCallback(
-		() => sendMusicCommand({kind: 'pause', paused: !musicStateRef.current.pausedAt}),
-		[sendMusicCommand],
-	);
-
-	/** Silenciar la música de la Jam (sólo para vos: es TU reproductor). */
-	const musicSetMuted = useCallback((muted: boolean) => {
-		dispatch({type: 'updateSettings', patch: {musicMuted: muted}});
-	}, []);
-
-	const musicSetVolume = useCallback((value: number) => {
-		dispatch({type: 'updateSettings', patch: {musicVolume: value}});
-	}, []);
-
-	/**
-	 * El motor de la Jam: cada uno reproduce LOCALMENTE.
-	 *
-	 * Todos reproducen el mismo tema y se corrigen solos si se desvían (igual que Pelaflix con las
-	 * películas). El host sigue siendo el dueño del ESTADO (qué suena, la cola, la pausa), pero el
-	 * audio no viaja por la red: por eso, cuando alguien se mueve de canal o cambia el host, a nadie
-	 * se le corta la música (antes el audio venía de una sola máquina y cada cambio de host dejaba a
-	 * todos sin música los 2-4 s que tardaba el nuevo en resolverla).
-	 */
-	useEffect(() => {
-		const channelId = jamChannelId;
-		const track = musicState.track;
-
-		// Sin tema, o no estoy en el canal: corto lo que esté sonando acá.
-		if (!track || !channelId) {
-			if (playingTrackId.current) {
-				playingTrackId.current = null;
-				stopMusic();
-			}
-			return;
-		}
-
-		let cancelled = false;
-		void (async () => {
-			try {
-				// Ya estoy con este tema: sólo respeto la pausa. La posición la corrige el vigilante
-				// (no acá): si escribiera el estado desde acá se armaría un bucle de escrituras.
-				if (playingTrackId.current === track.id) {
-					const audio = currentMusicAudio();
-					if (audio) {
-						if (musicState.pausedAt && !audio.paused) audio.pause();
-						else if (!musicState.pausedAt && audio.paused) {
-							audio.currentTime = expectedJamPositionMs(musicState, jamArrivedAt.current) / 1000;
-							void audio.play().catch(() => {});
-						}
-					}
-					return;
-				}
-				const url = await getDesktopTransport()?.getAudioUrl(track.url || track.id);
-				if (cancelled) return;
-				if (!url) {
-					console.warn('[pelacord] no pude sacar el audio de', track.title);
-					return;
-				}
-				// La posición se calcula DESPUÉS de resolver el audio (resolver tarda 1-3 s): si se
-				// calculara antes, el tema arrancaría esos segundos atrasado y el vigilante lo
-				// corregiría con un salto. Eso era el "se adelantó en la mitad de la canción".
-				const positionMs = expectedJamPositionMs(musicState, jamArrivedAt.current);
-				const audio = await playMusic(url, positionMs / 1000);
-				if (cancelled) {
-					stopMusic();
-					return;
-				}
-				playingTrackId.current = track.id;
-				// Y una última alineación: entre resolver el audio y que el reproductor esté listo
-				// (metadata) también pasa tiempo, así que se vuelve a mirar dónde va la Jam.
-				audio.currentTime = expectedJamPositionMs(musicStateRef.current, jamArrivedAt.current) / 1000;
-				if (musicState.pausedAt) audio.pause();
-				musicRetries.current = 0;
-				// Cuando termina, salta al siguiente. Lo pide SÓLO el host: si lo pidieran todos
-				// (cada uno termina a su hora), la cola avanzaría varios temas de golpe.
-				onMusicEnded(() => {
-					playingTrackId.current = null;
-					if (currentJamHost() === meRef.current.id) void musicSkip();
-				});
-				// Si el audio se corta solo (por ejemplo, porque la URL del tema venció a mitad), se
-				// vuelve a pedir y arrancar en el segundo en que va la Jam. Hasta 2 intentos por tema.
-				onMusicError(() => {
-					if (musicRetries.current >= 2) return;
-					musicRetries.current += 1;
-					playingTrackId.current = null;
-					setMusicTick((tick) => tick + 1);
-				});
-			} catch (error) {
-				console.warn('[pelacord] no pude arrancar la música', String(error));
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
-		// OJO con las dependencias: NO va la lista de participantes. Si dependiera de la lista, cada
-		// vez que alguien entra o sale se re-ejecutaría y CANCELARÍA el arranque (que tarda 1-3 s en
-		// pedir el audio) → la música nunca arrancaba.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [musicState.track?.id, musicState.pausedAt, jamChannelId, musicSkip, musicTick]);
-
-	// Cuándo me llegó la versión actual de la Jam. Sólo se refresca cuando la Jam cambia DE VERDAD
-	// (tema, arranque, pausa o salto): las reafirmaciones traen el mismo estado y no reinician el
-	// reloj. Sirve para calcular el segundo en que va sin depender del reloj del host.
-	const jamArrivedAt = useRef(Date.now());
-	const jamStampRef = useRef('');
-	useEffect(() => {
-		const stamp = musicStamp(musicState);
-		if (stamp === jamStampRef.current) return;
-		jamStampRef.current = stamp;
-		jamArrivedAt.current = Date.now();
-	}, [musicState]);
-
-	/**
-	 * Vigilante de sincronía: cada 3 s se fija que MI audio vaya por donde va la Jam.
-	 *
-	 * Si la diferencia es chica, se corrige con la VELOCIDAD (se acelera o frena un 5% hasta
-	 * alinearse, sin que se note). Si es grande, se salta. Antes se saltaba siempre y se sentía
-	 * como un corte en el medio del tema ("se adelantó en la mitad de la canción").
-	 */
-	useEffect(() => {
-		if (!jamChannelId) return;
-		const timer = setInterval(() => {
-			const audio = currentMusicAudio();
-			const state = musicStateRef.current;
-			if (!audio || !state.track || state.pausedAt) return;
-			const expected = expectedJamPositionMs(state, jamArrivedAt.current);
-			const action = musicSyncAction(audio.currentTime * 1000 - expected);
-			if (action.kind === 'ok') {
-				if (audio.playbackRate !== 1) audio.playbackRate = 1;
-				return;
-			}
-			if (action.kind === 'nudge') {
-				audio.playbackRate = action.rate;
-				return;
-			}
-			audio.playbackRate = 1;
-			audio.currentTime = expected / 1000;
-		}, 3000);
-		return () => clearInterval(timer);
-	}, [jamChannelId]);
-	// Al salir de un canal, la Jam NO se borra.
-	//
-	// OJO: antes se borraba ("para que no quede una cola vieja") y el usuario reportó el problema
-	// real: si te ibas y volvías, la cola aparecía VACÍA y no sonaba nada hasta que el host volviera
-	// a difundir el estado. Ahora cada uno guarda la Jam de cada canal y, si te vas siendo el
-	// último, se deja EN PAUSA: al volver está la cola y no sigue a mitad de una canción vieja.
-	const lastJamChannel = useRef<string | null>(null);
-	const othersByChannel = useRef<Record<string, number>>({});
-	useEffect(() => {
-		const channelId = state.voice.channelId;
-		const others = channelId
-			? (state.voiceMembers[channelId] ?? []).filter((participant) => participant.id !== state.me.id).length
-			: 0;
-		if (channelId) othersByChannel.current[channelId] = others;
-		const previous = lastJamChannel.current;
-		if (previous && previous !== channelId && (othersByChannel.current[previous] ?? 0) === 0) {
-			setMusicByChannel((prev) => {
-				const jam = prev[previous];
-				if (!jam?.track || jam.pausedAt) return prev;
-				return {...prev, [previous]: {...jam, pausedAt: Date.now(), positionMs: currentPositionMs(jam)}};
-			});
-		}
-		lastJamChannel.current = channelId;
-	}, [state.voice.channelId, state.voiceMembers, state.me.id]);
-
-	// El host difunde el estado: cuando cambia y cuando entra alguien (así el que llega se sincroniza).
-	useEffect(() => {
-		if (!iAmHost || !jamChannelId) return;
-		broadcastMusic(musicStateRef.current);
-	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey, broadcastMusic]);
-
-	// Si tengo una Jam y el host de turno no la tiene (por ejemplo volvieron al canal y el host
-	// arrancó vacío), se la paso: así la música vuelve a sonar sin tener que poner otra canción.
-	useEffect(() => {
-		if (iAmHost || !jamChannelId || !musicState.track) return;
-		const host = currentJamHost();
-		if (!host) return;
-		// Se manda una FOTO (no el estado crudo): el host la adopta tal cual y queda en el mismo
-		// segundo, sin tener que interpretar el reloj de mi máquina.
-		getDesktopTransport()?.sendCommand(host, {kind: 'music', command: {kind: 'adopt', state: musicSnapshot(musicState)}});
-	}, [iAmHost, jamChannelId, musicState, musicParticipantsKey]);
 
 	// ---------- Pelaflix: salas (por la malla, nada de Firebase) ----------
 
@@ -1863,8 +1534,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 		// Curva cuadrada: al oído el slider queda parejo en todo el recorrido. Con la lineal se
 		// siente que abajo sigue fuerte y que arriba no termina de subir.
 		const curva = volume * volume;
-		setMusicOutput(curva, Boolean(state.settings.musicMuted));
-	}, [state.settings.musicVolume, state.settings.musicMuted]);
+		setMusicOutput(curva, Boolean(state.settings.musicMuted), state.settings.outputDeviceId);
+	}, [state.settings.musicVolume, state.settings.musicMuted, state.settings.outputDeviceId]);
 
 	/** Hay una Jam con algo: es lo que hace que aparezca todo lo de m�sica (si no, queda dormida). */
 	const musicActive = Boolean(musicState.track || musicState.queue.length > 0);
@@ -1886,6 +1557,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			hotkeyFailures,
 			musicState,
 			musicActive,
+			musicPlayback,
+			musicRetry,
 			musicPlay,
 			musicEnqueue,
 			musicEnqueueMany,
@@ -1921,6 +1594,8 @@ export function StoreProvider({children}: {children: ReactNode}): JSX.Element {
 			hotkeyFailures,
 			musicState,
 			musicActive,
+			musicPlayback,
+			musicRetry,
 			musicPlay,
 			musicEnqueue,
 			musicEnqueueMany,

@@ -1,5 +1,11 @@
 import type {AvatarCrop, VoiceParticipant} from '@/types';
 
+export const presenceSession = Date.now();
+
+export function voiceSessionId(joinedAt: number | null): string | undefined {
+	return joinedAt === null ? undefined : `${presenceSession}:${joinedAt}`;
+}
+
 /** Presence payload a peer publishes over the ZeroTier mesh. */
 export interface PeerPresence {
 	id: string;
@@ -35,6 +41,8 @@ export interface PeerPresence {
 	 * "desaparecía" un instante y la llamada entraba en un bucle de desconectar/conectar.
 	 */
 	seq?: number;
+	session?: number;
+	voiceSession?: string;
 	/** En qué sala de Pelaflix está mirando (null = ninguna). */
 	movieRoomId?: string | null;
 	channelId: string | null;
@@ -72,9 +80,9 @@ interface DesktopTransport {
 	onPresence(callback: (message: PeerMessage<PeerPresence>) => void): () => void;
 	onSignal(callback: (message: PeerMessage<unknown>) => void): () => void;
 	onPeerLeft(callback: (message: {id: string}) => void): () => void;
-	getRoster(): Promise<Array<{name?: string; host?: string; port?: number; self?: boolean}>>;
-	getRosterPath(): Promise<string>;
 	getPeers(): Promise<string[]>;
+	getNetworkInfo(): Promise<{addresses: string[]; manual: string; connected: number}>;
+	setNetworkPeers(value: string): Promise<{ok: boolean; error?: string}>;
 	getDesktopSources(): Promise<DesktopSource[]>;	selectSource(id: string): void;
 	getFileEndpoint(): Promise<{host: string; port: number}>;
 	/** Preview de un link (título, descripción, imagen). Se baja desde el proceso principal. */
@@ -114,7 +122,7 @@ interface DesktopTransport {
 	}): Promise<boolean>;
 	cacheMedia(payload: {url: string; name: string}): Promise<{ok: boolean; name?: string; error?: string}>;
 	openPath(target: string): Promise<void>;
-	downloadFile(payload: {url: string; name: string; size?: number}): Promise<{ok: boolean; path?: string; error?: string; cancelled?: boolean; resumable?: boolean}>;
+	downloadFile(payload: {id: string; attachmentId: string; url: string; name: string; size?: number}): Promise<{ok: boolean; path?: string; error?: string; cancelled?: boolean; resumable?: boolean}>;
 	cancelDownload(id: string): Promise<boolean>;
 	onDownloadProgress(callback: (message: {id: string; name: string; received?: number; total?: number; speed?: number; done?: boolean; cancelled?: boolean; resumable?: boolean; path?: string; error?: string}) => void): () => void;
 	getPathForFile(file: File): string;
@@ -245,6 +253,7 @@ export function isDesktop(): boolean {
 export function peerToParticipant(presence: PeerPresence): VoiceParticipant {
 	return {
 		id: presence.id,
+		voiceSession: presence.voiceSession,
 		name: presence.name,
 		color: presence.color,
 		avatarUrl: presence.avatarUrl,

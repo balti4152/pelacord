@@ -191,6 +191,8 @@ export function CallStage(): JSX.Element | null {
 	};
 	const connected = state.voiceMembers[voice.channelId] ?? [];
 	const roster = connected.some((p) => p.id === state.me.id) ? connected : [...connected, me];
+	const remoteCount = roster.length - 1;
+	const readyCount = roster.filter((participant) => participant.id !== state.me.id && meshStates[participant.id] === 'connected').length;
 
 	function videoFor(id: string): MediaStream | null {
 		// Si la persona ya no está compartiendo (según su presencia), no hay video.
@@ -225,13 +227,13 @@ export function CallStage(): JSX.Element | null {
 			<header className="call-stage-header">
 				<div className="call-stage-title">
 					<Icon name="speaker" size={18} />
-					<span>{channel?.name ?? 'Voz'}</span>
+					<span className="call-stage-name">{channel?.name ?? 'Voz'}</span>
 					{expanded ? (
 						<span className="call-stage-sub">
 							Compartiendo: {expanded.id === state.me.id ? `${expanded.name} (vos)` : expanded.name}
 						</span>
 					) : (
-						<span className="call-stage-sub">{roster.length} conectados</span>
+						<span className="call-stage-sub">{!remoteCount ? 'Estás solo en el canal' : `${readyCount} de ${remoteCount} en llamada`}</span>
 					)}
 					<span className="call-stage-timer">{elapsed}</span>
 				</div>
@@ -328,13 +330,6 @@ export function CallStage(): JSX.Element | null {
 				</button>
 				<button
 					type="button"
-					className={`call-control${voice.video ? ' is-active' : ''}`}
-					title="Cámara"
-					onClick={() => dispatch({type: 'toggleVoiceFlag', flag: 'video'})}>
-					<Icon name="video" size={22} />
-				</button>
-				<button
-					type="button"
 					className={`call-control${voice.sharing ? ' is-active' : ''}`}
 					title={voice.sharing ? 'Dejar de compartir' : 'Compartir pantalla'}
 					onClick={() => {
@@ -354,7 +349,9 @@ export function CallStage(): JSX.Element | null {
 				<button
 					type="button"
 					className="call-control"
-					title="Reconectar la llamada (si quedó en amarillo)"
+					aria-label="Reconectar llamada"
+					title="Reconectar llamada"
+					disabled={!remoteCount}
 					onClick={() => void voiceMesh.reconnect()}>
 					<RefreshCw size={20} />
 				</button>

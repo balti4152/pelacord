@@ -2,7 +2,7 @@ import {getDesktopTransport} from '@/lib/desktop';
 
 export interface MeshRemote {
 	peerId: string;
-	audios: MediaStream[];
+	audio: MediaStream | null;
 	video: MediaStream | null;
 }
 
@@ -19,7 +19,10 @@ export interface MeshTransport {
 }
 
 type SignalPayload = {
-	kind: 'offer' | 'answer' | 'candidate' | 'reset';
+	kind: 'offer' | 'answer' | 'candidate' | 'reset' | 'ready';
+	room?: string;
+	fromSession?: string;
+	toSession?: string;
 	sdp?: RTCSessionDescriptionInit;
 	candidate?: RTCIceCandidateInit;
 };
@@ -42,6 +45,11 @@ export class VoiceMesh {
 	private makingOffer = new Set<string>();
 	private listeners = new Set<() => void>();
 	private unsubSignal: (() => void) | null = null;
+	private room: {id: string; session: string | undefined} | null = null;
+	private peerSessions = new Map<string, string | undefined>();
+	private micRequest: Promise<void> | null = null;
+	private micGeneration = 0;
+	private screenGeneration = 0;
 	/** Peers del canal con los que HAY que estar conectado. El vigilante reconecta solo. */
 	private desired = new Set<string>();
 	/**
@@ -88,7 +96,7 @@ export class VoiceMesh {
 	private local: MediaStream | null = null;
 	private screen: MediaStream | null = null;
 	private audioContext: AudioContext | null = null;
-	private analysers = new Map<string, {analyser: AnalyserNode; data: Uint8Array}>();
+	private analysers = new Map<string, {source: MediaStreamAudioSourceNode; analyser: AnalyserNode; data: Uint8Array}>();
 	private speaking = new Set<string>();
 	private speakingTimer: ReturnType<typeof setInterval> | null = null;
 	private diagnostics = new Map<string, {sent: number; received: number; ice: RTCIceConnectionState}>();
@@ -155,6 +163,28 @@ export class VoiceMesh {
 		for (const listener of this.listeners) listener();
 	}
 
+	setRoom(myId: string, channelId: string | null, session: string | undefined, participants: {id: string; voiceSession?: string}[]): void {
+		if (!channelId) {
+			if (this.room) this.stop();
+			return;
+		}
+		if (this.room?.id !== channelId || this.room.session !== session) {
+			for (const id of this.desired) this.disconnect(id);
+			this.signalChains.clear();
+			this.stopScreen();
+			this.room = {id: channelId, session};
+			void this.start(myId);
+		}
+		const next = new Map(participants.filter(({id}) => id !== myId).map(({id, voiceSession}) => [id, voiceSession]));
+		for (const id of this.desired) {
+			if (!next.has(id) || next.get(id) !== this.peerSessions.get(id)) this.disconnect(id);
+		}
+		this.peerSessions = next;
+		for (const id of next.keys()) {
+			if (!this.desired.has(id)) void this.connect(id);
+		}
+	}
+
 	async start(myId: string): Promise<void> {
 		const transport = this.getTransport();
 		if (!transport) return;
@@ -163,18 +193,19 @@ export class VoiceMesh {
 			this.unsubSignal = transport.onSignal((message) => this.onSignal(message));
 		}
 		this.startWatchdog();
-		if (!this.local) {
-			this.local = await navigator.mediaDevices.getUserMedia(this.micConstraints()).catch(() => null);
-			this.local?.getAudioTracks().forEach((track) => {
-				track.enabled = !this.muted;
-			});
-			await this.ensureTracksOnAll();
-			if (this.local) this.attachAnalyser(this.myId, this.local);
-			this.emit();
-		}
+		if (this.local) return;
+		if (!this.micRequest) this.micRequest = this.captureMic(this.micGeneration);
+		const request = this.micRequest;
+		await request;
+		if (this.micRequest === request) this.micRequest = null;
 	}
 
 	stop(): void {
+		this.room = null;
+		this.peerSessions.clear();
+		this.micGeneration += 1;
+		this.micRequest = null;
+		this.screenGeneration += 1;
 		this.unsubSignal?.();
 		this.unsubSignal = null;
 		this.stopWatchdog();
@@ -246,12 +277,16 @@ export class VoiceMesh {
 
 	private micConstraints(): MediaStreamConstraints {
 		const deviceId = this.inputDeviceId && this.inputDeviceId !== 'default' ? {exact: this.inputDeviceId} : undefined;
+		// Chromium ofrece cancelación para toda la salida de audio cuando el dispositivo la admite.
+		const fullEchoCancellation = {exact: 'all'} as unknown as ConstrainBoolean;
 		return {
 			audio: {
 				...(deviceId ? {deviceId} : {}),
 				echoCancellation: true,
 				noiseSuppression: true,
 				autoGainControl: true,
+				channelCount: {ideal: 1},
+				advanced: [{echoCancellation: fullEchoCancellation}],
 			},
 		};
 	}
@@ -284,44 +319,55 @@ export class VoiceMesh {
 	}
 
 	async setInputDevice(deviceId: string): Promise<void> {
-		this.inputDeviceId = deviceId || 'default';
-		if (!this.local) return;
-		const stream = await navigator.mediaDevices.getUserMedia(this.micConstraints()).catch(() => null);
+		const nextId = deviceId || 'default';
+		if (nextId === this.inputDeviceId) return;
+		this.inputDeviceId = nextId;
+		if (!this.unsubSignal) return;
+		await this.captureMic(++this.micGeneration);
+	}
+
+	private async captureMic(generation: number): Promise<void> {
+		const constraints = this.micConstraints();
+		const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(() => null);
 		if (!stream) return;
 		const nextTrack = stream.getAudioTracks()[0];
-		if (!nextTrack) return;
-		nextTrack.enabled = !this.muted;
-		const previousTrack = this.local.getAudioTracks()[0];
-		this.local = stream;
-		for (const [peerId, pc] of this.pcs) {
-			const roles = this.senders.get(peerId) ?? {};
-			if (roles.voice) await roles.voice.replaceTrack(nextTrack).catch(() => {});
-			else roles.voice = pc.addTrack(nextTrack, stream);
-			this.senders.set(peerId, roles);
+		if (generation !== this.micGeneration || !nextTrack) {
+			stream.getTracks().forEach((track) => track.stop());
+			return;
 		}
-		previousTrack?.stop();
-		if (this.local) this.attachAnalyser(this.myId, this.local);
+		nextTrack.enabled = !this.muted;
+		this.local?.getTracks().forEach((track) => track.stop());
+		this.local = stream;
+		await this.ensureTracksOnAll();
+		if (this.local === stream) this.attachAnalyser(this.myId, stream);
 		this.emit();
 	}
 
 	/** Conecta con un peer del canal. La negociación la maneja onnegotiationneeded. */
 	async connect(peerId: string): Promise<void> {
 		if (peerId === this.myId) return;
+		const alreadyDesired = this.desired.has(peerId);
 		this.desired.add(peerId);
-		await this.pcFor(peerId);
+		const pc = await this.pcFor(peerId);
+		if (!alreadyDesired && this.room && this.pcs.get(peerId) === pc) this.send(peerId, {kind: 'ready'});
 	}
 
 	disconnect(peerId: string): void {
 		this.desired.delete(peerId);
+		this.signalChains.delete(peerId);
+		this.iceRestarts.delete(peerId);
+		this.rebuilds.delete(peerId);
+		this.rebuildAt.delete(peerId);
 		this.drop(peerId);
 	}
 
-	async startScreen(sourceId?: string): Promise<void> {
+	async startScreen(sourceId?: string): Promise<boolean> {
 		const transport = this.getTransport();
 		if (sourceId && transport) transport.selectSource?.(sourceId);
 		if (!this.screen) {
+			const generation = ++this.screenGeneration;
 			const {width, height, frameRate, audio} = this.screenOptions;
-			this.screen = await navigator.mediaDevices
+			const stream = await navigator.mediaDevices
 				.getDisplayMedia({
 					video: {
 						width: {ideal: width, max: width},
@@ -331,12 +377,18 @@ export class VoiceMesh {
 					audio: audio ? ({restrictOwnAudio: true} as MediaTrackConstraints) : false,
 				})
 				.catch(() => null);
+			if (generation !== this.screenGeneration) {
+				stream?.getTracks().forEach((track) => track.stop());
+				return false;
+			}
+			this.screen = stream;
 		}
-		if (!this.screen) return;
-		for (const track of this.screen.getVideoTracks()) {
+		const screen = this.screen;
+		if (!screen) return false;
+		for (const track of screen.getVideoTracks()) {
 			// Pantalla = nitidez. 'motion' es para cámaras y emborrona el contenido de pantalla.
 			track.contentHint = 'detail';
-			track.addEventListener('ended', () => this.stopScreen());
+			track.addEventListener('ended', () => { if (this.screen === screen) this.stopScreen(); }, {once: true});
 			// Forzar el tamaño/fps de captura (a veces las constraints de getDisplayMedia se ignoran).
 			const {width, height, frameRate} = this.screenOptions;
 			await track
@@ -349,9 +401,11 @@ export class VoiceMesh {
 		}
 		await this.ensureTracksOnAll();
 		this.emit();
+		return this.screen === screen;
 	}
 
 	stopScreen(): void {
+		this.screenGeneration += 1;
 		const stream = this.screen;
 		if (!stream) return;
 		this.screen = null;
@@ -363,7 +417,8 @@ export class VoiceMesh {
 	}
 
 	private send(to: string, payload: SignalPayload): void {
-		this.getTransport()?.sendSignal(to, payload);
+		const scope = this.room ? {room: this.room.id, fromSession: this.room.session, toSession: this.peerSessions.get(to)} : {};
+		this.getTransport()?.sendSignal(to, {...payload, ...scope});
 	}
 
 	private async pcFor(peerId: string): Promise<RTCPeerConnection> {
@@ -371,24 +426,27 @@ export class VoiceMesh {
 		if (existing) return existing;
 		const pc = new RTCPeerConnection({iceServers: [{urls: 'stun:stun.l.google.com:19302'}]});
 		this.pcs.set(peerId, pc);
-		this.remotes.set(peerId, {peerId, audios: [], video: null});
+		this.remotes.set(peerId, {peerId, audio: null, video: null});
 		this.states.set(peerId, 'new');
+		this.connectingAt.set(peerId, Date.now());
 		this.diagnostics.set(peerId, {sent: 0, received: 0, ice: 'new'});
 
 		// Perfect negotiation: cualquier lado renegocia cuando cambian sus pistas.
 		pc.onnegotiationneeded = async () => {
+			if (this.pcs.get(peerId) !== pc) return;
 			try {
 				this.makingOffer.add(peerId);
 				await pc.setLocalDescription();
-				this.send(peerId, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
+				if (this.pcs.get(peerId) === pc) this.send(peerId, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
 			} catch {
 				// se reintenta en el próximo cambio
 			} finally {
-				this.makingOffer.delete(peerId);
+				if (this.pcs.get(peerId) === pc) this.makingOffer.delete(peerId);
 			}
 		};
 
 		pc.onicecandidate = (event) => {
+			if (this.pcs.get(peerId) !== pc) return;
 			const diagnostics = this.diagnostics.get(peerId);
 			if (event.candidate) {
 				if (diagnostics) diagnostics.sent += 1;
@@ -398,14 +456,22 @@ export class VoiceMesh {
 		};
 
 		pc.ontrack = (event) => {
+			if (this.pcs.get(peerId) !== pc) return;
 			const remote = this.remotes.get(peerId);
 			if (!remote) return;
 			const stream = event.streams[0] ?? new MediaStream([event.track]);
 			if (event.track.kind === 'audio') {
-				if (!remote.audios.includes(stream)) {
-					remote.audios.push(stream);
-					if (!this.analysers.has(peerId)) this.attachAnalyser(peerId, stream);
-				}
+				const current = remote.audio?.getAudioTracks()[0];
+				if (current?.id === event.track.id || (current?.readyState === 'live' && !current.muted)) return;
+				const voice = new MediaStream([event.track]);
+				remote.audio = voice;
+				this.attachAnalyser(peerId, voice);
+				event.track.addEventListener('ended', () => {
+					if (this.pcs.get(peerId) !== pc || remote.audio !== voice) return;
+					remote.audio = null;
+					this.detachAnalyser(peerId);
+					this.emit();
+				}, {once: true});
 			} else {
 				// La pantalla se corta con "mute" (se deja de mandar sin renegociar). Acá se guarda el
 				// stream igual y la INTERFAZ decide (useRemoteVideo mira `muted`): si acá se pusiera en
@@ -420,6 +486,7 @@ export class VoiceMesh {
 		};
 
 		pc.onconnectionstatechange = () => {
+			if (this.pcs.get(peerId) !== pc) return;
 			this.states.set(peerId, pc.connectionState);
 			console.log(`[pelacord-media] ${peerId} conexión: ${pc.connectionState} (ice: ${pc.iceConnectionState})`);
 			this.emit();
@@ -460,12 +527,14 @@ export class VoiceMesh {
 			}
 		};
 		pc.oniceconnectionstatechange = () => {
+			if (this.pcs.get(peerId) !== pc) return;
 			const diagnostics = this.diagnostics.get(peerId);
 			if (diagnostics) diagnostics.ice = pc.iceConnectionState;
 			this.emit();
 		};
 
 		await this.syncTracks(peerId, pc);
+		if (this.pcs.get(peerId) === pc) this.emit();
 		return pc;
 	}
 
@@ -480,12 +549,14 @@ export class VoiceMesh {
 	 * (replaceTrack). Nunca se agregan canales de más (ver la nota de `senders`).
 	 */
 	private async syncTracks(peerId: string, pc: RTCPeerConnection): Promise<void> {
+		if (this.pcs.get(peerId) !== pc) return;
 		const roles = this.senders.get(peerId) ?? {};
 		const voiceTrack = this.local?.getAudioTracks()[0] ?? null;
 		if (voiceTrack && this.local) {
 			if (roles.voice) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
 			else roles.voice = pc.addTrack(voiceTrack, this.local);
 		}
+		if (this.pcs.get(peerId) !== pc) return;
 		const screenTrack = this.screen?.getVideoTracks()[0] ?? null;
 		if (screenTrack && this.screen) {
 			if (roles.screen) await roles.screen.replaceTrack(screenTrack).catch(() => {});
@@ -498,7 +569,7 @@ export class VoiceMesh {
 				setTimeout(() => this.tuneVideoSender(roles.screen as RTCRtpSender), 800);
 			}
 		}
-		this.senders.set(peerId, roles);
+		if (this.pcs.get(peerId) === pc) this.senders.set(peerId, roles);
 	}
 
 	private preferH264(transceiver: RTCRtpTransceiver): void {
@@ -542,8 +613,9 @@ export class VoiceMesh {
 
 	private drop(peerId: string): void {
 		this.cancelRestart(peerId);
-		this.pcs.get(peerId)?.close();
+		const pc = this.pcs.get(peerId);
 		this.pcs.delete(peerId);
+		pc?.close();
 		this.remotes.delete(peerId);
 		this.states.delete(peerId);
 		this.makingOffer.delete(peerId);
@@ -566,6 +638,7 @@ export class VoiceMesh {
 	 * entera, también con espera creciente (hasta 1 minuto) para no entrar en un bucle.
 	 */
 	private tryIceRestart(peerId: string, pc: RTCPeerConnection): void {
+		if (this.restartTimers.has(peerId)) return;
 		const attempts = (this.iceRestarts.get(peerId) ?? 0) + 1;
 		this.iceRestarts.set(peerId, attempts);
 		if (attempts > 3) {
@@ -620,14 +693,12 @@ export class VoiceMesh {
 
 	/** Rearma toda la malla: corta y vuelve a empezar (lo usa el botón "Reconectar" de la llamada). */
 	async reconnect(): Promise<void> {
-		const myId = this.myId;
-		const peers = [...this.desired];
-		// Se les avisa a todos para que rearmen también (si no, sus conexiones quedan con los canales
-		// viejos y rechazan la oferta nueva: la llamada se caía).
-		for (const peerId of peers) this.send(peerId, {kind: 'reset'});
-		this.stop();
-		await this.start(myId);
-		for (const peerId of peers) await this.connect(peerId);
+		await Promise.all([...this.desired].map((peerId) => {
+			this.iceRestarts.delete(peerId);
+			this.rebuilds.delete(peerId);
+			this.rebuildAt.delete(peerId);
+			return this.rebuild(peerId);
+		}));
 	}
 
 	/**
@@ -659,10 +730,9 @@ export class VoiceMesh {
 					if (now - since > 20000) this.tryIceRestart(peerId, pc);
 					continue;
 				}
-				if (pc.connectionState === 'connecting') {
+				if (pc.connectionState === 'connecting' || pc.connectionState === 'new') {
 					const since = this.connectingAt.get(peerId) ?? now;
-					// 40 s en "connecting": ya no va a cerrar solo, se reinicia el ICE.
-					if (now - since > 40000) this.tryIceRestart(peerId, pc);
+					if (now - since > 12000) this.tryIceRestart(peerId, pc);
 				}
 			}
 			for (const peerId of [...this.pcs.keys()]) {
@@ -702,6 +772,9 @@ export class VoiceMesh {
 		// Si el peer no está en el canal (y nunca hablamos con él), se ignora: si no, alguien que
 		// ya se fue puede rearmar la conexión y armar una guerra de reconexiones.
 		if (!this.desired.has(from) && !this.pcs.has(from)) return;
+		if (payload.room !== undefined && (payload.room !== this.room?.id ||
+			(payload.toSession && payload.toSession !== this.room?.session) ||
+			(this.peerSessions.get(from) && payload.fromSession !== this.peerSessions.get(from)))) return;
 
 		// El otro rearmó su conexión y pide que rearmemos la nuestra: se hace de cero, así los dos
 		// quedan con los mismos canales. Si no, su oferta nueva traería menos canales que los que
@@ -714,7 +787,12 @@ export class VoiceMesh {
 		}
 
 		const pc = await this.pcFor(from);
+		if (this.pcs.get(from) !== pc) return;
 		const polite = this.myId > from;
+		if (payload.kind === 'ready') {
+			if (pc.signalingState === 'have-local-offer') this.send(from, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
+			return;
+		}
 
 		if (payload.kind === 'offer' && payload.sdp) {
 			const collision = this.makingOffer.has(from) || pc.signalingState !== 'stable';
@@ -743,9 +821,10 @@ export class VoiceMesh {
 				// Si fue porque los canales quedaron desalineados (pasa al compartir pantalla y después
 				// rearmar una sola punta), se rearma la conexión de los DOS: si no, esta conexión queda
 				// muerta y la llamada se cae.
-				if (String(error).includes('m-lines')) void this.rebuild(from);
+				if (this.pcs.get(from) === pc && String(error).includes('m-lines')) void this.rebuild(from);
 				return;
 			}
+			if (this.pcs.get(from) !== pc) return;
 			this.remoteReady.add(from);
 			await this.flushCandidates(from, pc);
 			try {
@@ -754,7 +833,7 @@ export class VoiceMesh {
 				console.warn(`[pelacord-media] ${from}: no pude armar la respuesta`, String(error));
 				return;
 			}
-			this.send(from, {kind: 'answer', sdp: plainSdp(pc.localDescription)});
+			if (this.pcs.get(from) === pc) this.send(from, {kind: 'answer', sdp: plainSdp(pc.localDescription)});
 			return;
 		}
 
@@ -768,6 +847,7 @@ export class VoiceMesh {
 				console.warn(`[pelacord-media] ${from}: no pude aplicar la respuesta`, String(error));
 				return;
 			}
+			if (this.pcs.get(from) !== pc) return;
 			this.remoteReady.add(from);
 			await this.flushCandidates(from, pc);
 			return;
@@ -810,13 +890,14 @@ export class VoiceMesh {
 	}
 
 	private attachAnalyser(id: string, stream: MediaStream): void {
+		this.detachAnalyser(id);
 		try {
 			const context = this.ensureAudioContext();
 			const source = context.createMediaStreamSource(stream);
 			const analyser = context.createAnalyser();
 			analyser.fftSize = 512;
 			source.connect(analyser);
-			this.analysers.set(id, {analyser, data: new Uint8Array(analyser.frequencyBinCount)});
+			this.analysers.set(id, {source, analyser, data: new Uint8Array(analyser.frequencyBinCount)});
 			this.startSpeakingLoop();
 		} catch {
 			// sin audio
@@ -824,6 +905,7 @@ export class VoiceMesh {
 	}
 
 	private detachAnalyser(id: string): void {
+		this.analysers.get(id)?.source.disconnect();
 		this.analysers.delete(id);
 		if (this.speaking.delete(id)) this.emit();
 	}

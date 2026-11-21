@@ -30,7 +30,11 @@ export interface MusicState {
 	pausedAt: number | null;
 	/** Posición guardada, en milisegundos (se usa al pausar y al retomar). */
 	positionMs: number;
-	/** Quién está mandando el audio (el id más chico del canal). */
+	/** Versión de la cola y los controles; los anuncios periódicos conservan esta versión. */
+	revision?: number;
+	/** Distingue dos reproducciones consecutivas del mismo tema. */
+	playbackId?: string;
+	/** Quién mantiene el estado (el id más chico del canal). */
 	hostId: string | null;
 	/** Lo que viene después. */
 	queue: MusicTrack[];
@@ -49,6 +53,8 @@ export const EMPTY_MUSIC_STATE: MusicState = {
 export interface MusicBroadcast {
 	channelId: string;
 	state: MusicState;
+	voiceSession?: string;
+	serial?: number;
 }
 
 /** Comandos que cualquiera le manda al host (estilo Jam: todos controlan). */
@@ -134,6 +140,10 @@ export function musicSnapshot(state: MusicState, now = Date.now()): MusicState {
 	return {...state, positionMs: currentPositionMs(state, now), startedAt: now};
 }
 
+export function receiveMusicSnapshot(state: MusicState, now = Date.now()): MusicState {
+	return {...state, startedAt: state.track ? now - Math.max(0, state.positionMs) : 0};
+}
+
 /**
  * Hasta acá se corrige con la VELOCIDAD (sin saltar): más allá, se salta.
  *
@@ -181,31 +191,34 @@ export function moveInQueue(state: MusicState, from: number, to: number): MusicT
 
 /** Aplica un comando sobre el estado (lo hace el host cuando recibe una orden). */
 export function applyMusicCommand(state: MusicState, command: MusicCommand, now = Date.now()): MusicState {
+	if (command.kind === 'adopt') return state;
+	const revision = (state.revision ?? 0) + 1;
+	const changed = {...state, revision};
+	const playbackId = `${now}:${revision}`;
 	if (command.kind === 'play') {
 		return {
-			...state,
+			...changed,
+			playbackId,
 			track: command.track,
-			// OJO: se usa el `now` que recibe (no Date.now()): si no, la función no se puede probar
-			// de forma determinista y quedaba inconsistente con las otras órdenes.
 			startedAt: command.track ? now - (command.startAtMs ?? 0) : 0,
 			pausedAt: null,
 			positionMs: command.startAtMs ?? 0,
 		};
 	}
 	if (command.kind === 'pause') {
+		if (!state.track || command.paused === Boolean(state.pausedAt)) return state;
 		return command.paused
-			? {...state, pausedAt: now, positionMs: currentPositionMs(state, now)}
-			: {...state, pausedAt: null, startedAt: now - state.positionMs};
+			? {...changed, pausedAt: now, positionMs: currentPositionMs(state, now)}
+			: {...changed, pausedAt: null, startedAt: now - state.positionMs};
 	}
 	if (command.kind === 'skip') {
 		const [next, ...rest] = state.queue;
-		if (!next) return {...state, track: null, queue: [], startedAt: 0, positionMs: 0, pausedAt: null};
-		return {...state, track: next, queue: rest, startedAt: Date.now(), positionMs: 0, pausedAt: null};
+		return {...changed, playbackId, track: next ?? null, queue: rest, startedAt: next ? now : 0, positionMs: 0, pausedAt: null};
 	}
-	if (command.kind === 'enqueue') return {...state, queue: appendToQueue(state, command.track)};
-	if (command.kind === 'enqueueMany') return {...state, queue: [...state.queue, ...command.tracks]};
-	if (command.kind === 'clearQueue') return {...state, queue: []};
-	if (command.kind === 'remove') return {...state, queue: removeFromQueue(state, command.index)};
-	if (command.kind === 'move') return {...state, queue: moveInQueue(state, command.from, command.to)};
+	if (command.kind === 'enqueue') return {...changed, queue: appendToQueue(state, command.track)};
+	if (command.kind === 'enqueueMany') return {...changed, queue: [...state.queue, ...command.tracks]};
+	if (command.kind === 'clearQueue') return {...changed, queue: []};
+	if (command.kind === 'remove') return {...changed, queue: removeFromQueue(state, command.index)};
+	if (command.kind === 'move') return {...changed, queue: moveInQueue(state, command.from, command.to)};
 	return state;
 }

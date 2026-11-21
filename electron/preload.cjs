@@ -47,8 +47,8 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 		ipcRenderer.on('pelacord:peer-left', handler);
 		return () => ipcRenderer.removeListener('pelacord:peer-left', handler);
 	},
-	getRoster: () => ipcRenderer.invoke('pelacord:roster'),
-	getRosterPath: () => ipcRenderer.invoke('pelacord:rosterPath'),
+	getNetworkInfo: () => ipcRenderer.invoke('pelacord:network-info'),
+	setNetworkPeers: (value) => ipcRenderer.invoke('pelacord:set-network-peers', value),
 	getPeers: () => ipcRenderer.invoke('pelacord:peers'),
 	getDesktopSources: () => ipcRenderer.invoke('pelacord:desktop-sources'),
 	selectSource: (id) => ipcRenderer.send('pelacord:select-source', id),

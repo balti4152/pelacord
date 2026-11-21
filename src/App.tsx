@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {CallStage} from '@/components/CallStage';
 import {ChannelSidebar} from '@/components/ChannelSidebar';
 import {ChatView} from '@/components/ChatView';
@@ -11,7 +11,7 @@ import {Icon} from '@/components/primitives';
 import {RemoteAudio} from '@/components/RemoteMedia';
 import {ScreenSharePicker} from '@/components/ScreenSharePicker';
 import {SettingsModal} from '@/components/SettingsModal';
-import {getDesktopTransport, isDesktop} from '@/lib/desktop';
+import {getDesktopTransport, isDesktop, voiceSessionId} from '@/lib/desktop';
 import {hasChosenName} from '@/lib/identity';
 import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
@@ -28,6 +28,7 @@ export function App(): JSX.Element {
 	const [moviesOpen, setMoviesOpen] = useState(false);
 	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
+	const [droppedFiles, setDroppedFiles] = useState<File[] | null>(null);
 
 	// El selector de pantalla se puede abrir desde cualquier lado (botón del sidebar, llamada…).
 	useEffect(() => subscribeSharePicker(() => setSharePickerOpen(true)), []);
@@ -40,6 +41,7 @@ export function App(): JSX.Element {
 	useEffect(() => {
 		const resetDrag = () => setDragging(false);
 		const onDragOver = (event: DragEvent) => {
+			if (!hasChosenName()) return;
 			if (event.dataTransfer && Array.from(event.dataTransfer.types).includes('Files')) {
 				event.preventDefault();
 				setDragging(true);
@@ -49,10 +51,13 @@ export function App(): JSX.Element {
 			if (event.relatedTarget === null) setDragging(false);
 		};
 		const onDrop = (event: DragEvent) => {
-			if (!event.dataTransfer || event.dataTransfer.files.length === 0) return;
+			if (!hasChosenName() || !event.dataTransfer || event.dataTransfer.files.length === 0) return;
 			event.preventDefault();
 			setDragging(false);
-			attachFiles(Array.from(event.dataTransfer.files));
+			setMusicOpen(false);
+			setMoviesOpen(false);
+			dispatch({type: 'minimizeVoice'});
+			setDroppedFiles(Array.from(event.dataTransfer.files));
 		};
 		window.addEventListener('dragover', onDragOver);
 		window.addEventListener('dragleave', onDragLeave);
@@ -66,65 +71,33 @@ export function App(): JSX.Element {
 			window.removeEventListener('dragend', resetDrag);
 			window.removeEventListener('blur', resetDrag);
 		};
-	}, []);
+	}, [dispatch]);
 
 	const showStage = state.voice.channelId !== null && state.voice.stageOpen;
-	const showMembers = !showStage && state.settings.showMembers;
-
-	// Malla de voz: arranca al entrar a un canal y se apaga al salir.
+	const showMembers = !showStage && !musicOpen && !moviesOpen && state.settings.showMembers;
 	useEffect(() => {
+		if (!droppedFiles || showStage || musicOpen || moviesOpen) return;
+		attachFiles(droppedFiles);
+		setDroppedFiles(null);
+	}, [droppedFiles, showStage, musicOpen, moviesOpen]);
+
+	useLayoutEffect(() => {
 		if (!isDesktop()) return;
-		if (!state.voice.channelId) {
-			voiceMesh.stop();
-			return;
-		}
-		void voiceMesh.start(state.me.id);
-	}, [state.voice.channelId, state.me.id]);
-
-	const peersInChannel = useMemo(
-		() =>
-			state.voice.channelId
-				? (state.voiceMembers[state.voice.channelId] ?? []).map((p) => p.id).filter((id) => id !== state.me.id)
-				: [],
-		[state.voiceMembers, state.voice.channelId, state.me.id],
-	);
-	const peersKey = peersInChannel.join(',');
-
-	// Conecta con quien está en el canal y corta con quien se fue.
-	//
-	// El corte tiene TOLERANCIA (8 s): una presencia perdida o atrasada no puede cortar la llamada.
-	// Antes se cortaba al instante y la llamada entraba en un bucle de desconectar/conectar
-	// ("me desconecta a cada rato").
-	const pendingDisconnects = useRef(new Map<string, number>());
-	useEffect(() => {
-		if (!isDesktop() || !state.voice.channelId) return;
-		for (const id of peersInChannel) {
-			const timer = pendingDisconnects.current.get(id);
-			if (timer) {
-				window.clearTimeout(timer);
-				pendingDisconnects.current.delete(id);
-			}
-			void voiceMesh.connect(id);
-		}
-		for (const remote of voiceMesh.getRemotes()) {
-			if (peersInChannel.includes(remote.peerId)) continue;
-			if (pendingDisconnects.current.has(remote.peerId)) continue;
-			const timer = window.setTimeout(() => {
-				pendingDisconnects.current.delete(remote.peerId);
-				voiceMesh.disconnect(remote.peerId);
-			}, 8000);
-			pendingDisconnects.current.set(remote.peerId, timer);
-		}
-		// peersKey resume peersInChannel; no se incluye el array para no reejecutar en cada render.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [peersKey, state.voice.channelId]);
+		const {channelId, joinedAt} = state.voice;
+		voiceMesh.setRoom(state.me.id, channelId, voiceSessionId(joinedAt), channelId ? (state.voiceMembers[channelId] ?? []) : []);
+	}, [state.me.id, state.voice.channelId, state.voice.joinedAt, state.voiceMembers]);
 
 	// Compartir pantalla.
 	useEffect(() => {
 		if (!isDesktop()) return;
-		if (state.voice.sharing) void voiceMesh.startScreen();
-		else voiceMesh.stopScreen();
-	}, [state.voice.sharing]);
+		let active = true;
+		if (state.voice.sharing && state.voice.channelId) {
+			void voiceMesh.startScreen().then((started) => {
+				if (active && !started) dispatch({type: 'setSharing', sharing: false});
+			});
+		} else voiceMesh.stopScreen();
+		return () => { active = false; };
+	}, [dispatch, state.voice.channelId, state.voice.sharing]);
 
 	// Si la captura termina SOLA (el usuario aprieta "Dejar de compartir" en la barra del sistema, o
 	// cierra la ventana que estaba compartiendo), la app tiene que enterarse. Si no, queda para
@@ -132,9 +105,14 @@ export function App(): JSX.Element {
 	// cerrar). Se mira cada vez que la malla avisa algo.
 	useEffect(() => {
 		if (!isDesktop() || !state.voice.sharing) return;
+		let captured = Boolean(voiceMesh.getScreen());
 		const revisar = () => {
 			const track = voiceMesh.getScreen()?.getVideoTracks()[0];
-			if (!track || track.readyState !== 'live') dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+			if (track?.readyState === 'live') captured = true;
+			else if (captured) {
+				captured = false;
+				dispatch({type: 'setSharing', sharing: false});
+			}
 		};
 		return voiceMesh.subscribe(revisar);
 	}, [state.voice.sharing]);
@@ -222,8 +200,9 @@ export function App(): JSX.Element {
 
 	return (
 		<>
-			<div className={`app-shell${showMembers ? '' : ' is-members-hidden'}`}>
+			<div className={`app-shell${isDesktop() ? ' is-desktop' : ''}${showMembers ? '' : ' is-members-hidden'}`}>
 				<ChannelSidebar
+					view={moviesOpen ? 'movies' : musicOpen ? 'music' : showStage ? 'call' : 'chat'}
 					onOpenSettings={() => setSettingsOpen(true)}
 					onOpenVoice={() => dispatch({type: 'openVoiceStage'})}
 					onOpenMusic={() => {
@@ -244,7 +223,7 @@ export function App(): JSX.Element {
 				) : musicOpen ? (
 					<MusicView onClose={() => setMusicOpen(false)} />
 				) : showStage ? (
-					<CallStage />
+					<CallStage key={state.voice.channelId} />
 				) : (
 					<ChatView />
 				)}

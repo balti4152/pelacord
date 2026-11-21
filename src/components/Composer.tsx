@@ -1,7 +1,7 @@
 import {type ChangeEvent, type ClipboardEvent, type KeyboardEvent, useCallback, useEffect, useRef, useState} from 'react';
 import {EmojiChooser} from '@/components/EmojiChooser';
 import {GifPicker} from '@/components/GifPicker';
-import {Icon} from '@/components/primitives';
+import {formatBytes, Icon} from '@/components/primitives';
 import {subscribeAttach} from '@/lib/attach';
 import {getDesktopTransport} from '@/lib/desktop';
 import {type GifResult} from '@/lib/klipy';
@@ -36,6 +36,9 @@ function videoThumbnail(file: File): Promise<string | undefined> {
 		const finish = (value?: string) => {
 			if (done) return;
 			done = true;
+			clearTimeout(timer);
+			video.removeAttribute('src');
+			video.load();
 			URL.revokeObjectURL(url);
 			resolve(value);
 		};
@@ -73,33 +76,24 @@ async function buildAttachment(file: File, ownerId: string): Promise<Attachment>
 	const kind = attachmentKind(file);
 	const mime = file.type || 'application/octet-stream';
 	const name = file.name || 'archivo';
-	const thumbnail = kind === 'video' ? await videoThumbnail(file) : undefined;
 	const transport = getDesktopTransport();
 	if (transport) {
-		try {
-			const endpoint = await transport.getFileEndpoint();
-			const filePath = transport.getPathForFile(file);
-			const id = filePath
-				? await transport.shareFile({filePath, name, mime, size: file.size})
-				: await transport.shareBuffer({name, mime, data: await file.arrayBuffer()});
-			if (id) {
-				return {
-					id,
-					name,
-					size: file.size,
-					mime,
-					kind,
-					url: `http://${endpoint.host}:${endpoint.port}/file/${id}`,
-					ownerId,
-					ownerHost: endpoint.host,
-					ownerPort: endpoint.port,
-					thumbnail,
-				};
-			}
-		} catch {
-			// cae al modo local
-		}
+		const endpoint = await transport.getFileEndpoint();
+		if (!endpoint.port) throw new Error('El servicio de archivos no está disponible');
+		const filePath = transport.getPathForFile(file);
+		const [id, thumbnail] = await Promise.all([
+			filePath ? transport.shareFile({filePath, name, mime, size: file.size}) : file.arrayBuffer().then((data) => transport.shareBuffer({name, mime, data})),
+			kind === 'video' ? videoThumbnail(file) : undefined,
+		]);
+		if (!id) throw new Error('No se pudo leer el archivo');
+		return {
+			id, name, size: file.size, mime, kind, ownerId, thumbnail,
+			url: `http://127.0.0.1:${endpoint.port}/file/${id}`,
+			ownerHost: endpoint.host,
+			ownerPort: endpoint.port,
+		};
 	}
+	const thumbnail = kind === 'video' ? await videoThumbnail(file) : undefined;
 	return {id: uid(), name, size: file.size, mime, kind, url: URL.createObjectURL(file), ownerId, thumbnail};
 }
 
@@ -107,6 +101,8 @@ export function Composer(): JSX.Element {
 	const {sendMessage, state} = useStore();
 	const [text, setText] = useState('');
 	const [attachments, setAttachments] = useState<Attachment[]>([]);
+	const [preparing, setPreparing] = useState(0);
+	const [fileError, setFileError] = useState('');
 	const [showEmoji, setShowEmoji] = useState(false);
 	const [showGifs, setShowGifs] = useState(false);
 	const [mention, setMention] = useState<{query: string; index: number} | null>(null);
@@ -127,13 +123,21 @@ export function Composer(): JSX.Element {
 		textarea.current?.focus();
 	}, []);
 
-	useEffect(() => {
-		return subscribeAttach((files) => {
-			void Promise.all(files.map((file) => buildAttachment(file, state.me.id))).then((next) => {
-				setAttachments((prev) => [...prev, ...next]);
-			});
-		});
+	const addFiles = useCallback(async (files: File[]) => {
+		setPreparing((count) => count + files.length);
+		setFileError('');
+		const results = await Promise.allSettled(files.map((file) => buildAttachment(file, state.me.id)));
+		const ready: Attachment[] = [];
+		const failed: string[] = [];
+		for (const [index, result] of results.entries()) {
+			if (result.status === 'fulfilled') ready.push(result.value);
+			else failed.push(files[index].name || 'Archivo pegado');
+		}
+		setAttachments((prev) => [...prev, ...ready]);
+		setPreparing((count) => count - files.length);
+		if (failed.length) setFileError(`No se pudieron adjuntar ${failed.join(', ')}.`);
 	}, [state.me.id]);
+	useEffect(() => subscribeAttach((files) => void addFiles(files)), [addFiles]);
 
 	async function handleFiles(event: ChangeEvent<HTMLInputElement>): Promise<void> {
 		const files = event.target.files;
@@ -141,16 +145,16 @@ export function Composer(): JSX.Element {
 		// Capturar la lista ANTES de limpiar el input (limpiar vacía la FileList).
 		const list = Array.from(files);
 		event.target.value = '';
-		const next = await Promise.all(list.map((file) => buildAttachment(file, state.me.id)));
-		setAttachments((prev) => [...prev, ...next]);
+		await addFiles(list);
 	}
 
 	function submit(): void {
-		if (!text.trim() && attachments.length === 0) return;
+		if (preparing || (!text.trim() && attachments.length === 0)) return;
 		sendMessage(text, attachments);
 		setText('');
 		setAttachments([]);
 		setShowEmoji(false);
+		setFileError('');
 		if (textarea.current) {
 			textarea.current.style.height = 'auto';
 			textarea.current.focus();
@@ -158,6 +162,7 @@ export function Composer(): JSX.Element {
 	}
 
 	function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+		if (event.nativeEvent.isComposing) return;
 		// Con la lista de menciones abierta: Tab/Enter completan, flechas mueven, Esc cierra.
 		if (mention && mentionList.length > 0) {
 			if (event.key === 'Tab' || event.key === 'Enter') {
@@ -216,9 +221,7 @@ export function Composer(): JSX.Element {
 		const files = event.clipboardData?.files;
 		if (!files || files.length === 0) return;
 		event.preventDefault();
-		const list = Array.from(files);
-		const next = await Promise.all(list.map((file) => buildAttachment(file, state.me.id)));
-		setAttachments((prev) => [...prev, ...next]);
+		await addFiles(Array.from(files));
 	}
 
 	return (
@@ -274,11 +277,14 @@ export function Composer(): JSX.Element {
 									<Icon name="file" size={16} />
 								</span>
 							)}
-							<span className="composer-attachment-name">{attachment.name}</span>
+							<span className="composer-attachment-detail">
+								<span className="composer-attachment-name" title={attachment.name}>{attachment.name}</span>
+								<small>{formatBytes(attachment.size)}</small>
+							</span>
 							<button
 								type="button"
 								className="composer-attachment-remove"
-								title="Quitar"
+								aria-label={`Quitar ${attachment.name}`}
 								onClick={() => setAttachments((prev) => prev.filter((a) => a.id !== attachment.id))}>
 								×
 							</button>
@@ -286,13 +292,16 @@ export function Composer(): JSX.Element {
 					))}
 				</div>
 			) : null}
+			{preparing > 0 && <p className="composer-status" role="status">Preparando {preparing === 1 ? '1 archivo' : `${preparing} archivos`}…</p>}
+			{fileError && <p className="composer-status is-error" role="alert">{fileError}</p>}
 
 			<div className={`composer-box${attachments.length > 0 ? ' is-open' : ''}`}>
 				<div className="composer-actions">
 					<button
 						type="button"
 						className="composer-btn"
-						title="Subir un archivo"
+						aria-label="Adjuntar archivos"
+						title="Adjuntar archivos"
 						onClick={() => fileInput.current?.click()}>
 						<Icon name="attach" size={20} />
 					</button>
@@ -312,7 +321,8 @@ export function Composer(): JSX.Element {
 				<textarea
 					ref={textarea}
 					className="composer-input"
-					placeholder="Escribe un mensaje"
+					placeholder="Escribí un mensaje"
+					aria-label="Mensaje"
 					rows={1}
 					value={text}
 					onChange={handleInput}
@@ -324,9 +334,10 @@ export function Composer(): JSX.Element {
 					<button
 						type="button"
 						className="composer-btn is-send"
+						aria-label="Enviar mensaje"
 						title="Enviar"
 						onClick={submit}
-						disabled={!text.trim() && attachments.length === 0}>
+						disabled={preparing > 0 || (!text.trim() && attachments.length === 0)}>
 						<Icon name="send" size={20} />
 					</button>
 				</div>

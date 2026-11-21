@@ -35,7 +35,7 @@ function formatDuration(seconds: number): string {
  * el estilo de Pelacord. Los íconos son de `lucide-react`.
  */
 export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
-	const {state, musicState, musicPlay, musicEnqueue, musicRemove, musicClearQueue, musicMove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
+	const {state, musicState, musicPlayback, musicRetry, musicPlay, musicEnqueue, musicRemove, musicClearQueue, musicMove, musicSkip, musicTogglePause, musicSetMuted, musicSetVolume} =
 		useStore();
 	const [query, setQuery] = useState('');
 	/** Lo que se busca de verdad: cambia con Enter o después de una pausa larga. */
@@ -58,6 +58,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	const volume = state.settings.musicVolume ?? 0.8;
 	/** Para controlar la Jam hay que estar en un canal de voz: si no, no hay dónde sonar. */
 	const inVoice = Boolean(state.voice.channelId);
+	const voiceChannel = state.channels.find(({id}) => id === state.voice.channelId);
 
 	// Pausa larga: si dejás de escribir, busca igual (sin lanzar uno por tecla).
 	useEffect(() => {
@@ -119,28 +120,32 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 	return (
 		<div className="music-view">
 			<header className="music-header">
-				<span className="music-brand">
-					<ListMusic size={20} /> Música
-				</span>
-				<nav className="music-tabs">
-					<button type="button" className={tab === 'search' ? 'is-active' : ''} onClick={() => setTab('search')}>
+				<div className="music-brand"><ListMusic size={20} /><h1>Música</h1></div>
+				<nav className="music-tabs" aria-label="Música">
+					<button type="button" aria-pressed={tab === 'search'} className={tab === 'search' ? 'is-active' : ''} onClick={() => setTab('search')}>
 						<Search size={15} /> Buscar
 					</button>
-					<button type="button" className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}>
+					<button type="button" aria-pressed={tab === 'queue'} className={tab === 'queue' ? 'is-active' : ''} onClick={() => setTab('queue')}>
 						<ListMusic size={15} /> Cola
 						{musicState.queue.length > 0 ? <span className="music-badge">{musicState.queue.length}</span> : null}
 					</button>
 					<button
 						type="button"
+						aria-pressed={tab === 'spotify'}
 						className={`spotify-tab${tab === 'spotify' ? ' is-active' : ''}`}
 						onClick={() => setTab('spotify')}>
 						<SiSpotify size={15} /> Spotify
 					</button>
 				</nav>
-				<button type="button" className="music-close" onClick={onClose} title="Cerrar">
+				<button type="button" className="music-close" onClick={onClose} aria-label="Cerrar música" title="Cerrar">
 					<X size={18} />
 				</button>
 			</header>
+			<div className="music-session" role="status">
+				<span>{voiceChannel ? `Jam en ${voiceChannel.name}` : 'Entrá a un canal de voz para iniciar una Jam'}</span>
+				{musicPlayback === 'loading' && <span className="music-session-state"><Loader2 size={15} className="music-spin" /> Cargando audio…</span>}
+				{musicPlayback === 'error' && <span className="music-session-state is-error">No se pudo cargar el audio <button type="button" className="button secondary" onClick={musicRetry}>Reintentar</button></span>}
+			</div>
 
 			<div className="music-body">
 				{/* Una playlist del buscador se abre para ver sus canciones, igual que en la pestaña de Spotify. */}
@@ -237,7 +242,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						<ul className="music-list">
 							{results.map((track) => (
 								<li key={track.id} className="music-row">
-									<img src={track.thumbnail} alt="" loading="lazy" />
+									{track.thumbnail ? <img src={track.thumbnail} alt="" loading="lazy" /> : <span className="music-artwork"><ListMusic size={17} /></span>}
 									<span className="music-row-info">
 										<span className="music-row-title" title={track.title}>
 											{track.title}
@@ -250,6 +255,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 										type="button"
 										className="music-row-action"
 										title="Reproducir para todos"
+										disabled={!inVoice}
 										onClick={() => void musicPlay(toMusicTrack(track, state.me.name))}>
 										<Play size={16} />
 									</button>
@@ -257,6 +263,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 										type="button"
 										className="music-row-action"
 										title="Agregar a la cola"
+										disabled={!inVoice}
 										onClick={() => void musicEnqueue(toMusicTrack(track, state.me.name))}>
 										<Plus size={16} />
 									</button>
@@ -358,9 +365,9 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 							))}
 						</ul>
 					</>
-				) : (
+				) : tab === 'spotify' ? (
 					<SpotifyView onShowQueue={() => setTab('queue')} />
-				)}
+				) : null}
 			</div>
 
 			{/* Barra de reproducción, como la de Spotify. */}
@@ -368,7 +375,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 				<div className="music-bar-track">
 					{current ? (
 						<>
-							<img src={current.thumbnail} alt="" />
+							{current.thumbnail ? <img src={current.thumbnail} alt="" /> : <span className="music-artwork"><ListMusic size={17} /></span>}
 							<span className="music-bar-info">
 								<span className="music-bar-title" title={current.title}>
 									{current.title}
@@ -393,7 +400,7 @@ export function MusicView({onClose}: {onClose: () => void}): JSX.Element {
 						type="button"
 						className="music-skip"
 						title={!inVoice ? 'Unite a un canal de voz para controlar la música' : 'Siguiente'}
-						disabled={!inVoice}
+						disabled={!inVoice || (!current && !musicState.queue.length)}
 						onClick={() => void musicSkip()}>
 						<SkipForward size={18} />
 					</button>

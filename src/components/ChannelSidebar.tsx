@@ -176,12 +176,14 @@ function UpdateBanner(): JSX.Element | null {
 }
 
 export function ChannelSidebar({
+	view,
 	onOpenSettings,
 	onOpenVoice,
 	onOpenMusic,
 	onOpenMovies,
 	onChannelClick,
 }: {
+	view: 'chat' | 'call' | 'music' | 'movies';
 	onOpenSettings: () => void;
 	onOpenVoice: () => void;
 	onOpenMusic: () => void;
@@ -259,15 +261,14 @@ export function ChannelSidebar({
 
 	return (
 		<div className="sidebar">
-			<button type="button" className="sidebar-header">
+			<div className="sidebar-header">
 				<span className="sidebar-header-title">Pelacord</span>
-			</button>
+			</div>
 			<UpdateBanner />
 			<div className="sidebar-scroll">
 				{categories.map((category, index) => (
 					<div className="channel-category" key={category} style={index === 0 ? {marginTop: 0} : undefined}>
 						<div className="channel-category-header">
-							<Icon name="chevronDown" size={12} />
 							<span>{category}</span>
 							<button
 								type="button"
@@ -286,13 +287,14 @@ export function ChannelSidebar({
 						{state.channels
 							.filter((c) => c.category === category)
 							.map((channel) => {
-								const isActive = channel.type === 'text' && state.activeChannelId === channel.id;
 								const isConnected = channel.type === 'voice' && state.voice.channelId === channel.id;
+								const isActive = (view === 'chat' && state.activeChannelId === channel.id) || (view === 'call' && isConnected);
 								return (
 									<div key={channel.id}>
 										<button
 											type="button"
-											className={`channel${isActive || isConnected ? ' is-active' : ''}${state.unread[channel.id] ? ' is-unread' : ''}${dropTarget === channel.id ? ' is-drop-target' : ''}`}
+											aria-current={isActive ? 'page' : undefined}
+											className={`channel${isActive ? ' is-active' : ''}${isConnected ? ' is-connected' : ''}${state.unread[channel.id] ? ' is-unread' : ''}${dropTarget === channel.id ? ' is-drop-target' : ''}`}
 											onClick={() => openChannel(channel)}
 											onDragOver={
 												channel.type === 'voice'
@@ -350,7 +352,7 @@ export function ChannelSidebar({
 				))}
 			</div>
 			{/* Música: la Jam del grupo. Las caritas de los que escuchan van DENTRO del botón. */}
-			<button type="button" className="music-button" onClick={onOpenMusic}>
+			<button type="button" className="music-button" aria-current={view === 'music' ? 'page' : undefined} onClick={onOpenMusic}>
 				<ListMusic size={18} />
 				<span>Música</span>
 				{musicActive && shownListeners.length > 0 ? (
@@ -376,7 +378,7 @@ export function ChannelSidebar({
 				) : null}
 			</button>
 			{/* Pelaflix: el catálogo del grupo, estilo Netflix. */}
-			<button type="button" className="movies-button" onClick={onOpenMovies}>
+			<button type="button" className="movies-button" aria-current={view === 'movies' ? 'page' : undefined} onClick={onOpenMovies}>
 				<Film size={18} />
 				<span>Pelaflix</span>
 			</button>

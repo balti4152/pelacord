@@ -89,8 +89,8 @@ async function correr(): Promise<void> {
 
 	// La VOZ tiene que llegar en las dos direcciones (el micrófono falso de la prueba).
 	await esperar(800);
-	const audioEnB = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.audios.length ?? 0;
-	const audioEnA = mallaA.getRemotes().find((remote) => remote.peerId === 'bbb')?.audios.length ?? 0;
+	const audioEnB = mallaB.getRemotes().find((remote) => remote.peerId === 'aaa')?.audio?.getAudioTracks().length ?? 0;
+	const audioEnA = mallaA.getRemotes().find((remote) => remote.peerId === 'bbb')?.audio?.getAudioTracks().length ?? 0;
 	anotar(`2) voz recibida: en b=${audioEnB} pista(s) · en a=${audioEnA} pista(s)`);
 
 	// LOS DOS comparten pantalla al mismo tiempo: es el caso que antes rompía los m-lines

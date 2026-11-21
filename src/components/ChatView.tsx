@@ -37,33 +37,18 @@ function authorFor(state: AppState, message: Message): {member: ReturnType<typeo
 }
 
 function VideoAttachment({attachment, url, onFailed}: {attachment: Attachment; url: string; onFailed: () => void}): JSX.Element {
-	const [src, setSrc] = useState<string | null>(null);
-	const [loading, setLoading] = useState(false);
-
-	async function play(): Promise<void> {
-		const transport = getDesktopTransport();
-		if (!transport) {
-			setSrc(url);
-			return;
-		}
-		setLoading(true);
-		const result = await transport.cacheMedia({url, name: attachment.name});
-		setLoading(false);
-		if (result.ok && result.name) setSrc(`pelacord-media://local/${encodeURIComponent(result.name)}`);
-		else onFailed();
-	}
-
-	if (src) {
-		return <video className="attachment-video" src={src} controls autoPlay onError={onFailed} />;
+	const [playing, setPlaying] = useState(false);
+	if (playing) {
+		return <video className="attachment-video" src={url} controls autoPlay onError={onFailed} />;
 	}
 	return (
-		<button type="button" className="attachment-video-poster" onClick={() => void play()} disabled={loading}>
+		<button type="button" className="attachment-video-poster" aria-label={`Reproducir ${attachment.name}`} onClick={() => setPlaying(true)}>
 			{attachment.thumbnail ? (
 				<img src={attachment.thumbnail} alt={attachment.name} />
 			) : (
 				<span className="attachment-video-blank" />
 			)}
-			<span className="attachment-video-play">{loading ? 'Cargando…' : <Icon name="video" size={28} />}</span>
+			<span className="attachment-video-play"><Icon name="video" size={24} /></span>
 			<span className="attachment-video-name">{attachment.name}</span>
 		</button>
 	);
@@ -317,102 +302,109 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	const [status, setStatus] = useState<'idle' | 'downloading' | 'done' | 'error'>('idle');
 	const [progress, setProgress] = useState({received: 0, total: attachment.size});
 	const [speed, setSpeed] = useState(0);
-	const [downloadId, setDownloadId] = useState<string | null>(null);
-	const [failed, setFailed] = useState(false);
+	const downloadId = useRef<string | null>(null);
+	const [downloadError, setDownloadError] = useState('');
+	const [savedPath, setSavedPath] = useState('');
+	const [previewFailure, setPreviewFailure] = useState<string | null>(null);
 	const [zoom, setZoom] = useState(false);
-	const [text, setText] = useState<string | null>(null);
-	const [textFailed, setTextFailed] = useState(false);
+	const [previewText, setPreviewText] = useState<{url: string; text: string} | null>(null);
 	const [copiado, setCopiado] = useState(false);
 	// El que comparte el archivo puede haber cambiado de puerto o de IP: se usa lo que informa
 	// AHORA (si está online) y, si no, lo que quedó guardado en el mensaje. El cuidado con el
 	// puerto 0 está en attachmentFileUrl (si no, la imagen se mostraba como "descargar").
 	const url = attachmentFileUrl(attachment, state.members);
+	const failed = previewFailure === url;
+	const text = previewText?.url === url ? previewText.text : null;
 
 	useEffect(() => {
 		if (attachment.kind !== 'text' || !url) return;
-		let active = true;
-		fetch(url, {headers: {Range: 'bytes=0-40000'}})
-			.then((response) => response.text())
+		const controller = new AbortController();
+		const timeout = window.setTimeout(() => controller.abort('timeout'), 12000);
+		fetch(url, {headers: attachment.size === 0 ? {} : {Range: 'bytes=0-39999'}, signal: controller.signal})
+			.then((response) => {
+				if (!response.ok) throw new Error(`HTTP ${response.status}`);
+				return response.text();
+			})
 			.then((value) => {
-				if (active) setText(value.slice(0, 40000));
+				setPreviewText({url, text: value.slice(0, 40000)});
 			})
 			.catch(() => {
-				if (active) setTextFailed(true);
-			});
+				if (!controller.signal.aborted || controller.signal.reason === 'timeout') setPreviewFailure(url);
+			})
+			.finally(() => clearTimeout(timeout));
 		return () => {
-			active = false;
+			clearTimeout(timeout);
+			controller.abort();
 		};
-	}, [attachment.kind, url]);
+	}, [attachment.kind, attachment.size, url]);
 
 	async function download(): Promise<void> {
+		if (downloadId.current || !url) return;
 		const transport = getDesktopTransport();
-		if (!transport) {
-			if (url) window.open(url, '_blank');
+		if (!transport || url.startsWith('blob:')) {
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = attachment.name;
+			link.click();
 			return;
 		}
+		const id = crypto.randomUUID();
+		downloadId.current = id;
 		setStatus('downloading');
+		setDownloadError('');
+		setProgress({received: 0, total: attachment.size});
 		setSpeed(0);
 		const off = transport.onDownloadProgress((message) => {
-			if (message.name !== attachment.name) return;
-			if (message.cancelled) {
-				setStatus('idle');
-				setSpeed(0);
-				off();
-				return;
-			}
-			if (message.error) {
-				setStatus('error');
-				off();
-				return;
-			}
-			setDownloadId(message.id);
+			if (message.id !== id || message.cancelled || message.error) return;
 			setProgress({received: message.received ?? 0, total: message.total || attachment.size});
 			if (typeof message.speed === 'number') setSpeed(message.speed);
-			if (message.done) {
-				setStatus('done');
-				setSpeed(0);
-				off();
-			}
 		});
-		const result = await transport.downloadFile({url, name: attachment.name, size: attachment.size});
-		off();
-		if (result.cancelled) setStatus('idle');
-		else setStatus(result.ok ? 'done' : 'error');
+		try {
+			const result = await transport.downloadFile({id, attachmentId: `${attachment.ownerId ?? ''}:${attachment.id}`, url, name: attachment.name, size: attachment.size});
+			if (result.cancelled) setStatus('idle');
+			else if (result.ok) {
+				setSavedPath(result.path ?? '');
+				setStatus('done');
+			} else {
+				setDownloadError(result.error ?? 'No se pudo descargar');
+				setStatus('error');
+			}
+		} catch {
+			setDownloadError('No se pudo descargar');
+			setStatus('error');
+		} finally {
+			off();
+			downloadId.current = null;
+		}
 	}
 
 	async function cancel(): Promise<void> {
-		if (downloadId) await getDesktopTransport()?.cancelDownload(downloadId);
+		if (downloadId.current) await getDesktopTransport()?.cancelDownload(downloadId.current);
 	}
 
-	// Vista previa en línea de imágenes (también pegadas): se transmiten desde el servidor del dueño.
+	let preview: ReactNode = null;
 	if (attachment.kind === 'image' && url && !failed) {
-		return (
+		preview = (
 			<>
-				<div className="attachment-image">
-					<img src={url} alt={attachment.name} onClick={() => setZoom(true)} onError={() => setFailed(true)} />
-				</div>
+				<button type="button" className="attachment-image" aria-label={`Ampliar ${attachment.name}`} onClick={() => setZoom(true)}>
+					<img src={url} alt={attachment.name} loading="lazy" onError={() => setPreviewFailure(url)} />
+				</button>
 				{zoom ? (
 					<div className="lightbox" onClick={() => setZoom(false)}>
-						<img src={url} alt="" />
+						<button type="button" autoFocus className="lightbox-close" aria-label="Cerrar imagen" onKeyDown={(event) => { if (event.key === 'Escape') setZoom(false); }}>
+							<Icon name="x" size={22} />
+						</button>
+						<img src={url} alt={attachment.name} />
 					</div>
 				) : null}
 			</>
 		);
-	}
-
-	// Video: se muestra solo la miniatura; al dar play se descarga temporalmente y se reproduce.
-	if (attachment.kind === 'video' && url && !failed) {
-		return <VideoAttachment attachment={attachment} url={url} onFailed={() => setFailed(true)} />;
-	}
-
-	// Audio: reproductor en línea, igual que Discord.
-	if (attachment.kind === 'audio' && url && !failed) {
-		return <AudioAttachment attachment={attachment} url={url} onFailed={() => setFailed(true)} />;
-	}
-
-	// Previsualización de texto plano: en una caja tipo código, con copiar y descargar.
-	if (attachment.kind === 'text' && url && !textFailed) {
-		return (
+	} else if (attachment.kind === 'video' && url && !failed) {
+		preview = <VideoAttachment key={url} attachment={attachment} url={url} onFailed={() => setPreviewFailure(url)} />;
+	} else if (attachment.kind === 'audio' && url && !failed) {
+		preview = <AudioAttachment key={url} attachment={attachment} url={url} onFailed={() => setPreviewFailure(url)} />;
+	} else if (attachment.kind === 'text' && url && !failed) {
+		preview = (
 			<div className="code-card">
 				<div className="code-card-head">
 					<span className="code-card-name" title={attachment.name}>
@@ -422,15 +414,13 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 						<button
 							type="button"
 							className="button secondary"
+							disabled={text === null}
 							onClick={() => {
 								void navigator.clipboard.writeText(text ?? '');
 								setCopiado(true);
 								window.setTimeout(() => setCopiado(false), 1500);
 							}}>
 							{copiado ? '¡Copiado!' : 'Copiar'}
-						</button>
-						<button type="button" className="button secondary" onClick={() => void download()}>
-							Descargar .txt
 						</button>
 					</div>
 				</div>
@@ -441,32 +431,28 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 
 	const percent = progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : 0;
 	return (
-		<div className="attachment-file">
-			<span className="attachment-file-icon">
-				<Icon name="file" size={20} />
-			</span>
-			<span className="attachment-file-info">
-				<span className="attachment-file-name">{attachment.name}</span>
-				<span className="attachment-file-size">
-					{formatBytes(attachment.size)}
-					{status === 'downloading'
-						? ` · ${percent}%${speed > 0 ? ` · ${formatSpeed(speed)}` : ''}`
-						: status === 'done'
-							? ' · descargado'
-							: status === 'error'
-								? ' · se cortó, podés reanudar'
-								: ''}
+		<div className={`attachment-card${preview ? ' has-preview' : ''}`}>
+			{preview}
+			<div className="attachment-file">
+				<span className="attachment-file-icon"><Icon name="file" size={18} /></span>
+				<span className="attachment-file-info">
+					<span className="attachment-file-name" title={attachment.name}>{attachment.name}</span>
+					<span className="attachment-file-size" role="status">
+						{!url ? 'Archivo no disponible' : status === 'done' ? 'Guardado en Descargas' : downloadError ||
+							`${formatBytes(attachment.size)}${status === 'downloading' && speed > 0 ? ` · ${formatSpeed(speed)}` : ''}`}
+					</span>
 				</span>
-			</span>
-			{status === 'downloading' ? (
-				<button type="button" className="button danger" onClick={() => void cancel()}>
-					Cancelar
-				</button>
-			) : (
-				<button type="button" className="button secondary" onClick={() => void download()}>
-					{status === 'done' ? 'Descargado' : status === 'error' ? 'Reanudar' : 'Descargar'}
-				</button>
-			)}
+				{status === 'downloading' ? (
+					<button type="button" className="button secondary" onClick={() => void cancel()}>Cancelar</button>
+				) : savedPath ? (
+					<button type="button" className="button secondary" onClick={() => void getDesktopTransport()?.openPath(savedPath)}>Abrir</button>
+				) : (
+					<button type="button" className="button secondary" disabled={!url} onClick={() => void download()}>
+						{status === 'error' ? 'Reintentar' : 'Descargar'}
+					</button>
+				)}
+			</div>
+			{status === 'downloading' && <progress className="attachment-progress" max={100} value={progress.total ? percent : undefined} aria-label="Progreso de descarga" />}
 		</div>
 	);
 }
@@ -582,26 +568,27 @@ export function ChatView(): JSX.Element {
 								onClick={() => updateSettings({showMembers: !state.settings.showMembers})}
 							/>
 							<IconButton icon="search" label="Buscar en el canal" onClick={() => setSearch('')} />
-							<IconButton icon="inbox" label="Bandeja de entrada" />
-							<IconButton icon="help" label="Ayuda" />
 						</>
 					)}
 				</div>
 			</header>
 
 			<div className="chat-body" ref={scrollRef}>
-				<div className="chat-intro">
-					<div className="chat-intro-icon">
-						<Icon name="hash" size={40} />
+				{visible.length ? (
+					<div className="chat-history">
+						<div className="divider">{formatDay(visible[0].createdAt)}</div>
+						<div className="messages">{rendered}</div>
 					</div>
-					<h2>¡Bienvenido a #{channel.name}!</h2>
-					<p>{channel.topic ?? `Este es el comienzo del canal #${channel.name}.`}</p>
-				</div>
-				<div className="divider">{formatDay(messages[0]?.createdAt ?? Date.now())}</div>
-				<div className="messages">{rendered}</div>
+				) : (
+					<div className="chat-intro">
+						<div className="chat-intro-icon"><Icon name={term ? 'search' : 'hash'} size={25} /></div>
+						<h2>{term ? 'Sin resultados' : 'Todavía no hay mensajes'}</h2>
+						<p>{term ? 'Probá con otra búsqueda.' : 'Escribí el primer mensaje del canal.'}</p>
+					</div>
+				)}
 			</div>
 
-			<Composer />
+			<Composer key={channel.id} />
 
 			{menu ? (
 				<MessageMenu

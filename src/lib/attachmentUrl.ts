@@ -15,9 +15,10 @@ import type {Attachment, Member} from '@/types';
  *    que lo subió). Así que si no hay host/puerto, no hay URL: hay que caer al respaldo.
  */
 export function attachmentFileUrl(attachment: Attachment, members: Member[]): string {
+	if (attachment.url?.startsWith('blob:')) return attachment.url;
 	const dueno = attachment.ownerId ? members.find((member) => member.id === attachment.ownerId) : undefined;
 	const host = dueno?.fileHost || attachment.ownerHost;
 	const port = dueno?.filePort && dueno.filePort > 0 ? dueno.filePort : attachment.ownerPort;
-	if (host && port && port > 0) return `http://${host}:${port}/file/${attachment.id}`;
-	return attachment.url;
+	if (host && port && port > 0) return `http://${host}:${port}/file/${encodeURIComponent(attachment.id)}`;
+	return attachment.url ?? '';
 }

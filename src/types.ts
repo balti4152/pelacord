@@ -195,6 +195,7 @@ export interface VoiceState {
 
 export interface VoiceParticipant {
 	id: string;
+	voiceSession?: string;
 	name: string;
 	color: string;
 	avatarUrl?: string;

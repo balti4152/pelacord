@@ -36,7 +36,7 @@ function stripAttachment(attachment: Attachment): Record<string, unknown> {
 		kind: attachment.kind,
 	};
 	// Solo se conservan las URLs públicas (GIFs de Giphy). Los blob locales no sirven afuera.
-	if (attachment.url && attachment.url.startsWith('http')) clean.url = attachment.url;
+	if (!attachment.ownerId && attachment.url?.startsWith('http')) clean.url = attachment.url;
 	if (attachment.ownerId) clean.ownerId = attachment.ownerId;
 	if (attachment.ownerHost) clean.ownerHost = attachment.ownerHost;
 	if (typeof attachment.ownerPort === 'number') clean.ownerPort = attachment.ownerPort;

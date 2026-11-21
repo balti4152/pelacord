@@ -15,6 +15,8 @@ const http = require('node:http');
 const https = require('node:https');
 const fs = require('node:fs');
 const crypto = require('node:crypto');
+const {isIPv4} = require('node:net');
+const {pipeline} = require('node:stream/promises');
 const {spawn} = require('node:child_process');
 const {pathToFileURL} = require('node:url');
 const {WebSocketServer, WebSocket} = require('ws');
@@ -52,16 +54,17 @@ let tray = null;
 let isQuitting = false;
 let myPeerId = null;
 let myName = '';
-let listenPort = PORT;
+let listenPort = 0;
 
 /** peerId -> socket */
 const peers = new Map();
 /** socket -> peerId */
 const socketIds = new Map();
-/** conexiones salientes (para presentarse cuando el nombre ya está listo) */
-const outgoingSockets = new Set();
-/** peerId -> {host, port} ya intentado */
-const knownPeers = new Map();
+const sockets = new Map();
+const outgoingByAddress = new Map();
+const peerPresences = new Map();
+let ownPresence = null;
+let manualPeers = [];
 
 function sendHello(socket) {
 	if (myPeerId && socket.readyState === WebSocket.OPEN) {
@@ -73,25 +76,51 @@ function sendToRenderer(channel, payload) {
 	if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
 }
 
-/** Quita una conexión y avisa a la interfaz si el peer ya no tiene ninguna otra. */
+function peerAddress(socket) {
+	return sockets.get(socket)?.address;
+}
+
+function presentPeer(id, payload) {
+	const address = peerAddress(peers.get(id));
+	sendToRenderer('pelacord:presence', {from: id, payload: address ? {...payload, fileHost: address} : payload});
+}
+
+function selectPeerSocket(id) {
+	const previous = peers.get(id);
+	const zeroTier = localInterfaces().filter((entry) => entry.isZeroTier);
+	const score = (socket) => {
+		const info = sockets.get(socket);
+		return (zeroTier.some((entry) => entry.address === info.localAddress) ? 2 : 0) +
+			(Number(info.outgoing === (myPeerId < id)));
+	};
+	let best = previous?.readyState === WebSocket.OPEN && socketIds.has(previous) ? previous : null;
+	for (const [socket, peerId] of socketIds) {
+		if (peerId === id && socket.readyState === WebSocket.OPEN && (!best || score(socket) > score(best))) best = socket;
+	}
+	if (!best) {
+		peers.delete(id);
+		return;
+	}
+	peers.set(id, best);
+	if (best !== previous && peerPresences.has(id)) presentPeer(id, peerPresences.get(id).payload);
+}
+
 function dropSocket(socket) {
 	const id = socketIds.get(socket);
 	socketIds.delete(socket);
+	sockets.delete(socket);
 	if (!id) return;
-	// Si queda otra conexión viva con el mismo peer, re-apuntar el envío a esa.
-	let replacement = null;
-	for (const [otherSocket, otherId] of socketIds) {
-		if (otherId === id && otherSocket.readyState === WebSocket.OPEN) {
-			replacement = otherSocket;
-			break;
-		}
-	}
-	if (replacement) {
-		peers.set(id, replacement);
-		return;
-	}
-	peers.delete(id);
-	sendToRenderer('pelacord:peer-left', {id});
+	selectPeerSocket(id);
+}
+
+function attachSocket(socket, connection, outgoing, expectedId) {
+	const address = connection?.remoteAddress?.replace(/^::ffff:/, '');
+	sockets.set(socket, {address: isIPv4(address) ? address : undefined, localAddress: connection?.localAddress, outgoing, expectedId, alive: true});
+	socket.on('pong', () => {
+		const info = sockets.get(socket);
+		if (info) info.alive = true;
+	});
+	sendHello(socket);
 }
 
 // ---------- Red de seguridad del proceso principal ----------
@@ -132,24 +161,13 @@ function broadcastAddress(ip, netmask) {
 	return ipParts.map((part, index) => (part & maskParts[index]) | (~maskParts[index] & 255)).join('.');
 }
 
-function broadcastTargets() {
-	const all = localInterfaces();
-	const zt = all.filter((entry) => entry.isZeroTier);
-	const chosen = zt.length > 0 ? zt : all;
-	const targets = new Set();
-	for (const entry of chosen) {
-		targets.add(broadcastAddress(entry.address, entry.netmask));
-	}
-	targets.add('255.255.255.255');
-	return [...targets];
-}
-
 // ---------- Descubrimiento automático (UDP broadcast) ----------
 
-let discoverySocket = null;
+const discoverySenders = new Map();
+let discoveryReady = false;
 
-function startDiscovery() {
-	discoverySocket = dgram.createSocket({type: 'udp4', reuseAddr: true});
+function listenForAnnouncements() {
+	const discoverySocket = dgram.createSocket({type: 'udp4', reuseAddr: true});
 	discoverySocket.on('error', (error) => console.error('[pelacord] discovery error', error.message));
 	discoverySocket.on('message', (buffer, rinfo) => {
 		let message;
@@ -158,29 +176,70 @@ function startDiscovery() {
 		} catch {
 			return;
 		}
-		if (!message || message.type !== 'announce' || !message.id) return;
-		if (message.id === myPeerId) return;
-		if (!knownPeers.has(message.id)) {
-			knownPeers.set(message.id, {host: rinfo.address, port: Number(message.port || PORT)});
-			console.log(`[pelacord] peer descubierto: ${message.name || message.id} @ ${rinfo.address}`);
-			connectPeer(message.id, rinfo.address, Number(message.port || PORT));
-		}
+		if (message?.type !== 'announce' || typeof message.id !== 'string' || !message.id || message.id === myPeerId) return;
+		connectPeer(rinfo.address, Number(message.port), message.id);
 	});
 	discoverySocket.bind(DISCOVERY_PORT, () => {
-		discoverySocket.setBroadcast(true);
+		discoveryReady = true;
 		console.log(`[pelacord] descubrimiento escuchando en udp/${DISCOVERY_PORT}`);
+		announce();
 	});
+}
+
+function startDiscovery() {
+	if (DISCOVERY_PORT > 0) listenForAnnouncements();
 	setInterval(announce, 3000);
+	setInterval(() => {
+		const now = Date.now();
+		for (const [id, presence] of peerPresences) {
+			if (now - presence.receivedAt > 30000) peerPresences.delete(id);
+		}
+		for (const [socket, info] of sockets) {
+			if (!info.alive || !socketIds.has(socket)) {
+				socket.terminate();
+				continue;
+			}
+			if (socket.readyState !== WebSocket.OPEN) continue;
+			info.alive = false;
+			socket.ping();
+		}
+	}, 8000);
 }
 
 function announce() {
-	if (!myPeerId || !discoverySocket) return;
+	if (!myPeerId || !listenPort) return;
+	for (const {host, port} of manualPeers) connectPeer(host, port);
+	if (!discoveryReady) return;
 	const payload = Buffer.from(JSON.stringify({type: 'announce', id: myPeerId, name: myName, port: listenPort}));
-	for (const target of broadcastTargets()) {
-		discoverySocket.send(payload, 0, payload.length, DISCOVERY_PORT, target, () => {});
+	const interfaces = localInterfaces();
+	const zeroTier = interfaces.filter((entry) => entry.isZeroTier);
+	const selected = zeroTier.length > 0 ? zeroTier : interfaces;
+	const active = new Set(selected.map((entry) => entry.address));
+	for (const [address, sender] of discoverySenders) {
+		if (active.has(address)) continue;
+		discoverySenders.delete(address);
+		sender.socket.close();
 	}
-	// Re-presentarse en las conexiones salientes (por si el saludo inicial se perdió).
-	for (const socket of outgoingSockets) sendHello(socket);
+	for (const {address, netmask} of selected) {
+		const target = broadcastAddress(address, netmask);
+		const existing = discoverySenders.get(address);
+		if (existing) {
+			if (existing.ready) existing.socket.send(payload, DISCOVERY_PORT, target, () => {});
+			continue;
+		}
+		const sender = {socket: dgram.createSocket('udp4'), ready: false};
+		discoverySenders.set(address, sender);
+		sender.socket.on('error', () => {
+			if (discoverySenders.get(address) !== sender) return;
+			discoverySenders.delete(address);
+			sender.socket.close();
+		});
+		sender.socket.bind(0, address, () => {
+			sender.socket.setBroadcast(true);
+			sender.ready = true;
+			sender.socket.send(payload, DISCOVERY_PORT, target, () => {});
+		});
+	}
 }
 
 // ---------- Señalización (WebSocket) ----------
@@ -198,25 +257,29 @@ function announce() {
 const seenMessages = new Map();
 
 function rememberMessage(msgId) {
-	if (!msgId) return true;
 	const now = Date.now();
 	if (seenMessages.has(msgId)) return false;
 	seenMessages.set(msgId, now);
-	if (seenMessages.size > 4000) {
-		for (const [key, when] of seenMessages) {
-			if (now - when > 120000) seenMessages.delete(key);
-		}
+	for (const [key, when] of seenMessages) {
+		if (seenMessages.size <= 10000 && now - when <= 120000) break;
+		seenMessages.delete(key);
 	}
 	return true;
 }
 
-function broadcast(message, exceptSocket) {
-	// Cada mensaje sale con su id. El que lo reenvía mantiene el MISMO id, así el destinatario
-	// puede descartar la copia que le llegó de más.
-	if (message && !message.msgId) message.msgId = crypto.randomUUID();
+function broadcast(message, exceptPeer) {
+	if (!message.msgId) {
+		message.msgId = crypto.randomUUID();
+		rememberMessage(message.msgId);
+	}
 	const data = JSON.stringify(message);
-	for (const socket of peers.values()) {
-		if (socket === exceptSocket) continue;
+	const target = peers.get(message.to);
+	if (target?.readyState === WebSocket.OPEN && socketIds.get(target) !== exceptPeer) {
+		target.send(data);
+		return;
+	}
+	for (const [id, socket] of peers) {
+		if (id === exceptPeer) continue;
 		if (socket.readyState === WebSocket.OPEN) socket.send(data);
 	}
 }
@@ -228,117 +291,48 @@ function handleMessage(socket, raw) {
 	} catch {
 		return;
 	}
-	if (!message || typeof message.type !== 'string') return;
-	// Mensaje repetido: se descarta ACÁ, antes de entregarlo o de aplicarlo.
-	if (message.msgId && !rememberMessage(message.msgId)) return;
-
-	// Registrar al remitente con cualquier mensaje entrante. Así el envío de vuelta queda habilitado
-	// aunque la presentación (hello) se haya perdido.
-	if (typeof message.from === 'string' && message.from !== myPeerId) {
-		if (!peers.has(message.from)) {
-			console.log(`[pelacord] registrado peer ${message.from} (${message.type})`);
+	const {from, to, type, payload, msgId} = message ?? {};
+	if (typeof from !== 'string' || !from || from === myPeerId) return;
+	const info = sockets.get(socket);
+	if (!info) return;
+	// Sólo la presentación vincula una conexión a su vecino. Un paquete reenviado conserva su autor.
+	if (type === 'hello' || (!socketIds.has(socket) && type === 'presence' && from === info.expectedId)) {
+		const current = socketIds.get(socket);
+		if ((current && current !== from) || (info.expectedId && info.expectedId !== from)) return;
+		if (!current) {
+			socketIds.set(socket, from);
+			selectPeerSocket(from);
+			if (ownPresence && myPeerId) socket.send(JSON.stringify(ownPresence));
 		}
-		peers.set(message.from, socket);
-		socketIds.set(socket, message.from);
+		if (type === 'hello') return;
 	}
-
-	if (message.type === 'hello') return;
-
-	if (message.type === 'presence') {
-		// Ignora el eco de la propia presencia: en una malla bidireccional vuelve por el otro lado.
-		if (message.from === myPeerId) return;
-		sendToRenderer('pelacord:presence', {from: message.from, payload: message.payload});
-		broadcast(message, socket);
-		return;
+	const neighbor = socketIds.get(socket);
+	if (!neighbor || !['presence', 'music', 'movie-room', 'signal', 'messages', 'command'].includes(type)) return;
+	if (typeof msgId !== 'string' || !rememberMessage(msgId)) return;
+	if (type === 'presence') {
+		if (payload?.id !== from) return;
+		const previous = peerPresences.get(from);
+		if (previous && ((previous.payload.session ?? 0) > (payload.session ?? 0) ||
+			(previous.payload.session === payload.session && (previous.payload.seq ?? -1) >= (payload.seq ?? 0)))) return;
+		peerPresences.set(from, {payload, receivedAt: Date.now()});
+		presentPeer(from, payload);
+	} else if (!to || to === myPeerId) {
+		sendToRenderer(`pelacord:${type}`, {from, payload});
 	}
-
-	// Música de la Jam: viaja por la MALLA (broadcast), igual que la presencia. Nada de Firestore:
-	// es tiempo real y no puede gastar cuota ni depender de que internet funcione.
-	if (message.type === 'music') {
-		if (message.from === myPeerId) return;
-		sendToRenderer('pelacord:music', {from: message.from, payload: message.payload});
-		broadcast(message, socket);
-		return;
-	}
-
-	// Salas de Pelaflix: viajan por la MALLA (broadcast), igual que la música y la presencia. Es
-	// tiempo real (quién está mirando qué y por dónde va), así que no puede gastar cuota ni depender
-	// de internet: nada de Firebase.
-	if (message.type === 'movie-room') {
-		if (message.from === myPeerId) return;
-		sendToRenderer('pelacord:movie-room', {from: message.from, payload: message.payload});
-		broadcast(message, socket);
-		return;
-	}
-
-	if (message.type === 'signal') {
-		if (message.to === myPeerId) {
-			sendToRenderer('pelacord:signal', {from: message.from, payload: message.payload});
-			return;
-		}
-		if (message.to && peers.has(message.to)) {
-			const target = peers.get(message.to);
-			if (target.readyState === WebSocket.OPEN) target.send(JSON.stringify(message));
-			return;
-		}
-		broadcast(message, socket);
-		return;
-	}
-
-	// El log de mensajes: la reconciliación del historial entre peers. Si viene dirigido, se
-	// entrega al destinatario (y si no lo tengo identificado, lo reenvía el que lo originó); si no,
-	// se difunde como la Jam.
-	if (message.type === 'messages') {
-		if (message.to) {
-			if (message.to === myPeerId) {
-				sendToRenderer('pelacord:messages', {from: message.from, payload: message.payload});
-				return;
-			}
-			if (peers.has(message.to)) {
-				const target = peers.get(message.to);
-				if (target.readyState === WebSocket.OPEN) {
-					target.send(JSON.stringify(message));
-					return;
-				}
-			}
-			// Sólo lo retransmite el que lo originó, para que no se arme un bucle.
-			if (message.from === myPeerId) broadcast(message, socket);
-			return;
-		}
-		if (message.from === myPeerId) return;
-		sendToRenderer('pelacord:messages', {from: message.from, payload: message.payload});
-		broadcast(message, socket);
-		return;
-	}
-
-	// Comandos para otro peer (mover de canal de voz, y lo que venga después).
-	if (message.type === 'command') {
-		if (message.to === myPeerId) {
-			sendToRenderer('pelacord:command', {from: message.from, payload: message.payload});
-			return;
-		}
-		if (message.to && peers.has(message.to)) {
-			const target = peers.get(message.to);
-			if (target.readyState === WebSocket.OPEN) {
-				target.send(JSON.stringify(message));
-				return;
-			}
-		}
-		// Si no lo tengo identificado (o el socket no está abierto), se manda a todos: el que
-		// sea el destinatario lo aplica y el resto lo ignora. Sólo lo reenvía el que lo originó,
-		// para que no se arme un bucle de retransmisiones.
-		if (message.from === myPeerId) broadcast(message, socket);
-	}
+	if (to !== myPeerId) broadcast(message, neighbor);
 }
 
 function createSignallingServer(port) {
-	const wss = new WebSocketServer({port, host: '0.0.0.0'});
-	wss.on('connection', (socket) => {
+	const server = http.createServer(handleFileRequest);
+	const wss = new WebSocketServer({server});
+	wss.on('error', () => {}); // The listener reports bind failures through the HTTP server.
+	wss.on('connection', (socket, request) => {
+		attachSocket(socket, request.socket, false);
 		socket.on('message', (raw) => handleMessage(socket, raw));
 		socket.on('close', () => dropSocket(socket));
 		socket.on('error', () => {});
 	});
-	return wss;
+	return server.listen(port, '0.0.0.0');
 }
 
 function onListening(wss) {
@@ -362,22 +356,19 @@ function startServer() {
 	});
 }
 
-function connectPeer(peerId, host, port) {
-	if (peers.has(peerId)) return;
-	const socket = new WebSocket(`ws://${host}:${port}`);
+function connectPeer(host, port, peerId) {
+	if (!isIPv4(host) || !Number.isInteger(port) || port < 1 || port > 65535) return;
+	const endpoint = `${host}:${port}`;
+	if (outgoingByAddress.has(endpoint)) return;
+	const socket = new WebSocket(`ws://${endpoint}`, {handshakeTimeout: 5000});
+	outgoingByAddress.set(endpoint, socket);
 	socket.on('open', () => {
-		outgoingSockets.add(socket);
-		sendHello(socket);
-		console.log(`[pelacord] conectado a ${host}:${port}`);
+		attachSocket(socket, socket._socket, true, peerId);
 	});
 	socket.on('message', (raw) => handleMessage(socket, raw));
 	socket.on('close', () => {
-		outgoingSockets.delete(socket);
+		outgoingByAddress.delete(endpoint);
 		dropSocket(socket);
-		knownPeers.delete(peerId);
-		setTimeout(() => {
-			if (!peers.has(peerId)) connectPeer(peerId, host, port);
-		}, 3000);
 	});
 	socket.on('error', () => {});
 }
@@ -533,16 +524,15 @@ ipcMain.on('pelacord:hello', (_event, identity) => {
 	if (identity && typeof identity.id === 'string') {
 		myPeerId = identity.id;
 		myName = identity.name || '';
-		// Presentarse en todas las conexiones ya abiertas (pudieron abrirse antes de tener nombre).
-		for (const socket of outgoingSockets) sendHello(socket);
-		broadcast({type: 'hello', from: myPeerId, name: myName});
+		for (const socket of sockets.keys()) sendHello(socket);
 		announce();
 	}
 });
 
 ipcMain.on('pelacord:presence', (_event, payload) => {
 	if (!myPeerId || !payload) return;
-	broadcast({type: 'presence', from: myPeerId, payload});
+	ownPresence = {type: 'presence', from: myPeerId, payload: {...payload, fileHost: localAddress(), filePort: listenPort}};
+	broadcast(ownPresence);
 });
 
 ipcMain.on('pelacord:signal', (_event, message) => {	if (!myPeerId || !message) return;
@@ -573,6 +563,39 @@ ipcMain.on('pelacord:movie-room', (_event, payload) => {
 });
 
 ipcMain.handle('pelacord:peers', () => [...peers.keys()]);
+
+function parsePeerAddresses(input) {
+	return [...new Set(String(input || '').split(/[\s,]+/).filter(Boolean))].map((value) => {
+		const [host, rawPort, extra] = value.split(':');
+		const port = rawPort === undefined ? PORT : Number(rawPort);
+		if (extra !== undefined || !isIPv4(host) || !Number.isInteger(port) || port < 1 || port > 65535) {
+			throw new Error(`Dirección inválida: ${value}`);
+		}
+		return {host, port};
+	});
+}
+
+function peerSettingsPath() {
+	return path.join(app.getPath('userData'), 'network-peers.txt');
+}
+
+ipcMain.handle('pelacord:network-info', () => ({
+	addresses: localInterfaces().filter((entry) => entry.isZeroTier).map((entry) => `${entry.address}:${listenPort}`),
+	manual: manualPeers.map(({host, port}) => `${host}:${port}`).join('\n'),
+	connected: peers.size,
+}));
+
+ipcMain.handle('pelacord:set-network-peers', (_event, value) => {
+	try {
+		const next = parsePeerAddresses(value);
+		fs.writeFileSync(peerSettingsPath(), next.map(({host, port}) => `${host}:${port}`).join('\n'));
+		manualPeers = next;
+		announce();
+		return {ok: true};
+	} catch (error) {
+		return {ok: false, error: error.message};
+	}
+});
 
 // ---------- yt-dlp (bajar el audio de un link, para el reproductor de música) ----------
 
@@ -621,7 +644,12 @@ function runYtDlp(args, timeoutMs = 60000, onSpawn) {
 			resolve({ok: false, error: 'yt-dlp no está disponible'});
 			return;
 		}
-		const child = spawn(bin, args, {windowsHide: true});
+		// yt-dlp uses Electron's bundled Node for YouTube's JavaScript player.
+		const runtime = `node:${process.execPath}`;
+		const child = spawn(bin, ['--js-runtimes', runtime, ...args], {
+			windowsHide: true,
+			env: {...process.env, ELECTRON_RUN_AS_NODE: '1'},
+		});
 		ytDlpChildren.add(child);
 		if (onSpawn) onSpawn(child);
 		let out = '';
@@ -746,18 +774,18 @@ ipcMain.handle('pelacord:yt-search-batch', async (_event, queries) => {
  * Se pide en el momento de reproducir: esas URLs vencen, así que no se cachean.
  */
 ipcMain.handle('pelacord:yt-audio-url', async (_event, target) => {
-	const url = await resolveAudioUrl(target);
-	if (!url) return null;
+	const source = await resolveAudioUrl(target);
+	if (!source) return null;
 	// Se sirve desde la app (ver serveAudio): así no depende de IPv6 ni de las cabeceras de CORS
 	// de googlevideo, y si la URL vence se vuelve a resolver sola.
 	const token = crypto.randomUUID();
-	audioStreams.set(token, {target: String(target || ''), url});
+	audioStreams.set(token, {target: String(target || ''), source});
 	// Se guardan las últimas 20 para no crecer sin control (una por tema que suena).
 	if (audioStreams.size > 20) {
 		const [oldest] = audioStreams.keys();
 		audioStreams.delete(oldest);
 	}
-	return fileServerPort ? `http://127.0.0.1:${fileServerPort}/audio/${token}` : url;
+	return listenPort ? `http://127.0.0.1:${listenPort}/audio/${token}` : null;
 });
 
 /**
@@ -1481,7 +1509,6 @@ ipcMain.handle('pelacord:link-preview', async (_event, target) => {
 
 /** id -> {path, name, size, mime} */
 const sharedFiles = new Map();
-let fileServerPort = 0;
 
 /**
  * Registro en disco de los adjuntos compartidos.
@@ -1526,15 +1553,9 @@ function restoreSharedFiles() {
 function localAddress() {
 	const all = localInterfaces();
 	const zt = all.filter((entry) => entry.isZeroTier);
-	// OJO: se puede estar en MÁS DE UNA red ZeroTier (pasa cuando probás con otra red, o con un
-	// amigo en otra red). Si se elige la que tus amigos NO tienen, ellos no pueden bajar NADA tuyo
-	// (fotos, archivos, avatar): el navegador intenta esa IP, no responde, y la foto se ve como
-	// "archivo que no anda". Los peers que ya descubrimos nos dicen cuál es la red compartida.
-	if (zt.length > 1) {
-		const amigos = [...knownPeers.values()].map((peer) => String(peer?.host ?? '')).filter(Boolean);
-		const compartida = zt.find((entry) => amigos.some((ip) => mismaRed(entry, ip)));
-		if (compartida) return compartida.address;
-	}
+	const connectedAddresses = new Set([...peers.values()].map((socket) => sockets.get(socket)?.localAddress));
+	const shared = zt.find((entry) => connectedAddresses.has(entry.address));
+	if (shared) return shared.address;
 	if (zt.length > 0) return zt[0].address;
 	// Si no se detecta ZeroTier, se EVITAN los adaptadores virtuales (WSL, Hyper-V, VirtualBox,
 	// VMware, etc.): si se elige uno de esos, los demás no pueden bajar la foto ni los archivos de
@@ -1542,15 +1563,6 @@ function localAddress() {
 	const virtuales = /wsl|hyper-v|vethernet|virtualbox|vmware|loopback|docker|tailscale|radmin|hamachi|tap|tun/i;
 	const candidatas = all.filter((entry) => !virtuales.test(entry.name) && !entry.address.startsWith('169.254.'));
 	return (candidatas[0] ?? all[0])?.address ?? '127.0.0.1';
-}
-
-/** ¿`ip` está en la misma red que esta interfaz? (se compara con la máscara). */
-function mismaRed(entry, ip) {
-	const objetivo = String(ip).split('.').map(Number);
-	if (objetivo.length !== 4 || objetivo.some((parte) => !Number.isFinite(parte))) return false;
-	const propias = entry.address.split('.').map(Number);
-	const mascara = entry.netmask.split('.').map(Number);
-	return propias.every((parte, i) => (parte & mascara[i]) === (objetivo[i] & mascara[i]));
 }
 
 // ---------- Proxy de audio (música de la Jam) ----------
@@ -1566,14 +1578,15 @@ function mismaRed(entry, ip) {
 //
 // Además, si la URL venció, acá se vuelve a resolver sola y se reintenta (antes se cortaba la música).
 
-/** token -> {target: link de YouTube del tema, url: URL directa de audio} */
+/** token -> {target: link de YouTube, source: URL directa y cabeceras de audio} */
 const audioStreams = new Map();
 
 async function resolveAudioUrl(target) {
 	const value = String(target || '').trim();
 	if (!value) return null;
 	const url = /^https?:/i.test(value) ? value : `https://www.youtube.com/watch?v=${value}`;
-	const base = ['-f', 'bestaudio[ext=m4a]/bestaudio/best', '--get-url', '--no-playlist', '--no-warnings', url];
+	const format = 'bestaudio[ext=m4a][protocol=https]/bestaudio[protocol=https]/best[protocol=https]';
+	const base = ['-4', '-f', format, '--dump-single-json', '--no-playlist', '--no-warnings', url];
 	// Primero con el cliente por defecto. Si YouTube lo rechaza (pasa cuando cambian las reglas y
 	// sale 403), se prueba con el cliente "android_vr", que es el que quedó funcionando cuando el
 	// otro falla (verificado a mano: web_safari, tv y web_embedded NO sirven, piden tokens extra).
@@ -1583,8 +1596,12 @@ async function resolveAudioUrl(target) {
 	for (const args of intentos) {
 		const result = await runYtDlp(args, 30000);
 		if (result.ok) {
-			const encontrado = result.output.split('\n')[0].trim();
-			if (encontrado) return encontrado;
+			try {
+				const info = JSON.parse(result.output);
+				if (typeof info.url === 'string' && info.url.startsWith('https://')) return {url: info.url, headers: info.http_headers};
+			} catch {
+				ultimoError = 'yt-dlp devolvió una respuesta inválida';
+			}
 			continue;
 		}
 		ultimoError = result.error || '';
@@ -1597,9 +1614,12 @@ const AUDIO_USER_AGENT =
 	'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 /** Baja una URL de audio y la escribe en la respuesta. Devuelve true si salió bien. */
-function pipeAudio(url, req, res, onStatus) {
+function pipeAudio({url, headers: sourceHeaders}, req, res, onStatus) {
 	return new Promise((resolve) => {
 		const headers = {'User-Agent': AUDIO_USER_AGENT};
+		for (const name of ['User-Agent', 'Accept', 'Accept-Language', 'Referer', 'Origin']) {
+			if (typeof sourceHeaders?.[name] === 'string') headers[name] = sourceHeaders[name];
+		}
 		if (req.headers.range) headers.Range = req.headers.range;
 		let terminado = false;
 		const terminar = (valor) => {
@@ -1614,18 +1634,17 @@ function pipeAudio(url, req, res, onStatus) {
 				terminar(false);
 				return;
 			}
-			res.writeHead(remote.statusCode, {
+			const responseHeaders = {
 				'Content-Type': remote.headers['content-type'] || 'audio/mp4',
-				'Content-Length': remote.headers['content-length'],
-				'Content-Range': remote.headers['content-range'],
 				'Accept-Ranges': 'bytes',
-				'Access-Control-Allow-Origin': '*',
-				'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
-			});
-			remote.pipe(res);
-			remote.on('end', () => terminar(true));
-			remote.on('error', () => terminar(false));
+			};
+			for (const name of ['content-length', 'content-range']) {
+				if (remote.headers[name] !== undefined) responseHeaders[name] = remote.headers[name];
+			}
+			res.writeHead(remote.statusCode, responseHeaders);
+			void pipeline(remote, res).then(() => terminar(true), () => terminar(false));
 		});
+		res.once('close', () => upstream.destroy());
 		upstream.on('error', () => terminar(false));
 		upstream.setTimeout(30000, () => upstream.destroy());
 	});
@@ -1641,10 +1660,11 @@ async function serveAudio(token, req, res) {
 			return;
 		}
 		let status = 0;
-		const ok = await pipeAudio(entry.url, req, res, (code) => {
+		const previous = entry.source;
+		const ok = await pipeAudio(previous, req, res, (code) => {
 			status = code;
 		});
-		if (ok) return;
+		if (ok || res.destroyed) return;
 		console.warn(`[pelacord] el audio respondió ${status}: se resuelve de nuevo`);
 		// OJO: si ya se mandaron las cabeceras NO se puede reintentar (tiraría
 		// "Cannot write headers after they are sent" y eso ROMPE EL PROCESO PRINCIPAL: salía la
@@ -1654,7 +1674,12 @@ async function serveAudio(token, req, res) {
 			res.end();
 			return;
 		}
-		const fresh = await resolveAudioUrl(entry.target);
+		entry.refresh ??= (entry.source !== previous ? Promise.resolve(entry.source) : resolveAudioUrl(entry.target)).then((source) => {
+			if (source) entry.source = source;
+			return source;
+		}).finally(() => { entry.refresh = null; });
+		const fresh = await entry.refresh;
+		if (res.destroyed) return;
 		if (!fresh) {
 			if (!res.headersSent) {
 				res.writeHead(502);
@@ -1662,7 +1687,6 @@ async function serveAudio(token, req, res) {
 			}
 			return;
 		}
-		entry.url = fresh;
 		const retry = await pipeAudio(fresh, req, res, () => {});
 		if (!retry && !res.headersSent) {
 			res.writeHead(502);
@@ -1680,8 +1704,8 @@ async function serveAudio(token, req, res) {
 	}
 }
 
-function startFileServer() {
-	const server = http.createServer((req, res) => {
+async function handleFileRequest(req, res) {
+	try {
 		res.setHeader('Access-Control-Allow-Origin', '*');
 		res.setHeader('Access-Control-Allow-Headers', 'Range');
 		res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges');
@@ -1690,61 +1714,64 @@ function startFileServer() {
 			res.end();
 			return;
 		}
+		if (req.method !== 'GET' && req.method !== 'HEAD') {
+			res.writeHead(405, {Allow: 'GET, HEAD, OPTIONS'}).end();
+			return;
+		}
 		const pathname = new URL(req.url, 'http://localhost').pathname;
-		// Audio de la música: se baja desde acá (ver serveAudio) y se entrega como propio.
 		const audio = /^\/audio\/(.+)$/.exec(pathname);
-		if (audio) {
-			void serveAudio(audio[1], req, res);
+		if (audio && req.socket.remoteAddress === '127.0.0.1' && req.method === 'GET') {
+			await serveAudio(audio[1], req, res);
 			return;
 		}
 		const match = /^\/file\/(.+)$/.exec(pathname);
 		const file = match ? sharedFiles.get(match[1]) : null;
-		if (!file || !fs.existsSync(file.path)) {
+		const stat = file ? await fs.promises.stat(file.path).catch(() => null) : null;
+		if (!stat?.isFile()) {
 			res.writeHead(404);
 			res.end();
 			return;
 		}
-		const stat = fs.statSync(file.path);
 		res.setHeader('Accept-Ranges', 'bytes');
 		res.setHeader('Content-Type', file.mime || 'application/octet-stream');
 		res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.name)}"`);
-		const range = req.headers.range && /bytes=(\d*)-(\d*)/.exec(req.headers.range);
-		if (range) {
-			const start = range[1] ? Number(range[1]) : 0;
-			const end = range[2] ? Number(range[2]) : stat.size - 1;
-			res.writeHead(206, {'Content-Range': `bytes ${start}-${end}/${stat.size}`, 'Content-Length': end - start + 1});
-			fs.createReadStream(file.path, {start, end}).pipe(res);
-			return;
+		let start = 0;
+		let end = stat.size - 1;
+		if (req.headers.range) {
+			const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+			if (range?.[1]) {
+				start = Number(range[1]);
+				if (range[2]) end = Math.min(Number(range[2]), end);
+			} else if (range?.[2]) {
+				start = Math.max(0, stat.size - Number(range[2]));
+			} else {
+				start = stat.size;
+			}
+			if (start > end) {
+				res.writeHead(416, {'Content-Range': `bytes */${stat.size}`}).end();
+				return;
+			}
+			res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
 		}
-		res.writeHead(200, {'Content-Length': stat.size});
-		fs.createReadStream(file.path).pipe(res);
-	});
-	// Puerto FIJO para el servidor de archivos: si fuera efímero (listen(0)), cambiaría en cada
-	// arranque y TODAS las URLs ya compartidas (avatares, banners, adjuntos) quedarían muertas con
-	// "ERR_CONNECTION_REFUSED". Si el puerto está ocupado, se cae a uno libre.
-	const onListening = () => {
-		fileServerPort = server.address().port;
-		console.log(`[pelacord] servidor de archivos en tcp/${fileServerPort}`);
-	};
-	server.once('error', (error) => {
-		if (error.code === 'EADDRINUSE') {
-			console.warn('[pelacord] el puerto de archivos estaba ocupado: se usa uno libre');
-			server.listen(0, '0.0.0.0', onListening);
-			return;
-		}
-		console.error('[pelacord] file server error', error.message);
-	});
-	server.listen(7789, '0.0.0.0', onListening);
+		res.writeHead(req.headers.range ? 206 : 200, {'Content-Length': end - start + 1});
+		if (req.method === 'HEAD' || stat.size === 0) res.end();
+		else await pipeline(fs.createReadStream(file.path, {start, end}), res);
+	} catch (error) {
+		if (res.destroyed) return;
+		console.warn('[pelacord] error sirviendo archivo:', error.message);
+		if (res.headersSent) res.destroy();
+		else res.writeHead(500).end();
+	}
 }
 
 ipcMain.handle('pelacord:file-endpoint', async () => {
 	// OJO: si el servidor de archivos todavía no terminó de escuchar, el puerto es 0. Devolver 0
 	// hacía que las fotos y los adjuntos de este equipo NO cargaran para los demás (la URL quedaba
 	// sin puerto y el navegador caía en "descargar" en vez de mostrar la imagen). Se espera un toque.
-	for (let intento = 0; intento < 60 && !fileServerPort; intento++) {
+	for (let intento = 0; intento < 60 && !listenPort; intento++) {
 		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
-	return {host: localAddress(), port: fileServerPort};
+	return {host: localAddress(), port: listenPort};
 });
 
 ipcMain.handle('pelacord:share-file', (_event, payload) => {
@@ -1760,7 +1787,7 @@ ipcMain.handle('pelacord:share-buffer', (_event, payload) => {
 	const {name, mime, data} = payload ?? {};
 	if (!name || !data) return null;
 	try {
-		const dir = path.join(app.getPath('temp'), 'pelacord-shares');
+		const dir = path.join(app.getPath('userData'), 'shared-files');
 		fs.mkdirSync(dir, {recursive: true});
 		const safe = String(name).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
 		const filePath = path.join(dir, `${crypto.randomUUID()}-${safe}`);
@@ -2262,34 +2289,47 @@ ipcMain.handle('pelacord:cancel-download', (_event, id) => {
 });
 
 ipcMain.handle('pelacord:download-file', async (_event, payload) => {
-	const {url, name, size} = payload ?? {};
-	if (!url || !name) return {ok: false, error: 'datos inválidos'};
+	const {url, name, size, id, attachmentId} = payload ?? {};
+	if (!/^https?:\/\//i.test(url || '') || !name || typeof id !== 'string') return {ok: false, error: 'Datos de descarga inválidos'};
 	const dir = app.getPath('downloads');
-	const safe = String(name).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
-	let target = path.join(dir, safe);
-	let counter = 1;
-	while (fs.existsSync(target)) {
-		const ext = path.extname(safe);
-		target = path.join(dir, `${path.basename(safe, ext)} (${counter++})${ext}`);
+	const cleanName = String(name).replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '').slice(0, 180) || 'archivo';
+	const safe = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(cleanName) ? `_${cleanName}` : cleanName;
+	const key = crypto.createHash('sha256').update(String(attachmentId || url)).digest('hex').slice(0, 24);
+	const part = path.join(dir, `.pelacord-${key}.part`);
+	if (activeDownloads.has(id) || [...activeDownloads.values()].some((entry) => entry.part === part)) {
+		return {ok: false, error: 'El archivo ya se está descargando'};
 	}
-	const part = `${target}.part`;
-	const startSize = fs.existsSync(part) ? fs.statSync(part).size : 0;
-	const downloadId = crypto.randomUUID();
-	activeDownloads.set(downloadId, {request: null, part, cancelled: false});
-	const progress = (extra) => sendToRenderer('pelacord:download-progress', {id: downloadId, name: safe, ...extra});
-	// Informa de una el punto de reanudación (si hay un .part previo).
-	if (startSize > 0) progress({received: startSize, total: size || 0, speed: 0});
+	const entry = {request: null, part, cancelled: false};
+	activeDownloads.set(id, entry);
+	const progress = (extra) => sendToRenderer('pelacord:download-progress', {id, name: safe, ...extra});
 	try {
+		fs.mkdirSync(dir, {recursive: true});
+		const startSize = fs.existsSync(part) ? fs.statSync(part).size : 0;
+		progress({received: startSize, total: size || 0, speed: 0});
 		await new Promise((resolve, reject) => {
 			const client = url.startsWith('https') ? https : http;
 			const request = client.get(url, {headers: startSize > 0 ? {Range: `bytes=${startSize}-`} : {}}, (response) => {
+				const rangeHeader = response.headers['content-range'] || '';
+				if (response.statusCode === 416 && startSize > 0 && rangeHeader === `bytes */${startSize}` && size === startSize) {
+					response.resume();
+					resolve();
+					return;
+				}
 				if (response.statusCode !== 200 && response.statusCode !== 206) {
+					response.resume();
 					reject(new Error(`HTTP ${response.statusCode}`));
 					return;
 				}
-				const total = startSize + (Number(response.headers['content-length']) || 0);
-				const out = fs.createWriteStream(part, {flags: startSize > 0 ? 'a' : 'w'});
-				let received = startSize;
+				const range = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(rangeHeader);
+				const partial = response.statusCode === 206;
+				if (partial && (!range || Number(range[1]) !== startSize || Number(range[2]) + 1 !== Number(range[3]))) {
+					response.resume();
+					reject(new Error('El servidor devolvió un rango incompleto'));
+					return;
+				}
+				const total = partial ? Number(range[3]) : Number(response.headers['content-length'] ?? size ?? 0);
+				const out = fs.createWriteStream(part, {flags: partial && startSize > 0 ? 'a' : 'w'});
+				let received = partial ? startSize : 0;
 				let lastEmit = Date.now();
 				let lastBytes = received;
 				response.on('data', (chunk) => {
@@ -2302,23 +2342,26 @@ ipcMain.handle('pelacord:download-file', async (_event, payload) => {
 						lastBytes = received;
 					}
 				});
-				response.on('error', reject);
-				out.on('error', reject);
-				out.on('finish', () => out.close(() => resolve()));
-				response.pipe(out);
+				void pipeline(response, out).then(() => {
+					if (total && received !== total) reject(new Error('La descarga quedó incompleta'));
+					else resolve();
+				}, reject);
 			});
-			const entry = activeDownloads.get(downloadId);
-			if (entry) entry.request = request;
+			entry.request = request;
+			request.setTimeout(12000, () => request.destroy(new Error('El equipo remoto no respondió')));
 			request.on('error', reject);
 		});
-		activeDownloads.delete(downloadId);
+		if (entry.cancelled) throw new Error('Descarga cancelada');
+		let target = path.join(dir, safe);
+		const ext = path.extname(safe);
+		let counter = 1;
+		while (fs.existsSync(target)) target = path.join(dir, `${path.basename(safe, ext)} (${counter++})${ext}`);
 		fs.renameSync(part, target);
-		progress({received: fs.statSync(target).size, total: fs.statSync(target).size, done: true, path: target});
+		const bytes = fs.statSync(target).size;
+		progress({received: bytes, total: bytes, done: true, path: target});
 		return {ok: true, path: target};
 	} catch (error) {
-		const entry = activeDownloads.get(downloadId);
-		activeDownloads.delete(downloadId);
-		if (entry?.cancelled) {
+		if (entry.cancelled) {
 			// Cancelar a propósito: se borra el temporal.
 			try {
 				fs.rmSync(part, {force: true});
@@ -2329,8 +2372,11 @@ ipcMain.handle('pelacord:download-file', async (_event, payload) => {
 			return {ok: false, cancelled: true};
 		}
 		// Se cortó (red, etc.): se CONSERVA el .part para poder reanudar.
-		progress({error: String(error), resumable: true});
-		return {ok: false, error: String(error), resumable: true};
+		const resumable = fs.existsSync(part);
+		progress({error: error.message, resumable});
+		return {ok: false, error: error.message, resumable};
+	} finally {
+		activeDownloads.delete(id);
 	}
 });
 
@@ -2372,8 +2418,10 @@ if (!gotLock) {
 	app.whenReady().then(() => {
 		// yt-dlp se actualiza solo (canal nightly) al arrancar y cada 6 h: YouTube cambia seguido
 		// y un binario viejo deja de funcionar. Es best-effort: nunca bloquea ni molesta.
-		void updateYtDlp();
-		setInterval(() => void updateYtDlp(), 6 * 60 * 60 * 1000);
+		if (app.isPackaged) {
+			void updateYtDlp();
+			setInterval(() => void updateYtDlp(), 6 * 60 * 60 * 1000);
+		}
 		session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {			try {
 				const sources = await desktopCapturer.getSources({types: ['screen', 'window']});
 				const chosen = (selectedSourceId && sources.find((source) => source.id === selectedSourceId)) || sources[0];
@@ -2386,12 +2434,18 @@ if (!gotLock) {
 				callback({});
 			}
 		});
-		startServer();
-		startDiscovery();
-		startFileServer();
+		try {
+			manualPeers = parsePeerAddresses(fs.readFileSync(peerSettingsPath(), 'utf8'));
+		} catch (error) {
+			if (error.code !== 'ENOENT') console.warn('[pelacord] direcciones guardadas:', error.message);
+		}
 		migrateLegacyAvatar();
 		registerSavedProfileAssets();
 		restoreSharedFiles();
+		startServer();
+		startDiscovery();
+		// Los adjuntos publicados antes de compartir el puerto de señalización usaban 7789.
+		if (PORT !== 7789) http.createServer(handleFileRequest).on('error', () => {}).listen(7789, '0.0.0.0');
 		registerMediaProtocol();
 		setupUpdater();
 		createWindow();

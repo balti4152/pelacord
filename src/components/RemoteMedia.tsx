@@ -1,6 +1,6 @@
-import {useEffect, useRef, useState} from 'react';
+import {useEffect, useLayoutEffect, useRef, useState} from 'react';
 import {type MeshRemote, voiceMesh} from '@/lib/media';
-import {getOutputVolume, subscribeOutputVolume} from '@/lib/sounds';
+import {getOutputVolume, routeMediaOutput, subscribeOutputVolume} from '@/lib/sounds';
 import {useStore} from '@/state/store';
 
 export interface MediaDevices {
@@ -83,19 +83,28 @@ function AudioPlayer({
 	sinkId: string;
 }): JSX.Element {
 	const ref = useRef<HTMLAudioElement>(null);
+	useLayoutEffect(() => {
+		const element = ref.current;
+		if (!element) return;
+		element.srcObject = stream;
+		return () => {
+			element.pause();
+			element.srcObject = null;
+		};
+	}, [stream]);
+	useLayoutEffect(() => {
+		if (ref.current) ref.current.volume = volume;
+	}, [volume]);
 	useEffect(() => {
-		if (!ref.current) return;
-		ref.current.srcObject = stream;
-		ref.current.muted = muted;
-		ref.current.volume = volume;
-		void ref.current.play().catch(() => {});
-	}, [stream, muted, volume]);
-	useEffect(() => {
-		const element = ref.current as (HTMLAudioElement & {setSinkId?: (id: string) => Promise<void>}) | null;
-		if (!element || !sinkId || sinkId === 'default' || typeof element.setSinkId !== 'function') return;
-		void element.setSinkId(sinkId).catch(() => {});
-	}, [sinkId]);
-	return <audio ref={ref} autoPlay />;
+		const element = ref.current;
+		if (!element) return;
+		let active = true;
+		void routeMediaOutput(element, sinkId).then(() => {
+			if (active && element.srcObject === stream && element.paused) void element.play().catch(() => {});
+		});
+		return () => { active = false; };
+	}, [sinkId, stream]);
+	return <audio ref={ref} muted={muted} />;
 }
 
 /** Reproduce el audio de todos los peers conectados (la música ya no viene por acá: cada uno la
@@ -108,18 +117,9 @@ export function RemoteAudio(): JSX.Element {
 	const sinkId = state.settings.outputDeviceId;
 	return (
 		<>
-			{remotes.flatMap((remote) => {
-				const peerVolume = voiceMesh.getPeerVolume(remote.peerId);
-				return remote.audios.map((stream, index) => (
-					<AudioPlayer
-						key={`${remote.peerId}-${index}`}
-						stream={stream}
-						muted={deafened}
-						volume={volume * peerVolume}
-						sinkId={sinkId}
-					/>
-				));
-			})}
+			{remotes.map(({peerId, audio}) => audio && (
+				<AudioPlayer key={peerId} stream={audio} muted={deafened} volume={volume * voiceMesh.getPeerVolume(peerId)} sinkId={sinkId} />
+			))}
 		</>
 	);
 }

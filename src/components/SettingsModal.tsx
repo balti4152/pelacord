@@ -2,7 +2,7 @@ import {type ChangeEvent, type CSSProperties, useEffect, useState} from 'react';
 import {AvatarEditor} from '@/components/AvatarEditor';
 import {CosmeticsTab} from '@/components/CosmeticsTab';
 import {Avatar, ColorAvatar, Icon} from '@/components/primitives';
-import {useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
+import {useLocalStream, useMediaDevices, useOutputVolume} from '@/components/RemoteMedia';
 import {getDesktopTransport} from '@/lib/desktop';
 import {fileToDataUrl} from '@/lib/image';
 import {playSound, setOutputVolume} from '@/lib/sounds';
@@ -72,7 +72,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 	const {state, updateProfile, updateSettings, setCssVariable, hotkeyFailures} = useStore();
 	const me = state.me;
 	const outputVolume = useOutputVolume();
-	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'hotkeys' | 'customcss'>('account');
+	const [tab, setTab] = useState<'account' | 'profile' | 'cosmetics' | 'appearance' | 'voice' | 'network' | 'hotkeys' | 'customcss'>('account');
 	const [avatarFile, setAvatarFile] = useState<File | null>(null);
 
 	function handleAvatar(event: ChangeEvent<HTMLInputElement>): void {
@@ -200,6 +200,9 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 						onClick={() => setTab('voice')}>
 						Voz
 					</button>
+					<button type="button" className={`modal-nav-item${tab === 'network' ? ' is-active' : ''}`} onClick={() => setTab('network')}>
+						Red ZeroTier
+					</button>
 					<button
 						type="button"
 						className={`modal-nav-item${tab === 'hotkeys' ? ' is-active' : ''}`}
@@ -279,6 +282,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 
 						{tab === 'voice' ? (
 							<VoiceTab
+								inCall={Boolean(state.voice.channelId)}
 								inputDeviceId={state.settings.inputDeviceId}
 								outputDeviceId={state.settings.outputDeviceId}
 								onInput={(v) => updateSettings({inputDeviceId: v})}
@@ -295,6 +299,7 @@ export function SettingsModal({onClose}: {onClose: () => void}): JSX.Element {
 								}
 							/>
 						) : null}
+						{tab === 'network' ? <NetworkTab /> : null}
 
 						{tab === 'customcss' ? (
 							<CustomCssTab
@@ -688,31 +693,39 @@ function MicTest({
 	deviceId,
 	outputDeviceId,
 	monitor,
+	inCall,
 }: {
 	deviceId: string;
 	outputDeviceId: string;
 	monitor: boolean;
+	inCall: boolean;
 }): JSX.Element {
 	const [level, setLevel] = useState(0);
+	const callMic = useLocalStream();
 	useEffect(() => {
 		let active = true;
-		let stream: MediaStream | null = null;
+		let testMic: MediaStream | null = null;
 		let context: AudioContext | null = null;
 		let frame = 0;
 		void (async () => {
 			try {
-				stream = await navigator.mediaDevices.getUserMedia({
-					audio: deviceId && deviceId !== 'default' ? {deviceId: {exact: deviceId}} : true,
-				});
+				if (!inCall) {
+					testMic = await navigator.mediaDevices.getUserMedia({
+						audio: deviceId && deviceId !== 'default' ? {deviceId: {exact: deviceId}} : true,
+					});
+				}
 				if (!active) {
-					stream.getTracks().forEach((track) => track.stop());
+					testMic?.getTracks().forEach((track) => track.stop());
 					return;
 				}
+				const stream = inCall ? callMic : testMic;
+				if (!stream) return;
 				context = new AudioContext();
 				if (monitor && outputDeviceId && outputDeviceId !== 'default') {
 					const withSink = context as AudioContext & {setSinkId?: (id: string) => Promise<void>};
 					if (typeof withSink.setSinkId === 'function') await withSink.setSinkId(outputDeviceId).catch(() => {});
 				}
+				if (!active) return;
 				const source = context.createMediaStreamSource(stream);
 				const analyser = context.createAnalyser();
 				analyser.fftSize = 512;
@@ -738,9 +751,9 @@ function MicTest({
 			active = false;
 			cancelAnimationFrame(frame);
 			void context?.close();
-			stream?.getTracks().forEach((track) => track.stop());
+			testMic?.getTracks().forEach((track) => track.stop());
 		};
-	}, [deviceId, outputDeviceId, monitor]);
+	}, [callMic, deviceId, inCall, outputDeviceId, monitor]);
 	return (
 		<div className="mic-meter" title="Nivel del micrófono">
 			<div className="mic-meter-fill" style={{width: `${Math.round(level * 100)}%`}} />
@@ -748,7 +761,63 @@ function MicTest({
 	);
 }
 
+function NetworkTab(): JSX.Element {
+	const transport = getDesktopTransport();
+	const [info, setInfo] = useState<{addresses: string[]; manual: string; connected: number} | null>(null);
+	const [addresses, setAddresses] = useState<string | null>(null);
+	const [feedback, setFeedback] = useState<{text: string; error?: boolean} | null>(null);
+	const [saving, setSaving] = useState(false);
+
+	useEffect(() => {
+		if (!transport) return;
+		let active = true;
+		const refresh = () => {
+			void transport.getNetworkInfo().then((value) => { if (active) setInfo(value); }).catch(() => {});
+		};
+		refresh();
+		const timer = setInterval(refresh, 3000);
+		return () => { active = false; clearInterval(timer); };
+	}, [transport]);
+
+	async function save(): Promise<void> {
+		if (!transport || addresses === null || saving) return;
+		setSaving(true);
+		try {
+			const result = await transport.setNetworkPeers(addresses);
+			setFeedback({text: result.ok ? 'Direcciones guardadas. Reintentando conexión…' : (result.error ?? 'No se pudieron guardar las direcciones'), error: !result.ok});
+		} catch {
+			setFeedback({text: 'No se pudieron guardar las direcciones', error: true});
+		} finally {
+			setSaving(false);
+		}
+	}
+
+	return (
+		<section className="settings-network">
+			<h2>Red ZeroTier</h2>
+			{!transport ? <p className="settings-hint">La conexión por ZeroTier se configura en la app de escritorio.</p> : (
+				<>
+					<dl className="network-overview">
+						<div><dt>Tu dirección</dt><dd>{info ? info.addresses.length ? info.addresses.map((address) => <code key={address}>{address}</code>) : 'ZeroTier sin IPv4 activa' : 'Buscando adaptadores…'}</dd></div>
+						<div><dt>Equipos conectados</dt><dd aria-live="polite">{info?.connected ?? '—'}</dd></div>
+					</dl>
+					<form className="network-form" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+						<label htmlFor="network-peers">Direcciones manuales</label>
+						<p className="settings-hint" id="network-peers-hint">Si el descubrimiento automático falla, pegá la IP de ZeroTier de un amigo. Podés usar una por línea con el puerto que le muestra PelaCord.</p>
+						<textarea id="network-peers" aria-describedby="network-peers-hint" className="input" rows={4} placeholder="10.147.17.9:7788" spellCheck={false} value={addresses ?? info?.manual ?? ''} onChange={(event) => { setAddresses(event.target.value); setFeedback(null); }} />
+						<div className="network-form-footer">
+							<button type="submit" className="button primary" disabled={addresses === null || saving}>{saving ? 'Guardando…' : 'Guardar direcciones'}</button>
+							{feedback && <span className={feedback.error ? 'is-error' : ''} role="status">{feedback.text}</span>}
+						</div>
+					</form>
+				</>
+			)}
+		</section>
+	);
+}
+
 function VoiceTab(props: {
+	inCall: boolean;
 	inputDeviceId: string;
 	outputDeviceId: string;
 	onInput: (v: string) => void;
@@ -776,17 +845,18 @@ function VoiceTab(props: {
 					))}
 				</select>
 				<p className="settings-hint">Habla y mirá el nivel:</p>
-				<MicTest deviceId={props.inputDeviceId} outputDeviceId={props.outputDeviceId} monitor={monitor} />
+				<MicTest deviceId={props.inputDeviceId} outputDeviceId={props.outputDeviceId} monitor={monitor && !props.inCall} inCall={props.inCall} />
 				<div className="input-row" style={{marginTop: '0.75rem'}}>
 					<button
 						type="button"
+						disabled={props.inCall}
 						className={`button ${monitor ? 'danger' : 'secondary'}`}
 						onClick={() => setMonitor((value) => !value)}>
-						{monitor ? 'Dejar de escucharme' : 'Escucharme'}
+						{monitor && !props.inCall ? 'Dejar de escucharme' : 'Escucharme'}
 					</button>
 				</div>
 				<p className="settings-hint">
-					{monitor
+					{props.inCall ? 'Salí de la llamada para probar el retorno del micrófono.' : monitor
 						? 'Estás escuchando tu propio micrófono. Usá auriculares para evitar acople.'
 						: 'Reproduce tu micrófono por el altavoz elegido, para probar que ambos funcionan.'}
 				</p>
@@ -807,7 +877,7 @@ function VoiceTab(props: {
 						</option>
 					))}
 				</select>
-				<p className="settings-hint">Se aplica a la voz de la llamada.</p>
+				<p className="settings-hint">Se aplica a la voz de la llamada y a la música de la Jam.</p>
 			</div>
 		</>
 	);

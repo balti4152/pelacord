@@ -68,6 +68,18 @@ export function subscribeOutputVolume(callback: () => void): () => void {
 	};
 }
 
+export async function routeMediaOutput(element: HTMLMediaElement, deviceId: string): Promise<void> {
+	const audio = element as HTMLMediaElement & {sinkId?: string; setSinkId?: (id: string) => Promise<void>};
+	if (!audio.setSinkId) return;
+	const sink = deviceId === 'default' ? '' : deviceId;
+	if (audio.sinkId === sink) return;
+	try {
+		await audio.setSinkId(sink);
+	} catch {
+		if (sink) await audio.setSinkId('').catch(() => {});
+	}
+}
+
 /** Reproduce un sonido de la interfaz. No rompe nada si el navegador lo bloquea. */
 export function playSound(name: SoundName, volume = 0.5): void {
 	if (!enabled) return;
