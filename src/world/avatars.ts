@@ -29,6 +29,35 @@ const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', T
 type BaseAnim = 'idle' | 'walk' | 'sit';
 const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', sit: 'Sit'};
 
+/**
+ * Huesos que mueve DE VERDAD cada animación.
+ *
+ * El exportador de glTF guarda todos los huesos en todas las animaciones (con la pose de reposo en
+ * los que no se tocan). Sin este filtro, el parpadeo o la boca al hablar "devolvían" el cuerpo a
+ * estar parado: sentado, cada parpadeo te paraba un instante y te volvía a sentar.
+ */
+const CLIP_BONES: Record<string, string[] | null> = {
+	Idle: null,
+	Walk: null,
+	Sit: null,
+	Blink: ['eye_L', 'eye_R'],
+	Talk: ['mouth', 'head'],
+	Wave: ['arm_R', 'arm_L', 'head'],
+	Slap: ['arm_R', 'spine', 'head'],
+};
+const clipCache = new Map<THREE.AnimationClip, THREE.AnimationClip>();
+
+function onlyBones(clip: THREE.AnimationClip): THREE.AnimationClip {
+	const bones = CLIP_BONES[clip.name];
+	if (!bones) return clip;
+	let filtered = clipCache.get(clip);
+	if (!filtered) {
+		filtered = new THREE.AnimationClip(clip.name, clip.duration, clip.tracks.filter((track) => bones.includes(track.name.split('.')[0])));
+		clipCache.set(clip, filtered);
+	}
+	return filtered;
+}
+
 function hidesOf(catalog: Catalog, itemId: string | null): string[] {
 	if (!itemId) return [];
 	const item = catalog.items.find((i) => i.id === itemId);
@@ -86,11 +115,18 @@ export class Avatar {
 		});
 		this.root.add(this.model);
 		this.mixer = new THREE.AnimationMixer(this.model);
-		for (const clip of gltf.animations) {
+		for (const source of gltf.animations) {
+			const clip = onlyBones(source);
 			const action = this.mixer.clipAction(clip);
 			if (clip.name === 'Wave' || clip.name === 'Slap' || clip.name === 'Blink') {
 				action.setLoop(THREE.LoopOnce, 1);
 				action.clampWhenFinished = false;
+			}
+			// Sentarse es una POSE: se reproduce una vez y queda quieta. En bucle, al dar la vuelta se
+			// veía un "pararse y volver a sentarse" cada segundo.
+			if (clip.name === 'Sit') {
+				action.setLoop(THREE.LoopOnce, 1);
+				action.clampWhenFinished = true;
 			}
 			this.actions[clip.name] = action;
 		}
@@ -188,6 +224,12 @@ export class Avatar {
 	dispose(): void {
 		this.disposed = true;
 		this.mixer?.stopAllAction();
+		// Las etiquetas HTML (nombre, viñetas) no se borran solas al sacar el objeto de la escena:
+		// quedaban flotando (pasaba con la vendedora al salir de la tienda).
+		this.root.traverse((obj) => {
+			const element = (obj as unknown as {isCSS2DObject?: boolean; element?: HTMLElement}).element;
+			if ((obj as unknown as {isCSS2DObject?: boolean}).isCSS2DObject) element?.remove();
+		});
 		this.root.removeFromParent();
 		for (const mat of this.materials.values()) mat.dispose();
 	}

@@ -179,8 +179,9 @@ def build_shop():
 	# --- Zona de muebles (derecha): tarima con un living armado de muestra ---
 	plat = toy.material('Platform', 'dark_crimson')
 	toy.rounded_box('Showcase', size=(3.4, 3.4, 0.25), loc=(3.0, 1.0, 0.125), radius=0.08, mat=plat)
-	for key, loc, rot in (('loveseat', (3.0, 2.0, 0.25), 0), ('floor_lamp', (4.3, 2.3, 0.25), 0), ('coffee_table', (3.0, 0.9, 0.25), 0),
-			('beanbag', (1.9, 0.6, 0.25), -40), ('plant', (4.2, -0.3, 0.25), 0), ('rug', (3.0, 1.0, 0.25), 0)):
+	# De frente a la entrada (+Y): antes el sillón y el puf le daban la espalda a quien entraba.
+	for key, loc, rot in (('loveseat', (3.0, 0.2, 0.25), 180), ('floor_lamp', (4.3, -0.2, 0.25), 0), ('coffee_table', (3.0, 1.3, 0.25), 0),
+			('beanbag', (1.85, 1.75, 0.25), 150), ('plant', (4.25, 2.3, 0.25), 0), ('rug', (3.0, 1.0, 0.25), 0)):
 		root, created = furniture.build_item(key)
 		root.location = loc
 		root.rotation_euler = (0, 0, DEG(rot))

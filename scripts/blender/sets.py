@@ -349,7 +349,8 @@ def build_campfire():
 		for k, offset in enumerate((-0.4, 0.4)):
 			tx, ty = -math.sin(a) * offset, math.cos(a) * offset
 			seat = toy.mark_seat(f'Log_{i + 1}_{k + 1}', (x + tx, y + ty, 0.4))
-			seat.rotation_euler = (0, 0, DEG(facing + 180))
+			# El -Y local del asiento (= adelante del avatar) apunta al fuego. Con +180 quedaban de espaldas.
+			seat.rotation_euler = (0, 0, DEG(facing))
 
 	# Arbolitos low-poly de silueta redonda alrededor.
 	leaves = toy.material('PineLeaves', (0.12, 0.32, 0.28))

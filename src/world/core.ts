@@ -49,13 +49,15 @@ export interface Catalog {
 	items: CatalogItem[];
 }
 
-export type RoomId = 'living' | 'cinema' | 'campfire' | 'shop' | `house:${string}`;
+export type RoomId = 'city' | 'living' | 'cinema' | 'campfire' | 'shop' | 'games' | `house:${string}`;
 
-export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string; glb: string; emoji: string}> = [
-	{id: 'living', name: 'Living', glb: 'models/room_living.glb', emoji: '🛋️'},
-	{id: 'cinema', name: 'Cine', glb: 'models/room_cinema.glb', emoji: '🎬'},
-	{id: 'campfire', name: 'Fogata', glb: 'models/room_campfire.glb', emoji: '🔥'},
-	{id: 'shop', name: 'Tienda', glb: 'models/room_shop.glb', emoji: '🛍️'},
+export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string; glb: string; icon: string}> = [
+	{id: 'city', name: 'Ciudad', glb: 'models/room_city.glb', icon: 'map'},
+	{id: 'living', name: 'Living', glb: 'models/room_living.glb', icon: 'sofa'},
+	{id: 'cinema', name: 'Cine', glb: 'models/room_cinema.glb', icon: 'clapperboard'},
+	{id: 'campfire', name: 'Campamento', glb: 'models/room_campfire.glb', icon: 'flame'},
+	{id: 'shop', name: 'Tienda', glb: 'models/room_shop.glb', icon: 'store'},
+	{id: 'games', name: 'Casa de juegos', glb: 'models/room_games.glb', icon: 'dice'},
 ];
 export const HOUSE_GLB = 'models/room_house.glb';
 
@@ -96,6 +98,8 @@ export type WorldMessage =
 	| {kind: 'state'; s: PlayerState}
 	| {kind: 'emote'; id: string; room: RoomId; emote: Emote; target?: string | null}
 	| {kind: 'leave'; id: string}
+	/** "Vení a mi casa": invitación dirigida. */
+	| {kind: 'invite'; id: string; name: string; room: RoomId}
 	| {kind: 'game'; g: GameMessage};
 
 // --------------------------------------------------------------- catálogo ---
@@ -230,6 +234,13 @@ let peers: Record<string, PlayerState> = {};
 const peerListeners = new Set<() => void>();
 const emoteListeners = new Set<(m: Extract<WorldMessage, {kind: 'emote'}>) => void>();
 const gameListeners = new Set<(g: GameMessage, from: string) => void>();
+const inviteListeners = new Set<(m: Extract<WorldMessage, {kind: 'invite'}>) => void>();
+
+export function onInvite(callback: (m: Extract<WorldMessage, {kind: 'invite'}>) => void): () => void {
+	startNet();
+	inviteListeners.add(callback);
+	return () => inviteListeners.delete(callback);
+}
 let netStarted = false;
 
 function emitPeers(): void {
@@ -260,6 +271,8 @@ function startNet(): void {
 			emitPeers();
 		} else if (message.kind === 'emote' && message.id === from) {
 			for (const listener of emoteListeners) listener(message);
+		} else if (message.kind === 'invite' && message.id === from) {
+			for (const listener of inviteListeners) listener(message);
 		} else if (message.kind === 'game' && message.g) {
 			for (const listener of gameListeners) listener(message.g, from);
 		}
@@ -315,30 +328,5 @@ export function onGame(callback: (g: GameMessage, from: string) => void): () => 
 
 // ------------------------------------------------------- juegos (tipos) -----
 
-export type GameKind = 'tateti' | 'cuatro' | 'memo';
-
-export interface GameSession {
-	id: string;
-	kind: GameKind;
-	host: string;
-	guest: string;
-	/** Tablero: tateti 9, cuatro 42 (7x6), memo 16 cartas. */
-	board: (string | null)[];
-	/** Memotest: valores ocultos de cada carta y cuáles están dadas vuelta. */
-	cards?: string[];
-	revealed?: number[];
-	matched?: Record<number, string>;
-	score?: Record<string, number>;
-	turn: string;
-	winner: string | null;
-	draw: boolean;
-	updatedAt: number;
-}
-
-export type GameMessage =
-	| {type: 'invite'; session: GameSession; fromName: string}
-	| {type: 'accept'; id: string}
-	| {type: 'decline'; id: string}
-	| {type: 'move'; id: string; cell: number}
-	| {type: 'state'; session: GameSession}
-	| {type: 'quit'; id: string};
+/** Mensajes de los juegos de la mesa (ver tableGames.ts). */
+export type GameMessage = {type: string; [key: string]: unknown};

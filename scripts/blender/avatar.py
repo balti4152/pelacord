@@ -181,13 +181,13 @@ def new_action(rig, name):
 #   (brazo derecho se abre con Z positivo; el izquierdo con Z negativo)
 
 def anim_idle(rig):
+	"""Respiración simple: sin escalar nada (antes se estiraba la cabeza) y con el loop cerrado."""
 	new_action(rig, 'Idle')
-	for f, s, tilt, sway in ((1, 1.0, 0, 0), (13, 1.025, 2, -3), (25, 1.0, 0, 0), (37, 1.025, -2, 3), (49, 1.0, 0, 0)):
-		key(rig, f, 'spine', scale=(1, s, 1))
-		key(rig, f, 'head', rot=(tilt, 0, sway))
-	for f, a in ((1, 6), (25, 9), (49, 6)):
-		key(rig, f, 'arm_L', rot=(0, 0, -a))
-		key(rig, f, 'arm_R', rot=(0, 0, a))
+	for f, bob, tilt, arm in ((1, 0.0, 0, 6), (25, 0.006, 1.5, 8), (49, 0.0, 0, 6)):
+		key(rig, f, 'hips', loc=(0, bob, 0))
+		key(rig, f, 'head', rot=(tilt, 0, 0))
+		key(rig, f, 'arm_L', rot=(0, 0, -arm))
+		key(rig, f, 'arm_R', rot=(0, 0, arm))
 
 
 def anim_walk(rig):

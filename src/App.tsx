@@ -263,7 +263,7 @@ export function App(): JSX.Element {
 					}}
 				/>
 				{worldOpen ? (
-					<WorldView onClose={() => setWorldOpen(false)} />
+					<WorldView onClose={() => setWorldOpen(false)} onOpenMovies={() => { setWorldOpen(false); setMoviesOpen(true); }} />
 				) : moviesOpen ? (
 					<MoviesView onClose={() => setMoviesOpen(false)} />
 				) : musicOpen ? (
