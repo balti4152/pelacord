@@ -1300,8 +1300,10 @@ export class WorldEngine {
 	}
 
 	/** Lo que se VE: quieto con música en la sala = bailando. */
+	/** Lo que se ve de un jugador. Con música en la tele bailan sólo los NPC: los jugadores bailan
+	 * cuando ellos quieren (con el emote). */
 	private visualAnim(anim: Anim): BaseAnim {
-		return anim === 'idle' && this.musicOn ? 'dance' : anim;
+		return anim;
 	}
 
 	private stepOther(actor: Actor, dt: number): void {
