@@ -111,7 +111,8 @@ export class OutdoorLighting {
 
 	update(): number {
 		if (!this.fog || !this.backdrop || !this.context || this.startedAt === null) return 0;
-		const phase = ((performance.now() - this.startedAt) % CYCLE_MS) / CYCLE_MS;
+		// Por la hora (no desde que entraste): así es de día o de noche al mismo tiempo para todos.
+		const phase = (Date.now() % CYCLE_MS) / CYCLE_MS;
 		const night = THREE.MathUtils.smoothstep(phase, .33, .48) * (1 - THREE.MathUtils.smoothstep(phase, .82, 1));
 		const blend = Math.round(night * 144) / 144;
 		if (blend !== this.lastBlend) {
