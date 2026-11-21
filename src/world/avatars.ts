@@ -25,9 +25,9 @@ export function loadGLB(url: string): Promise<GLTF> {
 }
 
 const AVATAR_URL = 'models/avatar_modular.glb';
-const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
-export type BaseAnim = 'idle' | 'walk' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
-const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
+export const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
+export type BaseAnim = 'idle' | 'walk' | 'run' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', run: 'Run', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
 /** Gestos de una sola vez (se mezclan encima de lo que esté haciendo). */
 export type OneShot = 'Wave' | 'Slap' | 'Cheer' | 'Bow' | 'Shrug';
 const ONE_SHOTS = new Set(['Wave', 'Slap', 'Cheer', 'Bow', 'Shrug']);
@@ -42,6 +42,7 @@ const ONE_SHOTS = new Set(['Wave', 'Slap', 'Cheer', 'Bow', 'Shrug']);
 const CLIP_BONES: Record<string, string[] | null> = {
 	Idle: null,
 	Walk: null,
+	Run: null,
 	Sit: null,
 	Dance: null,
 	Fish: null,
@@ -137,6 +138,9 @@ export class Avatar {
 				action.setLoop(THREE.LoopOnce, 1);
 				action.clampWhenFinished = true;
 			}
+			// Piernitas cortas: los pasos van más rápido para que los pies no "patinen".
+			if (clip.name === 'Walk') action.timeScale = 1.45;
+			if (clip.name === 'Run') action.timeScale = 1.15;
 			this.actions[clip.name] = action;
 		}
 		this.mixer.addEventListener('finished', (event) => {

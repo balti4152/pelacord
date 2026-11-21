@@ -1,11 +1,11 @@
 /**
- * Ambiente "re cozy" de los lugares de afuera: cielo de atardecer-noche, niebla suave, halos cálidos
- * en los faroles, guirnaldas de lamparitas entre los faroles y luciérnagas.
+ * Ambiente de los lugares de afuera: ciclo de luz, halos cálidos, guirnaldas y luciérnagas.
  *
  * Todo es barato: los halos son sprites (sin luces reales extra, que son caras para PCs flojas).
  */
 import * as THREE from 'three';
 import type {RoomId} from '@/world/core';
+import {OutdoorLighting} from '@/world/outdoorLighting';
 
 let glowTexture: THREE.Texture | null = null;
 
@@ -26,47 +26,35 @@ function glow(): THREE.Texture {
 	return glowTexture;
 }
 
-function skyTexture(top: string, middle: string, bottom: string): THREE.Texture {
-	const canvas = document.createElement('canvas');
-	canvas.width = 4;
-	canvas.height = 256;
-	const ctx = canvas.getContext('2d')!;
-	const g = ctx.createLinearGradient(0, 0, 0, 256);
-	g.addColorStop(0, top);
-	g.addColorStop(0.55, middle);
-	g.addColorStop(1, bottom);
-	ctx.fillStyle = g;
-	ctx.fillRect(0, 0, 4, 256);
-	const texture = new THREE.CanvasTexture(canvas);
-	texture.colorSpace = THREE.SRGBColorSpace;
-	return texture;
-}
-
 const BULB_COLORS = [0xffd27a, 0xff9e6b, 0xfff1c9, 0xff7fae, 0x9fe3ff, 0xc6a2ff];
+const CITY_BULB_COLORS = [0xffce83, 0xffe8b2, 0xfbb4bb, 0xe8ddfa, 0xc9eabf];
 
 export class Ambience {
 	private group = new THREE.Group();
 	private fireflies: THREE.Points | null = null;
 	private fireflySeeds: Float32Array | null = null;
 	private halos: THREE.Sprite[] = [];
+	private bulbs: THREE.MeshBasicMaterial | null = null;
+	private lighting: OutdoorLighting;
 
-	constructor(private scene: THREE.Scene) {
+	constructor(private scene: THREE.Scene, private sun: THREE.DirectionalLight, private fill: THREE.HemisphereLight) {
 		scene.add(this.group);
+		this.lighting = new OutdoorLighting(scene, sun, fill);
 	}
 
 	setup(room: RoomId, root: THREE.Object3D): void {
 		this.clear();
-		if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
-		const outdoor = room === 'city' || room === 'port' || room === 'campfire';
-		if (!outdoor) {
+		if (room !== 'city' && room !== 'port' && room !== 'campfire') {
 			this.scene.background = new THREE.Color(0x1d1430);
-			this.scene.fog = null;
+			this.fill.color.set(0xd9ccff);
+			this.fill.groundColor.set(0x3a2552);
+			this.fill.intensity = 1.25;
+			this.sun.color.set(0xfff0dd);
+			this.sun.intensity = 1.5;
+			this.sun.shadow.normalBias = 0;
 			return;
 		}
-		this.scene.background = room === 'city' ? skyTexture('#ac94c5', '#edafae', '#f7cfb0')
-			: skyTexture('#1b1240', room === 'port' ? '#4a3a7a' : '#43306e', room === 'port' ? '#f2a07a' : '#c97a8f');
-		this.scene.fog = room === 'city' ? new THREE.Fog(0xe7b9a9, 27, 69)
-			: new THREE.Fog(room === 'port' ? 0x6a4a7e : 0x4a3466, 22, 60);
+		this.lighting.enter(room, root);
 
 		// Halos en las lamparitas (todo lo que se llame Lamp_*, o las luces que quedaron).
 		root.updateMatrixWorld(true);
@@ -82,41 +70,47 @@ export class Ambience {
 			}
 		});
 		for (const p of lamps) this.halo(p, room === 'city' ? 1.07 : 2.4, 0xffc070, room === 'city' ? .34 : .75);
-		if (room === 'city') return;
-
 		// Guirnaldas: entre faroles vecinos (en la ciudad forman un anillo alrededor de la plaza).
-		const ring = lamps.slice().sort((a, b) => a.x - b.x || a.z - b.z);
+		const city = room === 'city';
+		const palette = city ? CITY_BULB_COLORS : BULB_COLORS;
+		const ring = lamps.sort(city
+			? (a, b) => Math.atan2(a.z, a.x) - Math.atan2(b.z, b.x)
+			: (a, b) => a.x - b.x || a.z - b.z);
 		const points: Array<{p: THREE.Vector3; c: number}> = [];
-		const pairs = ring.length - 1;
+		const pairs = ring.length > 2 && city ? ring.length : ring.length - 1;
 		for (let i = 0; i < pairs; i++) {
 			const a = ring[i];
 			const b = ring[(i + 1) % ring.length];
 			if (!a || !b || a.distanceTo(b) > 9) continue;
-			const count = Math.max(6, Math.round(a.distanceTo(b) * 2.6));
+			const start = a.clone().add(new THREE.Vector3(0, -.15, 0));
+			const end = b.clone().add(new THREE.Vector3(0, -.15, 0));
+			const middle = start.clone().lerp(end, .5);
+			middle.y -= city ? .88 : 1.4;
+			const curve = new THREE.QuadraticBezierCurve3(start, middle, end);
+			const count = Math.max(6, Math.round(a.distanceTo(b) * (city ? 2.05 : 2.6)));
 			for (let k = 1; k < count; k++) {
-				const t = k / count;
-				const p = a.clone().lerp(b, t);
-				p.y = a.y - 0.25 - Math.sin(t * Math.PI) * 0.7;
-				points.push({p, c: BULB_COLORS[(i * 3 + k) % BULB_COLORS.length]});
+				const p = curve.getPoint(k / count);
+				p.y -= .046;
+				points.push({p, c: palette[(i * 3 + k) % palette.length]});
 			}
-			// El cable.
-			const curve = new THREE.QuadraticBezierCurve3(a.clone().setY(a.y - 0.25), a.clone().lerp(b, 0.5).setY(a.y - 1.65), b.clone().setY(b.y - 0.25));
-			const wire = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(24)), new THREE.LineBasicMaterial({color: 0x2a1e30}));
+			const wire = new THREE.Line(new THREE.BufferGeometry().setFromPoints(curve.getPoints(24)), new THREE.LineBasicMaterial({color: city ? 0x57423d : 0x2a1e30}));
+			wire.name = 'Garland cord';
 			this.group.add(wire);
 		}
 		if (points.length) {
-			const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 8, 6), new THREE.MeshBasicMaterial({toneMapped: false}), points.length);
+			this.bulbs = new THREE.MeshBasicMaterial({toneMapped: false});
+			const bulbs = new THREE.InstancedMesh(new THREE.SphereGeometry(0.06, 8, 6), this.bulbs, points.length);
+			bulbs.name = 'Garland bulbs';
 			const m = new THREE.Matrix4();
 			points.forEach(({p, c}, i) => {
-				bulbs.setMatrixAt(i, m.makeTranslation(p.x, p.y, p.z));
-				bulbs.setColorAt(i, new THREE.Color(c).multiplyScalar(1.6));
-				this.halo(p, 0.55, c, 0.5);
+				bulbs.setMatrixAt(i, m.makeScale(1, 1.25, 1).setPosition(p));
+				bulbs.setColorAt(i, new THREE.Color(c).multiplyScalar(city ? 1.18 : 1.6));
+				if (!city || i % 3 === 0) this.halo(p, city ? .37 : .55, c, city ? .24 : .5);
 			});
 			this.group.add(bulbs);
 		}
-
 		// Luciérnagas.
-		const count = room === 'campfire' ? 60 : 45;
+		const count = city ? 26 : room === 'campfire' ? 60 : 45;
 		const positions = new Float32Array(count * 3);
 		const seeds = new Float32Array(count * 3);
 		for (let i = 0; i < count; i++) {
@@ -146,10 +140,13 @@ export class Ambience {
 		this.group.add(sprite);
 	}
 
-	update(_dt: number, t: number): void {
+	update(t: number): number {
+		const night = this.lighting.update();
+		this.bulbs?.color.setScalar(THREE.MathUtils.lerp(.68, 1.24, night));
 		const f = this.fireflies;
 		const seeds = this.fireflySeeds;
-		if (f && seeds) {
+		if (f) f.visible = night > .15;
+		if (f?.visible && seeds) {
 			const pos = f.geometry.attributes.position as THREE.BufferAttribute;
 			for (let i = 0; i < pos.count; i++) {
 				const s = i * 1.37;
@@ -161,14 +158,17 @@ export class Ambience {
 				);
 			}
 			pos.needsUpdate = true;
-			(f.material as THREE.PointsMaterial).opacity = 0.65 + Math.sin(t * 2) * 0.2;
+			(f.material as THREE.PointsMaterial).opacity = THREE.MathUtils.smoothstep(night, .15, .86) * (.65 + Math.sin(t * 2) * .15);
 		}
 		for (const h of this.halos) {
-			(h.material as THREE.SpriteMaterial).opacity = (h.userData.base as number) * (0.85 + Math.sin(t * 1.6 + (h.userData.phase as number)) * 0.15);
+			(h.material as THREE.SpriteMaterial).opacity = (h.userData.base as number) * (.24 + night * .76)
+				* (.85 + Math.sin(t * 1.6 + (h.userData.phase as number)) * .15);
 		}
+		return night;
 	}
 
 	private clear(): void {
+		this.lighting.clear();
 		for (const child of [...this.group.children]) {
 			child.removeFromParent();
 			const mesh = child as THREE.Mesh;
@@ -177,13 +177,13 @@ export class Ambience {
 			mat?.dispose();
 		}
 		this.halos = [];
+		this.bulbs = null;
 		this.fireflies = null;
 		this.fireflySeeds = null;
 	}
 
 	dispose(): void {
 		this.clear();
-		if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
 		this.group.removeFromParent();
 	}
 }

@@ -73,7 +73,7 @@ export interface PlacedFurniture {
 	rot: number;
 }
 
-export type Anim = 'idle' | 'walk' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+export type Anim = 'idle' | 'walk' | 'run' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
 
 /** Lo que cada uno anuncia del mundo. */
 export interface PlayerState {

@@ -1,19 +1,30 @@
+/**
+ * Mascotas salvajes: son RARAS. Cada una vive en un lugar (el oso en el campamento, la tortuga en el
+ * muelle, el zorro en la ciudad), aparece de vez en cuando, da unas vueltas y, si nadie la atrapa en
+ * 15 segundos, se va.
+ */
 import * as THREE from 'three';
 import {loadGLB} from '@/world/avatars';
+import type {RoomId} from '@/world/core';
 import {PETS, type PetId} from '@/world/petCatalog';
 import {PetModel} from '@/world/petModel';
 
 export const CAPTURE_RANGE = 2.15;
 const FLIGHT_TIME = .43;
 const CAPTURE_TIME = 1.08;
-const RESPAWN_MS = 35_000;
-const SPAWNS = [
-	{id: 'plaza-nuez', species: 'nuez', speed: .73, route: [[1.6, -4.6], [3.8, -5.1], [4.2, -3.5], [2.9, -3.4]]},
-	{id: 'plaza-bruma', species: 'bruma', speed: 1.0, route: [[-3.3, -2.6], [-5.8, -1.7], [-5.5, 1.4], [-3.0, 2.4]]},
-	{id: 'plaza-brote', species: 'brote', speed: .48, route: [[4.55, 1.15], [4.55, 2.35], [5.55, 2.25], [5.45, .55]]},
-	{id: 'garden-brote', species: 'brote', speed: .48, route: [[-6.8, -5.4], [-8.4, -6.5], [-5.6, -8.3], [-4.4, -7.1]]},
-	{id: 'street-nuez', species: 'nuez', speed: .73, route: [[7.1, 3.5], [9.8, 3.8], [11, 2.2], [8.4, 1.9]]},
-] as const satisfies ReadonlyArray<{id: string; species: PetId; speed: number; route: ReadonlyArray<readonly [number, number]>}>;
+/** Cuánto se queda si nadie la atrapa. */
+const STAY_MS = 15_000;
+/** Cada cuánto se tira la "moneda" para ver si aparece, y con qué probabilidad. */
+const ROLL_MS = 20_000;
+const CHANCE = 0.14;
+/** Después de irse o de que la atrapen, tarda al menos esto en poder volver. */
+const COOLDOWN_MS = 70_000;
+
+const HABITATS: Partial<Record<RoomId, {id: string; species: PetId; speed: number; route: Array<[number, number]>}>> = {
+	campfire: {id: 'camp-nuez', species: 'nuez', speed: .7, route: [[3.3, 1.4], [2.2, 3.1], [0.3, 3.7], [-1.9, 3.2], [-0.4, 2.4]]},
+	port: {id: 'pier-brote', species: 'brote', speed: .42, route: [[-1.5, 0.3], [-1.0, 1.6], [-1.9, 2.7], [-1.3, 1.1]]},
+	city: {id: 'plaza-bruma', species: 'bruma', speed: 1.0, route: [[-3.3, -2.6], [-5.8, -1.7], [-5.5, 1.4], [-3.0, 2.4]]},
+};
 
 interface Pet {
 	id: string;
@@ -23,6 +34,10 @@ interface Pet {
 	route: THREE.Vector3[];
 	next: number;
 	wait: number;
+	/** Hasta cuándo se queda (después se va achicándose). */
+	leaveAt: number;
+	leaving: number;
+	appearing: number;
 }
 
 interface Capture {
@@ -39,41 +54,81 @@ export class CityPets {
 	private pets: Pet[] = [];
 	private capture: Capture | null = null;
 	private sphere: THREE.Object3D | null = null;
-	private respawnAt = new Map<string, number>();
 	private epoch = 0;
+	private room: RoomId | null = null;
+	private nextRoll = 0;
+	private cooldownUntil = new Map<string, number>();
+	private sparkles: THREE.Points | null = null;
+	private sparkleLife = 0;
 	private pulseGeometry = new THREE.RingGeometry(.88, 1, 40);
 	private pulseMaterial = new THREE.MeshBasicMaterial({color: 0xb7f8e5, transparent: true, depthWrite: false});
+	/** Avisa cuando aparece una (para mostrar "¡Apareció…!"). */
+	onAppear: ((name: string) => void) | null = null;
 
-	async enterCity(): Promise<void> {
-		const epoch = ++this.epoch;
-		const sphere = loadGLB('models/capture_sphere.glb').then((gltf) => {
-			if (this.epoch === epoch) this.sphere = gltf.scene;
-		});
-		const spawns = SPAWNS.map(async ({id, species, speed, route}, index) => {
-			const model = await PetModel.load(species);
-			if (epoch !== this.epoch) {
-				model.dispose();
-				return;
-			}
-			const points = route.map(([x, z]) => new THREE.Vector3(x, .045, z));
-			model.root.position.copy(points[0]);
-			const pet = {id, species, speed, model, route: points, next: 1, wait: 2 + index * .63};
-			model.root.visible = !this.respawnAt.has(id);
-			this.pets.push(pet);
-			this.root.add(model.root);
-		});
-		await Promise.allSettled([sphere, ...spawns]);
+	/** Entra a un lugar: si es el hábitat de alguna, puede aparecer (de vez en cuando). */
+	async enterRoom(room: RoomId): Promise<void> {
+		this.clear();
+		const epoch = this.epoch;
+		this.room = room;
+		// La primera tirada llega rápido (para que a veces la veas al entrar), después cada ROLL_MS.
+		this.nextRoll = performance.now() + 6_000 + Math.random() * 6_000;
+		if (!HABITATS[room]) return;
+		const gltf = await loadGLB('models/capture_sphere.glb').catch(() => null);
+		if (this.epoch === epoch && gltf) this.sphere = gltf.scene;
+	}
+
+	/** Compatibilidad: la ciudad. */
+	enterCity(): Promise<void> {
+		return this.enterRoom('city');
+	}
+
+	private async spawn(): Promise<void> {
+		const habitat = this.room ? HABITATS[this.room] : undefined;
+		if (!habitat || this.pets.length) return;
+		const epoch = this.epoch;
+		const model = await PetModel.load(habitat.species);
+		if (epoch !== this.epoch || this.pets.length) {
+			model.dispose();
+			return;
+		}
+		const points = habitat.route.map(([x, z]) => new THREE.Vector3(x, .045, z));
+		const start = Math.floor(Math.random() * points.length);
+		model.root.position.copy(points[start]);
+		model.root.scale.setScalar(0.001);
+		const pet: Pet = {
+			id: habitat.id, species: habitat.species, speed: habitat.speed, model, route: points, next: (start + 1) % points.length,
+			wait: 1.2, leaveAt: performance.now() + STAY_MS, leaving: 0, appearing: 0.001,
+		};
+		this.pets.push(pet);
+		this.root.add(model.root);
+		this.burst(points[start]);
+		this.onAppear?.(PETS[habitat.species].name);
+	}
+
+	/** Brillitos cuando aparece o se va. */
+	private burst(at: THREE.Vector3): void {
+		this.sparkles?.removeFromParent();
+		const count = 26;
+		const positions = new Float32Array(count * 3);
+		const geometry = new THREE.BufferGeometry();
+		geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+		geometry.userData.seeds = Array.from({length: count}, () => [Math.random() * Math.PI * 2, 0.4 + Math.random() * 0.7, 0.3 + Math.random()]);
+		const points = new THREE.Points(geometry, new THREE.PointsMaterial({color: 0xfff3a8, size: 0.09, transparent: true, depthWrite: false, toneMapped: false}));
+		points.position.copy(at);
+		this.root.add(points);
+		this.sparkles = points;
+		this.sparkleLife = 0;
 	}
 
 	targets(): Array<{id: string; name: string; position: THREE.Vector3}> {
 		if (!this.sphere || this.capture) return [];
-		return this.pets.filter((pet) => pet.model.root.visible).map((pet) => ({
+		return this.pets.filter((pet) => pet.model.root.visible && !pet.leaving).map((pet) => ({
 			id: pet.id, name: PETS[pet.species].name, position: pet.model.root.position,
 		}));
 	}
 
 	tryCapture(id: string, from: THREE.Vector3, commit: (species: PetId) => boolean): PetId | null {
-		const pet = this.pets.find((candidate) => candidate.id === id && candidate.model.root.visible);
+		const pet = this.pets.find((candidate) => candidate.id === id && candidate.model.root.visible && !candidate.leaving);
 		const source = this.sphere;
 		if (!pet || !source || this.capture || pet.model.root.position.distanceTo(from) > CAPTURE_RANGE || !commit(pet.species)) return null;
 		const orb = source.clone(true);
@@ -85,7 +140,7 @@ export class CityPets {
 		pulse.position.copy(pet.model.root.position).setY(.075);
 		pulse.visible = false;
 		this.root.add(orb, pulse);
-		this.respawnAt.set(pet.id, performance.now() + RESPAWN_MS);
+		this.cooldownUntil.set(pet.id, performance.now() + COOLDOWN_MS);
 		this.capture = {pet, orb, pulse, start, end, time: 0};
 		pet.model.play('Startled');
 		return pet.species;
@@ -93,19 +148,38 @@ export class CityPets {
 
 	update(dt: number): void {
 		const now = performance.now();
-		for (const pet of this.pets) {
+		const habitat = this.room ? HABITATS[this.room] : undefined;
+		// ¿Aparece? (rara vez)
+		if (habitat && !this.pets.length && !this.capture && now >= this.nextRoll) {
+			this.nextRoll = now + ROLL_MS;
+			if (now >= (this.cooldownUntil.get(habitat.id) ?? 0) && Math.random() < CHANCE) void this.spawn();
+		}
+		for (const pet of [...this.pets]) {
 			if (this.capture?.pet === pet) {
 				pet.model.update(dt);
 				continue;
 			}
-			if (!pet.model.root.visible) {
-				if (now < (this.respawnAt.get(pet.id) ?? 0)) continue;
-				this.respawnAt.delete(pet.id);
-				pet.model.root.visible = true;
-				pet.model.root.position.copy(pet.route[0]);
-				pet.model.root.scale.setScalar(pet.model.scale);
-				pet.next = 1;
-				pet.wait = 2.2;
+			// Aparece creciendo con un rebotito; se va achicándose.
+			if (pet.appearing > 0 && pet.appearing < 1) {
+				pet.appearing = Math.min(1, pet.appearing + dt * 2.5);
+				const k = pet.appearing;
+				pet.model.root.scale.setScalar(pet.model.scale * Math.max(0.001, 1 + 2.2 * Math.pow(k - 1, 3) + 1.2 * Math.pow(k - 1, 2)));
+			}
+			if (!pet.leaving && now >= pet.leaveAt) {
+				pet.leaving = 0.001;
+				pet.model.play('Startled');
+				this.cooldownUntil.set(pet.id, now + COOLDOWN_MS);
+			}
+			if (pet.leaving) {
+				pet.leaving += dt * 1.6;
+				pet.model.root.scale.setScalar(pet.model.scale * Math.max(0.001, 1 - pet.leaving));
+				pet.model.root.position.y = .045 + pet.leaving * 0.4;
+				pet.model.update(dt);
+				if (pet.leaving >= 1) {
+					this.burst(pet.model.root.position.clone().setY(0.2));
+					this.remove(pet);
+				}
+				continue;
 			}
 			pet.wait -= dt;
 			if (pet.wait <= 0) {
@@ -115,7 +189,7 @@ export class CityPets {
 				const distance = Math.hypot(dx, dz);
 				if (distance < .07) {
 					pet.next = (pet.next + 1) % pet.route.length;
-					pet.wait = 1.3 + Math.random() * 2.2;
+					pet.wait = 1.0 + Math.random() * 1.8;
 					pet.model.play('Idle');
 				} else {
 					const turn = Math.atan2(dx, dz) - pet.model.root.rotation.y;
@@ -126,7 +200,34 @@ export class CityPets {
 			}
 			pet.model.update(dt);
 		}
+		this.updateSparkles(dt);
 		this.updateCapture(dt);
+	}
+
+	private updateSparkles(dt: number): void {
+		const s = this.sparkles;
+		if (!s) return;
+		this.sparkleLife += dt;
+		const pos = s.geometry.attributes.position as THREE.BufferAttribute;
+		const seeds = s.geometry.userData.seeds as number[][];
+		for (let i = 0; i < pos.count; i++) {
+			const [a, r, up] = seeds[i];
+			const t = this.sparkleLife;
+			pos.setXYZ(i, Math.cos(a) * r * t * 1.6, up * t * 1.8 - t * t * 0.9, Math.sin(a) * r * t * 1.6);
+		}
+		pos.needsUpdate = true;
+		(s.material as THREE.PointsMaterial).opacity = Math.max(0, 1 - this.sparkleLife / 1.1);
+		if (this.sparkleLife > 1.1) {
+			s.removeFromParent();
+			s.geometry.dispose();
+			this.sparkles = null;
+		}
+	}
+
+	private remove(pet: Pet): void {
+		pet.model.root.removeFromParent();
+		pet.model.dispose();
+		this.pets = this.pets.filter((p) => p !== pet);
 	}
 
 	private updateCapture(dt: number): void {
@@ -150,11 +251,10 @@ export class CityPets {
 			orb.scale.setScalar(Math.min(1, Math.max(.001, (1 - impact) * 3)));
 		}
 		if (capture.time >= CAPTURE_TIME) {
-			pet.model.root.visible = false;
-			pet.model.play('Idle');
 			orb.removeFromParent();
 			pulse.removeFromParent();
 			this.capture = null;
+			this.remove(pet);
 		}
 	}
 
@@ -164,6 +264,7 @@ export class CityPets {
 		this.pets = [];
 		this.capture = null;
 		this.sphere = null;
+		this.sparkles = null;
 		this.root.clear();
 	}
 

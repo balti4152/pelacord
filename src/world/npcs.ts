@@ -84,6 +84,25 @@ const WALK_AREAS: Partial<Record<string, Array<[number, number, number, number]>
 };
 const WALKERS: Partial<Record<string, number>> = {city: 7, port: 2};
 
+/** Un cajoncito de madera (va debajo de los pies del vendedor). */
+function makeCrate(height: number, color: number): THREE.Group {
+	const group = new THREE.Group();
+	const wood = new THREE.MeshStandardMaterial({color, roughness: 0.75});
+	const dark = new THREE.MeshStandardMaterial({color: new THREE.Color(color).multiplyScalar(0.7), roughness: 0.8});
+	const body = new THREE.Mesh(new THREE.BoxGeometry(0.66, height, 0.56), wood);
+	body.position.y = -height / 2;
+	body.castShadow = true;
+	body.receiveShadow = true;
+	group.add(body);
+	// Listones para que se lea como cajón.
+	for (const y of [-height * 0.25, -height * 0.75]) {
+		const slat = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.04, 0.58), dark);
+		slat.position.y = y;
+		group.add(slat);
+	}
+	return group;
+}
+
 export class Npcs {
 	private list: Npc[] = [];
 	private clampFn: (p: THREE.Vector3) => THREE.Vector3 = (p) => p;
@@ -139,6 +158,14 @@ export class Npcs {
 		actor.target.copy(pos);
 		actor.ry = ry;
 		if (label) actor.labelEl.classList.add('is-npc');
+		// Los vendedores van parados arriba de un cajón: detrás del mostrador, con la cámara de arriba,
+		// sólo se les veía el pelo.
+		if (kind === 'shop' || kind === 'fish') {
+			const lift = 0.46;
+			actor.pos.y = lift;
+			actor.target.y = lift;
+			actor.avatar.root.add(makeCrate(lift, kind === 'fish' ? 0x6f8fb3 : 0xb9824f));
+		}
 		const npc: Npc = {actor, kind, label: kind === 'shop' ? 'Hablar con Mili' : kind === 'fish' ? 'Vender pescado a Tano' : undefined, speed: 1.2, wait: 0, base: 'idle'};
 		this.list.push(npc);
 		return npc;

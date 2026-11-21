@@ -9,6 +9,10 @@ import * as THREE from 'three';
 import {CSS2DObject, CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {Avatar, type BaseAnim, loadGLB} from '@/world/avatars';
 import {Ambience} from '@/world/ambience';
+import {Dust} from '@/world/dust';
+import {Cinematic} from '@/world/cinematic';
+import {CameraOcclusion} from '@/world/cameraOcclusion';
+import {furnitureColor} from '@/world/furnitureColors';
 import {CAPTURE_RANGE, CityPets} from '@/world/cityPets';
 import {isPetId, type PetId} from '@/world/petCatalog';
 import {PetCompanion} from '@/world/petCompanion';
@@ -32,7 +36,14 @@ interface Bounds {
 	obstacles: Array<{x: number; z: number; r: number}>;
 	/** Zonas caminables sueltas (por ejemplo costanera + muelle): se queda en la más cercana. */
 	rects?: Array<[number, number, number, number]>;
+	/** Cajas que no se pueden atravesar (los edificios de la ciudad), calculadas del modelo. */
+	solids?: Array<[number, number, number, number]>;
 }
+
+/** Los edificios de la ciudad: se calcula su caja del modelo al cargar, así no se los atraviesa. */
+const SOLID_NAMES = /^(Cinema|Shop|Games|Lounge|MyHouse|FishStall|Lighthouse)$/;
+const BODY_RADIUS = 0.12;
+const isMoving = (anim: Anim): boolean => anim === 'walk' || anim === 'run';
 
 const box = (minX: number, maxX: number, minZ: number, maxZ: number, obstacles: Bounds['obstacles'] = []): Bounds => ({kind: 'box', minX, maxX, minZ, maxZ, radius: 0, obstacles});
 const BOUNDS: Record<string, Bounds> = {
@@ -131,13 +142,6 @@ function makeLabel(name: string, color: string, avatarUrl?: string): {el: HTMLDi
 	return {el, obj};
 }
 
-function lighten(hex: string, amount = 0.18): THREE.Color {
-	const color = new THREE.Color(hex);
-	const hsl = {h: 0, s: 0, l: 0};
-	color.getHSL(hsl);
-	return new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + amount));
-}
-
 export class WorldEngine {
 	private renderer: THREE.WebGLRenderer;
 	private labels: CSS2DRenderer;
@@ -148,6 +152,7 @@ export class WorldEngine {
 	private roomGroup = new THREE.Group();
 	private furnitureGroup = new THREE.Group();
 	private actorsGroup = new THREE.Group();
+	private occlusion = new CameraOcclusion();
 	/** Lo que pone el juego de mesa (cartas, fichas) sobre la mesa. */
 	readonly tableRoot = new THREE.Group();
 	private seats: Seat[] = [];
@@ -157,6 +162,10 @@ export class WorldEngine {
 	private tvPoint: THREE.Vector3 | null = null;
 	private npcs: Npcs;
 	private pets = new CityPets();
+	/** Aviso cuando aparece una mascota salvaje (es raro: se avisa para que la busquen). */
+	set onPetAppear(cb: ((name: string) => void) | null) {
+		this.pets.onAppear = cb;
+	}
 	private ambience: Ambience;
 	private active = true;
 	/** Suena música en la tele de esta sala: los que están quietos bailan. */
@@ -228,7 +237,8 @@ export class WorldEngine {
 		this.sun = sun;
 
 		this.npcs = new Npcs((id, name, color, look, label) => this.createActor(id, name, color, look, undefined, label));
-		this.ambience = new Ambience(this.scene);
+		this.ambience = new Ambience(this.scene, this.sun, this.skyFill);
+		this.dust = new Dust(this.scene);
 
 		this.promptEl = document.createElement('div');
 		this.promptEl.className = 'w-prompt';
@@ -244,6 +254,7 @@ export class WorldEngine {
 		window.addEventListener('keydown', this.onKeyDown);
 		window.addEventListener('keyup', this.onKeyUp);
 		window.addEventListener('blur', this.onBlur);
+		this.fx = new Cinematic(this.renderer, this.scene, this.camera);
 		this.resizeObserver = new ResizeObserver(() => this.resize());
 		this.resizeObserver.observe(container);
 		this.resize();
@@ -252,6 +263,7 @@ export class WorldEngine {
 	}
 
 	private sun: THREE.DirectionalLight;
+	private fx!: Cinematic;
 	private skyFill: THREE.HemisphereLight;
 
 	// ------------------------------------------------------------ salas ----
@@ -268,9 +280,11 @@ export class WorldEngine {
 		const scene = gltf.scene.clone(true);
 		this.bounds = BOUNDS[isHouse ? 'house' : room] ?? BOUNDS.living;
 		this.prepareScene(scene, false);
+		this.bounds = {...this.bounds, solids: this.findSolids(scene)};
 		this.limitLights(scene, 6);
 		this.roomGroup.add(scene);
 		scene.updateMatrixWorld(true);
+		this.occlusion.setRoom(scene.children);
 		const spawn = scene.getObjectByName('Spawn');
 		if (spawn) spawn.getWorldPosition(this.spawn);
 		else this.spawn.set(0, 0, -3);
@@ -292,17 +306,12 @@ export class WorldEngine {
 		this.tableRoot.position.copy(this.tableCenter ?? new THREE.Vector3(0, -50, 0));
 		this.exitPoint = room === 'city' ? null : this.clamp(new THREE.Vector3(this.spawn.x, 0, this.spawn.z - 0.7));
 		this.npcs.setup(room, scene, (p) => this.clamp(p));
-		if (room === 'city') {
-			this.roomGroup.add(this.pets.root);
-			void this.pets.enterCity();
-		}
+		// Mascotas salvajes: cada lugar tiene la suya (y aparecen muy de vez en cuando).
+		this.roomGroup.add(this.pets.root);
+		void this.pets.enterRoom(room);
 		this.ambience.setup(room, scene);
-		this.skyFill.color.set(room === 'city' ? 0xf2dcff : 0xd9ccff);
-		this.skyFill.groundColor.set(room === 'city' ? 0xaf7e7a : 0x3a2552);
-		this.skyFill.intensity = room === 'city' ? 1.51 : 1.25;
-		this.sun.color.set(room === 'city' ? 0xffd6ac : 0xfff0dd);
-		this.sun.intensity = room === 'city' ? 2.25 : 1.5;
-		this.sun.shadow.normalBias = room === 'city' ? .034 : 0;
+		// Color del polvo según el piso.
+		this.dust.setTint(room === 'port' ? 0xf2e2c4 : room === 'campfire' ? 0xd9c2a3 : room === 'city' ? 0xe6d3c4 : 0xe4d6ea);
 		this.stopFishing();
 		this.setTvView(false);
 		this.sun.position.set(-4, room === 'city' ? 16 : 10, -6);
@@ -322,7 +331,40 @@ export class WorldEngine {
 		}
 	}
 
+	/** Cajas en el piso de los edificios (sin contar lo que está alto, como toldos y carteles). */
+	private findSolids(root: THREE.Object3D): Array<[number, number, number, number]> {
+		root.updateMatrixWorld(true);
+		const solids: Array<[number, number, number, number]> = [];
+		root.traverse((obj) => {
+			if (!SOLID_NAMES.test(obj.name)) return;
+			const v = new THREE.Vector3();
+			let minX = Infinity;
+			let maxX = -Infinity;
+			let minZ = Infinity;
+			let maxZ = -Infinity;
+			// En glTF un objeto con varios materiales llega como grupo: se recorren sus pedazos.
+			const meshes: THREE.Mesh[] = [];
+			if ((obj as THREE.Mesh).isMesh) meshes.push(obj as THREE.Mesh);
+			for (const child of obj.children) if ((child as THREE.Mesh).isMesh && !/Sign|Text/i.test(child.name)) meshes.push(child as THREE.Mesh);
+			for (const mesh of meshes) {
+				const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+				for (let i = 0; i < pos.count; i++) {
+					v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld);
+					// Sólo lo que está a la altura del cuerpo (los toldos y carteles salen más adelante).
+					if (v.y > 1.6 || v.y < -0.05) continue;
+					minX = Math.min(minX, v.x);
+					maxX = Math.max(maxX, v.x);
+					minZ = Math.min(minZ, v.z);
+					maxZ = Math.max(maxZ, v.z);
+				}
+			}
+			if (Number.isFinite(minX)) solids.push([minX, maxX, minZ, maxZ]);
+		});
+		return solids;
+	}
+
 	private clearRoom(): void {
+		this.occlusion.clear();
 		this.pets.clear();
 		this.roomGroup.clear();
 		this.furnitureGroup.clear();
@@ -432,6 +474,7 @@ export class WorldEngine {
 			obj.traverse((child) => this.furnitureClickable.set(child, item.uid));
 			this.collectSeats(obj, `${item.uid}:`);
 		});
+		this.occlusion.setFurniture(this.furnitureGroup.children);
 	}
 
 	private recolor(obj: THREE.Object3D, hex: string): void {
@@ -439,8 +482,9 @@ export class WorldEngine {
 			const mesh = child as THREE.Mesh;
 			if (!mesh.isMesh) return;
 			const mat = mesh.material as THREE.MeshStandardMaterial;
-			if (mat.name === 'Base') mesh.material = Object.assign(mat.clone(), {color: new THREE.Color(hex)});
-			else if (mat.name === 'BaseLight') mesh.material = Object.assign(mat.clone(), {color: lighten(hex)});
+			if (mat.name === 'Base' || mat.name === 'BaseLight') {
+				mesh.material = Object.assign(mat.clone(), {color: furnitureColor(hex, mat.name === 'BaseLight')});
+			}
 		});
 	}
 
@@ -511,8 +555,8 @@ export class WorldEngine {
 			const reported = new THREE.Vector3(s.x, 0, s.z);
 			if (actor.pos.distanceTo(reported) > 2 || s.anim === 'sit') actor.pos.copy(reported);
 			actor.target.set(s.tx ?? s.x, 0, s.tz ?? s.z);
-			if (s.anim !== 'walk') actor.target.copy(reported);
-			if (s.anim !== 'walk') actor.ry = s.ry;
+			if (!isMoving(s.anim)) actor.target.copy(reported);
+			if (!isMoving(s.anim)) actor.ry = s.ry;
 		}
 	}
 
@@ -578,7 +622,13 @@ export class WorldEngine {
 		} else {
 			el.innerHTML = svg ?? '';
 		}
-		const obj = new CSS2DObject(el);
+		// El renderer de etiquetas ubica el elemento con `transform`: si la animación (que también usa
+		// `transform`) va en el mismo elemento, lo pisa y el cartelito aparecía en la esquina de la
+		// pantalla. Por eso va adentro de un "ancla" que sólo se posiciona.
+		const anchor = document.createElement('div');
+		anchor.className = 'w-pop-anchor';
+		anchor.append(el);
+		const obj = new CSS2DObject(anchor);
 		obj.position.set(0, 2.15, 0);
 		actor.avatar.root.add(obj);
 		setTimeout(() => obj.removeFromParent(), 1400);
@@ -996,6 +1046,20 @@ export class WorldEngine {
 			point.x = THREE.MathUtils.clamp(point.x, b.minX, b.maxX);
 			point.z = THREE.MathUtils.clamp(point.z, b.minZ, b.maxZ);
 		}
+		// Edificios: si quedó adentro de uno, se lo empuja al borde más cercano.
+		for (const [x1, x2, z1, z2] of b.solids ?? []) {
+			const minX = x1 - BODY_RADIUS;
+			const maxX = x2 + BODY_RADIUS;
+			const minZ = z1 - BODY_RADIUS;
+			const maxZ = z2 + BODY_RADIUS;
+			if (point.x <= minX || point.x >= maxX || point.z <= minZ || point.z >= maxZ) continue;
+			const pushes = [point.x - minX, maxX - point.x, point.z - minZ, maxZ - point.z];
+			const k = pushes.indexOf(Math.min(...pushes));
+			if (k === 0) point.x = minX;
+			else if (k === 1) point.x = maxX;
+			else if (k === 2) point.z = minZ;
+			else point.z = maxZ;
+		}
 		for (const o of b.obstacles) {
 			const dx = point.x - o.x;
 			const dz = point.z - o.z;
@@ -1216,7 +1280,8 @@ export class WorldEngine {
 		for (const actor of this.others.values()) this.stepOther(actor, dt);
 		this.npcs.update(dt, this.me?.pos ?? null, this.musicOn, (a, d) => this.turn(a, d.wanted, d.dt));
 		this.pets.update(dt);
-		this.ambience.update(dt, t);
+		const night = this.ambience.update(t);
+		this.dust.update(dt);
 		this.updateFishing(t);
 		for (const tick of this.tickers) tick(dt);
 		const taken = new Set<string>([...this.others.values()].map((a) => a.seat).filter(Boolean) as string[]);
@@ -1248,8 +1313,17 @@ export class WorldEngine {
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
 		this.sun.position.set((this.me?.pos.x ?? 0) - (city ? 8.4 : 4), city ? 10.8 : 12, (this.me?.pos.z ?? 0) - 6);
+		this.occlusion.update(this.camera.position, this.tvView || this.tableSeat !== null ? null : this.me?.pos ?? null, dt);
 
-		this.renderer.render(this.scene, this.camera);
+		// Enfoque en mi personaje: afuera el fondo se desenfoca más; en la mesa o mirando la tele, casi nada.
+		if (this.fx) {
+			const focusAt = this.tvView || this.tableSeat !== null ? this.camLook : (this.me?.pos ?? this.camLook);
+			const outdoor = this.room === 'city' || this.room === 'port' || this.room === 'campfire';
+			// Adentro (casas, locales) nada de desenfoque ni brillo: encandilaba todo.
+			this.fx.setOutdoor(outdoor);
+			this.fx.setFocus(this.camera.position.distanceTo(focusAt), this.tvView || this.tableSeat !== null ? 0.15 : 1, night);
+			this.fx.render(this.scene, this.camera);
+		} else this.renderer.render(this.scene, this.camera);
 		this.labels.render(this.scene, this.camera);
 	};
 
@@ -1272,14 +1346,16 @@ export class WorldEngine {
 			actor.pos.copy(this.clamp(next));
 			actor.target.copy(actor.pos).add(new THREE.Vector3((ix / length) * 0.8, 0, (iz / length) * 0.8));
 			this.turn(actor, Math.atan2(ix, iz), dt);
-			if (actor.anim !== 'walk') {
-				actor.anim = 'walk';
+			// Con Shift corre (otra animación, no la misma caminata apurada).
+			const gait: Anim = this.keys.has('shift') ? 'run' : 'walk';
+			if (actor.anim !== gait) {
+				actor.anim = gait;
 				this.announce(true);
 			} else {
 				this.announce();
 			}
 			this.moved = true;
-		} else if (actor.anim === 'walk') {
+		} else if (isMoving(actor.anim)) {
 			const toTarget = actor.target.clone().sub(actor.pos).setY(0);
 			const distance = toTarget.length();
 			if (this.moved || distance < 0.05) {
@@ -1299,7 +1375,6 @@ export class WorldEngine {
 		this.place(actor, dt);
 	}
 
-	/** Lo que se VE: quieto con música en la sala = bailando. */
 	/** Lo que se ve de un jugador. Con música en la tele bailan sólo los NPC: los jugadores bailan
 	 * cuando ellos quieren (con el emote). */
 	private visualAnim(anim: Anim): BaseAnim {
@@ -1307,14 +1382,14 @@ export class WorldEngine {
 	}
 
 	private stepOther(actor: Actor, dt: number): void {
-		if (actor.anim === 'walk') {
+		if (isMoving(actor.anim)) {
 			const toTarget = actor.target.clone().sub(actor.pos).setY(0);
 			const distance = toTarget.length();
 			if (distance > 0.05) {
-				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, RUN_SPEED * dt)));
+				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, (actor.anim === 'run' ? RUN_SPEED * 1.15 : WALK_SPEED * 1.3) * dt)));
 				this.turn(actor, Math.atan2(toTarget.x, toTarget.z), dt);
 			}
-			actor.avatar.setBase(distance > 0.05 ? 'walk' : this.visualAnim('idle'));
+			actor.avatar.setBase(distance > 0.05 ? (actor.anim as BaseAnim) : this.visualAnim('idle'));
 		} else {
 			actor.avatar.setBase(actor.avatar.isGhost() ? 'idle' : this.visualAnim(actor.anim));
 		}
@@ -1335,6 +1410,41 @@ export class WorldEngine {
 		actor.labelEl.classList.toggle('is-speaking', talking);
 		actor.avatar.update(dt);
 		actor.companion?.update(actor.pos, actor.ry, dt);
+		this.kickDust(actor, dt);
+	}
+
+	private dust!: Dust;
+	private dustState = new WeakMap<object, {t: number; gait: string; foot: number}>();
+
+	/** Polvito de los pies: al correr, al arrancar y al frenar (y un poquito al caminar). */
+	private kickDust(actor: Actor, dt: number): void {
+		const gait = actor.avatar.getBase();
+		let state = this.dustState.get(actor);
+		if (!state) {
+			state = {t: 0, gait, foot: 1};
+			this.dustState.set(actor, state);
+		}
+		const back = new THREE.Vector3(-Math.sin(actor.ry), 0, -Math.cos(actor.ry));
+		const side = new THREE.Vector3(Math.cos(actor.ry), 0, -Math.sin(actor.ry));
+		if (gait !== state.gait) {
+			// Arranca a correr: ¡puf! grande. Frena de golpe: nubecita adelante.
+			if (gait === 'run') this.dust.emit(actor.pos, 7, {back, size: 0.3, spread: 0.9, up: 0.4});
+			else if (state.gait === 'run' && (gait === 'idle' || gait === 'walk')) this.dust.emit(actor.pos.clone().addScaledVector(back, -0.25), 5, {size: 0.26, spread: 0.8, up: 0.3});
+			state.gait = gait;
+			state.t = 0;
+		}
+		if (gait !== 'run' && gait !== 'walk') return;
+		state.t -= dt;
+		if (state.t > 0) return;
+		state.foot *= -1;
+		const foot = actor.pos.clone().addScaledVector(side, 0.09 * state.foot).addScaledVector(back, 0.12);
+		if (gait === 'run') {
+			this.dust.emit(foot, 2, {back, size: 0.32, spread: 0.4, up: 0.35, life: 0.65});
+			state.t = 0.16;
+		} else {
+			this.dust.emit(foot, 1, {back, size: 0.14, spread: 0.2, up: 0.2, life: 0.45});
+			state.t = 0.34;
+		}
 	}
 
 	/** Busca lo más cercano con lo que se puede interactuar y muestra el cartel "E …". */
@@ -1396,6 +1506,7 @@ export class WorldEngine {
 		const width = this.container.clientWidth || 1;
 		const height = this.container.clientHeight || 1;
 		this.renderer.setSize(width, height, false);
+		this.fx?.setSize(width, height);
 		this.labels.setSize(width, height);
 		this.camera.aspect = width / height;
 		this.camera.updateProjectionMatrix();
@@ -1417,11 +1528,14 @@ export class WorldEngine {
 		this.npcs.dispose();
 		this.pets.dispose();
 		this.ambience.dispose();
+		this.dust.dispose();
+		this.occlusion.clear();
 		for (const actor of this.others.values()) {
 			actor.avatar.dispose();
 			actor.companion?.dispose();
 		}
 		this.screenVideo?.pause();
+		this.fx?.dispose();
 		this.renderer.dispose();
 		this.renderer.domElement.remove();
 		this.labels.domElement.remove();

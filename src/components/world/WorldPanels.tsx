@@ -1,16 +1,33 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Bed, Check, Coins, Crown, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
+	Armchair, Bed, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Lamp, Lock, Plus, Popcorn, Shirt,
 	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import {Avatar} from '@/world/avatars';
+import {ProductPreview} from '@/components/world/ProductPreview';
 import {buy, type Catalog, type CatalogItem, type ColorKey, type Look, owns, type PlacedFurniture, SLOT_LABEL, type Slot, updateProfile, useProfile} from '@/world/core';
 import {CARD_COLOR_HEX, type CardColor, TABLE_GAMES, type TableGameKind, type TableSession} from '@/world/tableGames';
 
+const HairIcon = createLucideIcon('WorldHair', [
+	['path', {d: 'M4 14V9a8 8 0 0 1 16 0v5M4 13c4-1 7-3 8-6 2 3 4 5 8 6M7 16a5 5 0 0 0 10 0', key: 'hair'}],
+]);
+const BrowsIcon = createLucideIcon('WorldBrows', [
+	['path', {d: 'M2 11c2.5-2.5 5.5-2.5 8-1m4 0c2.5-1.5 5.5-1.5 8 1M6 15h.01M18 15h.01', key: 'brows'}],
+]);
+const MouthIcon = createLucideIcon('WorldMouth', [
+	['path', {d: 'M3 10c3-1 5-3 7-3 1 0 2 1 2 1s1-1 2-1c2 0 4 2 7 3-1 4-5 7-9 7s-8-3-9-7Zm0 0c3 1 6 2 9 2s6-1 9-2', key: 'mouth'}],
+]);
+const CheeksIcon = createLucideIcon('WorldCheeks', [
+	['path', {d: 'M8 8h.01M16 8h.01M9 15c1.5 2 4.5 2 6 0M3 12l2-1m0 3 2-1m10 0 2 1m0-3 2 1', key: 'cheeks'}],
+]);
+const BottomIcon = createLucideIcon('WorldBottom', [
+	['path', {d: 'M5 3h14l2 18h-6l-3-10-3 10H3L5 3Zm0 4h14', key: 'bottom'}],
+]);
+
 export const SLOT_ICON: Record<string, LucideIcon> = {
-	hair: Sparkles, eyes: Eye, brows: Glasses, mouth: Smile, cheeks: Smile, top: Shirt, bottom: Shirt, shoes: Footprints,
+	hair: HairIcon, eyes: Eye, brows: BrowsIcon, mouth: MouthIcon, cheeks: CheeksIcon, top: Shirt, bottom: BottomIcon, shoes: Footprints,
 	hat: Crown, costume: Popcorn, furniture: Armchair, asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles,
 };
 
@@ -112,6 +129,30 @@ export function Panel({title, icon: Icon, onClose, className = '', children, coi
 	);
 }
 
+function CategoryTabs({children, label}: {children: ReactNode; label: string}): JSX.Element {
+	const ref = useRef<HTMLElement>(null);
+
+	useEffect(() => {
+		const row = ref.current;
+		if (!row) return;
+		const wheel = (event: WheelEvent) => {
+			if (event.ctrlKey || event.shiftKey || Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+			const limit = row.scrollWidth - row.clientWidth;
+			if (limit <= 0) return;
+			const {deltaMode, deltaY} = event;
+			const unit = deltaMode === 1 ? 18 : deltaMode === 2 ? row.clientWidth : 1;
+			const next = Math.max(0, Math.min(limit, row.scrollLeft + deltaY * unit));
+			if (next === row.scrollLeft) return;
+			event.preventDefault();
+			row.scrollLeft = next;
+		};
+		row.addEventListener('wheel', wheel, {passive: false});
+		return () => row.removeEventListener('wheel', wheel);
+	}, []);
+
+	return <nav ref={ref} className="t-tabs t-category-tabs" aria-label={label}>{children}</nav>;
+}
+
 function Swatches({colors, value, onPick}: {colors: string[]; value: string; onPick: (c: string) => void}): JSX.Element {
 	return (
 		<div className="t-swatches">
@@ -129,7 +170,7 @@ function Swatches({colors, value, onPick}: {colors: string[]; value: string; onP
 
 const EDITOR_TABS: Array<{id: string; label: string; icon: LucideIcon; slots: Slot[]}> = [
 	{id: 'body', label: 'Cuerpo', icon: User, slots: []},
-	{id: 'hair', label: 'Pelo', icon: Sparkles, slots: ['hair']},
+	{id: 'hair', label: 'Pelo', icon: HairIcon, slots: ['hair']},
 	{id: 'face', label: 'Cara', icon: Smile, slots: ['eyes', 'brows', 'mouth', 'cheeks']},
 	{id: 'clothes', label: 'Ropa', icon: Shirt, slots: ['top', 'bottom', 'shoes']},
 	{id: 'extras', label: 'Accesorios', icon: Crown, slots: ['hat', 'costume']},
@@ -182,13 +223,13 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 					</div>
 				</div>
 				<div className="t-editor-side">
-					<nav className="t-tabs">
+					<CategoryTabs label="Categorías de personalización">
 						{EDITOR_TABS.map((t) => (
 							<button key={t.id} type="button" className={t.id === tab ? 'is-active' : ''} onClick={() => setTab(t.id)}>
 								<t.icon size={16} strokeWidth={2.6} /> {t.label}
 							</button>
 						))}
-					</nav>
+					</CategoryTabs>
 					<div className="t-scroll">
 						{current.slots.map((slot) => {
 							const items = catalog.items.filter((i) => i.slot === slot);
@@ -199,7 +240,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 									<div className="t-grid">
 										{OPTIONAL.includes(slot) ? (
 											<button type="button" className={`t-item${!(draft as unknown as Record<string, string | null>)[slot] ? ' is-active' : ''}`} onClick={() => setDraft((d) => ({...d, [slot]: null}))}>
-												<span className="t-item-icon is-none"><X size={20} strokeWidth={3} /></span>
+												<span className="t-item-icon t-item-art is-none"><X size={20} strokeWidth={3} /></span>
 												<span>Nada</span>
 											</button>
 										) : null}
@@ -208,7 +249,8 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 											const active = (draft as unknown as Record<string, string | null>)[slot] === item.id;
 											return (
 												<button key={item.id} type="button" className={`t-item${active ? ' is-active' : ''}${have ? '' : ' is-locked'}`} onClick={() => setDraft((d) => ({...d, [slot]: item.id}))}>
-													<span className="t-item-icon"><Icon size={20} strokeWidth={2.4} /></span>
+													<ProductPreview className="t-item-art" item={item} avatarUrl={catalog.avatar.glb} look={draft}
+														fallback={<Icon size={20} strokeWidth={2.4} />} />
 													<span>{item.name}</span>
 													{have ? null : <span className="t-price"><Lock size={11} strokeWidth={3} /> {item.price}</span>}
 												</button>
@@ -258,7 +300,7 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 	return (
 		<Panel title={kind === 'furniture' ? 'Muebles' : 'Ropa y estilo'} icon={kind === 'furniture' ? Armchair : Shirt} onClose={onClose} className="t-shop" coins={profile.coins}>
 			{onSupplies ? <button type="button" className="t-btn is-soft t-pet-shop-link" onClick={onSupplies}><Sparkles size={16} /> Esferas de captura</button> : null}
-			<nav className="t-tabs">
+			<CategoryTabs label="Categorías de la tienda">
 				{sections.map((s) => {
 					const Icon = SLOT_ICON[s] ?? Sparkles;
 					return (
@@ -267,7 +309,7 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 						</button>
 					);
 				})}
-			</nav>
+			</CategoryTabs>
 			<div className="t-cards">
 				{items.map((item) => {
 					const have = item.slot !== 'furniture' && owns(item, profile);
@@ -276,9 +318,9 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 					const Icon = SLOT_ICON[item.slot === 'furniture' ? (item.category ?? 'deco') : item.slot] ?? Sparkles;
 					return (
 						<article key={item.id} className={`t-card${have ? ' is-owned' : ''}`}>
-							<span className="t-card-art" style={item.slot === 'furniture' && item.recolor?.length ? {background: color} : undefined}>
-								<Icon size={30} strokeWidth={2.2} />
-							</span>
+							<ProductPreview className="t-card-art" item={item} avatarUrl={catalog.avatar.glb}
+								look={profile.look} color={item.slot === 'furniture' ? color : undefined}
+								fallback={<Icon size={30} strokeWidth={2.2} />} />
 							<strong>{item.name}</strong>
 							<span className="t-card-price">{item.price === 0 ? 'Gratis' : <><Coins size={13} strokeWidth={2.6} /> {item.price}</>}</span>
 							{item.slot === 'furniture' && item.recolor?.length ? (

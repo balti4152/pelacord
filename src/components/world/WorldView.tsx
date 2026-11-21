@@ -121,10 +121,12 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 		return map;
 	}, [state.members]);
 
+	const flashRef = useRef<(message: string) => void>(() => {});
 	function flash(message: string): void {
 		setToast(message);
 		setTimeout(() => setToast((t) => (t === message ? '' : t)), 3200);
 	}
+	flashRef.current = flash;
 
 	// ------------------------------------------------------------- anuncio --
 
@@ -191,6 +193,7 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 		const tableView = new TableView(engine.tableRoot);
 		tableViewRef.current = tableView;
 		engine.tickers.add((dt) => tableView.tick(dt));
+		engine.onPetAppear = (name) => flashRef.current(`¡Apareció ${name}! Atrapalo antes de que se vaya`);
 		const p = getProfile();
 		void engine.setMe(state.me.id, state.me.name, state.me.avatarColor, p.look, state.me.avatarUrl);
 		engine.setEquippedPet(p.equippedPet);
