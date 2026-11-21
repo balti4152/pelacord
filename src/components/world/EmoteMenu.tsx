@@ -1,0 +1,56 @@
+import {Bot, Crown, Hand, Heart, HelpCircle, Laugh, Music2, PartyPopper, Sparkles, X} from 'lucide-react';
+import type {LucideIcon} from 'lucide-react';
+import type {Emote} from '@/world/core';
+
+export type LoopEmote = 'dance' | 'robot' | 'clap';
+
+export interface EmoteDef {
+	id: Emote | LoopEmote;
+	label: string;
+	icon: LucideIcon;
+	color: string;
+	loop?: boolean;
+	key: string;
+	flip?: boolean;
+}
+
+/** Todos los gestos, en el orden de las teclas 1…0. */
+export const EMOTES: EmoteDef[] = [
+	{id: 'wave', label: 'Saludar', icon: Hand, color: '#4fb3ff', key: '1'},
+	{id: 'laugh', label: 'Risa', icon: Laugh, color: '#ffc93c', key: '2'},
+	{id: 'slap', label: 'Cachetada', icon: Hand, color: '#ff6b5b', key: '3', flip: true},
+	{id: 'cheer', label: 'Festejar', icon: PartyPopper, color: '#38d39f', key: '4'},
+	{id: 'heart', label: 'Corazón', icon: Heart, color: '#ff6fae', key: '5'},
+	{id: 'bow', label: 'Reverencia', icon: Crown, color: '#c6a2ff', key: '6'},
+	{id: 'shrug', label: 'Ni idea', icon: HelpCircle, color: '#9fb4c9', key: '7'},
+	{id: 'dance', label: 'Bailar', icon: Music2, color: '#8a5cff', key: '8', loop: true},
+	{id: 'robot', label: 'Robot', icon: Bot, color: '#3fc2c9', key: '9', loop: true},
+	{id: 'clap', label: 'Aplaudir', icon: Sparkles, color: '#ff9e3c', key: '0', loop: true},
+];
+
+/** El menú de gestos (se abre con el botón "Emotes" o con Q). */
+export function EmoteMenu({active, onPick, onClose}: {active: string; onPick: (emote: EmoteDef) => void; onClose: () => void}): JSX.Element {
+	return (
+		<div className="t-emote-menu" onKeyDown={(e) => e.stopPropagation()}>
+			<header>
+				<strong>Emotes</strong>
+				<small>Teclas <kbd>1</kbd>…<kbd>0</kbd> · los bailes duran hasta que te movés</small>
+				<button type="button" className="t-close is-small" onClick={onClose} aria-label="Cerrar"><X size={14} strokeWidth={3} /></button>
+			</header>
+			<div className="t-emote-grid">
+				{EMOTES.map((e) => (
+					<button
+						key={e.id}
+						type="button"
+						className={`t-emote${active === e.id ? ' is-active' : ''}${e.loop ? ' is-loop' : ''}`}
+						style={{'--e': e.color} as React.CSSProperties}
+						onClick={() => onPick(e)}>
+						<span className="t-emote-icon"><e.icon size={24} strokeWidth={2.6} className={e.flip ? 'is-flip' : ''} /></span>
+						<span>{e.label}</span>
+						<kbd>{e.key}</kbd>
+					</button>
+				))}
+			</div>
+		</div>
+	);
+}

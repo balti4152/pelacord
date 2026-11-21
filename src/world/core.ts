@@ -6,6 +6,7 @@
  */
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {getDesktopTransport} from '@/lib/desktop';
+import {isPetId, type PetId} from '@/world/petCatalog';
 
 // ------------------------------------------------------------------ tipos ---
 
@@ -49,7 +50,7 @@ export interface Catalog {
 	items: CatalogItem[];
 }
 
-export type RoomId = 'city' | 'living' | 'cinema' | 'campfire' | 'shop' | 'games' | `house:${string}`;
+export type RoomId = 'city' | 'living' | 'cinema' | 'campfire' | 'shop' | 'games' | 'port' | `house:${string}`;
 
 export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string; glb: string; icon: string}> = [
 	{id: 'city', name: 'Ciudad', glb: 'models/room_city.glb', icon: 'map'},
@@ -58,6 +59,7 @@ export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}`>; name: string;
 	{id: 'campfire', name: 'Campamento', glb: 'models/room_campfire.glb', icon: 'flame'},
 	{id: 'shop', name: 'Tienda', glb: 'models/room_shop.glb', icon: 'store'},
 	{id: 'games', name: 'Casa de juegos', glb: 'models/room_games.glb', icon: 'dice'},
+	{id: 'port', name: 'Puerto', glb: 'models/room_port.glb', icon: 'anchor'},
 ];
 export const HOUSE_GLB = 'models/room_house.glb';
 
@@ -71,7 +73,7 @@ export interface PlacedFurniture {
 	rot: number;
 }
 
-export type Anim = 'idle' | 'walk' | 'sit';
+export type Anim = 'idle' | 'walk' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
 
 /** Lo que cada uno anuncia del mundo. */
 export interface PlayerState {
@@ -89,10 +91,14 @@ export interface PlayerState {
 	tz?: number;
 	look: Look;
 	house: PlacedFurniture[];
+	equippedPet?: PetId | null;
 	t: number;
+	/** Está en la parte 2D de PelaCord: su personaje queda quieto, gris y medio transparente. */
+	away?: boolean;
 }
 
-export type Emote = 'wave' | 'slap' | 'laugh';
+/** Gestos de una vez. Los bailes ('dance', 'robot', 'clap') son estados (`Anim`): duran hasta moverse. */
+export type Emote = 'wave' | 'slap' | 'laugh' | 'cheer' | 'bow' | 'shrug' | 'heart';
 
 export type WorldMessage =
 	| {kind: 'state'; s: PlayerState}
@@ -146,6 +152,19 @@ export interface WorldProfile {
 	furniture: PlacedFurniture[];
 	/** Ya armó su personaje la primera vez. */
 	created: boolean;
+	/** Peces pescados (id del pez → cuántos), para vender en el puerto. */
+	fish: Record<string, number>;
+	/** Récord de cada pez (el más grande, en cm). */
+	fishBest: Record<string, number>;
+	/** Cañas compradas y la que está usando. */
+	rods: string[];
+	rod: string;
+	/** Carnadas (id → cuántas quedan) y la que tiene puesta. */
+	bait: Record<string, number>;
+	activeBait: string | null;
+	captureSpheres: number;
+	pets: Record<string, number>;
+	equippedPet: PetId | null;
 }
 
 const PROFILE_KEY = 'pelacord.world.v1';
@@ -162,18 +181,28 @@ function readProfile(): WorldProfile {
 		const raw = localStorage.getItem(PROFILE_KEY);
 		if (raw) {
 			const parsed = JSON.parse(raw) as Partial<WorldProfile>;
+			const pets = Object.fromEntries(Object.entries(parsed.pets ?? {}).filter(([, count]) => Number.isSafeInteger(count) && count > 0));
 			return {
 				look: {...DEFAULT_LOOK, ...(parsed.look ?? {}), colors: {...DEFAULT_LOOK.colors, ...(parsed.look?.colors ?? {})}},
 				owned: Array.isArray(parsed.owned) ? parsed.owned : [],
 				coins: typeof parsed.coins === 'number' ? parsed.coins : START_COINS,
 				furniture: Array.isArray(parsed.furniture) ? parsed.furniture : [],
 				created: Boolean(parsed.created),
+				fish: parsed.fish && typeof parsed.fish === 'object' ? parsed.fish : {},
+				fishBest: parsed.fishBest && typeof parsed.fishBest === 'object' ? parsed.fishBest : {},
+				rods: Array.isArray(parsed.rods) && parsed.rods.length ? parsed.rods : ['bambu'],
+				rod: typeof parsed.rod === 'string' ? parsed.rod : 'bambu',
+				bait: parsed.bait && typeof parsed.bait === 'object' ? parsed.bait : {},
+				activeBait: typeof parsed.activeBait === 'string' ? parsed.activeBait : null,
+				captureSpheres: Number.isSafeInteger(parsed.captureSpheres) ? Math.max(0, parsed.captureSpheres!) : 0,
+				pets,
+				equippedPet: isPetId(parsed.equippedPet) && pets[parsed.equippedPet] ? parsed.equippedPet : null,
 			};
 		}
 	} catch {
 		// perfil roto: se arranca de cero
 	}
-	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false};
+	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false, fish: {}, fishBest: {}, rods: ['bambu'], rod: 'bambu', bait: {}, activeBait: null, captureSpheres: 0, pets: {}, equippedPet: null};
 }
 
 let profile: WorldProfile = typeof localStorage === 'undefined' ? readProfile() : readProfile();

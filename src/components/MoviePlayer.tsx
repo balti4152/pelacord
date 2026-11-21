@@ -33,7 +33,12 @@ function formatTime(seconds: number): string {
 		: `${minutes}:${String(rest).padStart(2, '0')}`;
 }
 
-export function MoviePlayer(): JSX.Element | null {
+/**
+ * `tv`: modo "tele del mundo 3D". El video se dibuja dentro de `tv.host` (un recuadro que el mundo
+ * pone justo encima de la pantalla), sin controles propios (se manejan desde el panel de la tele) y
+ * con el volumen que da la distancia a la pantalla.
+ */
+export function MoviePlayer({tv}: {tv?: {host: HTMLElement; volume: number}} = {}): JSX.Element | null {
 	const {state, myJoinedMovieRoom, movieCommand, movieHostSync, movieLeave, movieRoomViewers} = useStore();
 	const room = myJoinedMovieRoom;
 	const isHost = Boolean(room && room.hostId === state.me.id);
@@ -190,13 +195,17 @@ export function MoviePlayer(): JSX.Element | null {
 
 	// Los que NO son host siguen al host: si se desviaron mucho, se corrigen.
 	useEffect(() => {
-		if (!room || isHost) return;
+		// El host también sigue a la sala: así las órdenes de los demás (pausa, adelantar desde la
+		// tele del mundo) le llegan a SU reproductor, que es el que manda el tiempo.
+		if (!room) return;
 		// Por dónde va la sala, calculado con MI reloj desde que me llegó esta versión (ver
 		// expectedPositionMs): así un desfase de relojes entre las máquinas no lo corre para siempre.
 		const expected = expectedPositionMs(room, roomArrivedAt.current);
 		const drift = positionRef.current * 1000 - expected;
 		if (room.paused !== pausedRef.current) {
 			send(room.paused ? 'pause' : 'play');
+			// Optimista: si no, el host podía reafirmar el estado viejo antes de enterarse.
+			if (ready) setPaused(room.paused);
 			return;
 		}
 		if (Math.abs(drift) > MOVIE_DRIFT_TOLERANCE_MS) {
@@ -227,8 +236,8 @@ export function MoviePlayer(): JSX.Element | null {
 	// El volumen se aplica apenas el reproductor está listo.
 	useEffect(() => {
 		if (!ready) return;
-		send('setVolume', [muted ? 0 : volume]);
-	}, [muted, volume, ready, send]);
+		send('setVolume', [muted ? 0 : tv ? tv.volume : volume]);
+	}, [muted, volume, ready, send, tv?.volume]);
 
 	// La duración, el tiempo y el estado de pausa se piden cada tanto: el embed no siempre los manda
 	// por eventos, y sin ellos la barra para adelantar y el botón de play/pausa quedan inutilizables.
@@ -245,6 +254,7 @@ export function MoviePlayer(): JSX.Element | null {
 	}, [ready, send]);
 
 	useEffect(() => {
+		if (tv) return;
 		const onKey = (event: KeyboardEvent) => {
 			if (event.key === 'Escape') movieLeave();
 			if (event.code === 'Space') {
@@ -255,7 +265,7 @@ export function MoviePlayer(): JSX.Element | null {
 		};
 		window.addEventListener('keydown', onKey);
 		return () => window.removeEventListener('keydown', onKey);
-	}, [act, movieLeave, mostrarControles, paused]);
+	}, [act, movieLeave, mostrarControles, paused, tv]);
 
 	// Los controles se esconden si no se mueve el mouse; pausado (o con los subtítulos abiertos) se
 	// quedan siempre a la vista.
@@ -285,6 +295,16 @@ export function MoviePlayer(): JSX.Element | null {
 	}, []);
 
 	if (!room || !media) return null;
+
+	if (tv) {
+		return createPortal(
+			<div className="movie-tv">
+				<div className="movie-stage" ref={hostRef} />
+				{loading ? <span className="movie-tv-loading"><Loader2 size={34} className="music-spin" /></span> : null}
+			</div>,
+			tv.host,
+		);
+	}
 
 	const viewers = movieRoomViewers(room.id).length + (isHost ? 1 : 0);
 

@@ -17,21 +17,15 @@ import math
 import os
 import sys
 
-import bmesh
 import bpy
-from mathutils import Vector
 
 sys.path.insert(0, os.path.dirname(__file__))
-import avatar  # noqa: E402
+from chibi import Chibi, animate  # noqa: E402
+import hair_assets  # noqa: E402
+from organic import ellipsoid, line, loft, sweep  # noqa: E402
 import toy  # noqa: E402
 
 DEG = math.radians
-
-# Forma del torso por cuerpo: ancho de hombros / cadera y profundidad. Sutil, estilo juguete.
-BODY_SHAPES = {
-	'M': {'shoulders': 1.10, 'hips': 0.98, 'depth': 0.84, 'chest': 1.0},
-	'F': {'shoulders': 0.94, 'hips': 1.08, 'depth': 0.80, 'chest': 1.04},
-}
 
 MATS = {}
 
@@ -41,45 +35,28 @@ def mats(suffix=''):
 	if key in MATS and all(m.name in bpy.data.materials for m in MATS[key].values()):
 		return MATS[key]
 	MATS[key] = {
-		'Skin': toy.material('Skin' + suffix, (0.98, 0.78, 0.62)),
-		'Hair': toy.material('Hair' + suffix, (0.30, 0.17, 0.10)),
+		'Skin': toy.material('Skin' + suffix, (0.98, 0.78, 0.62), roughness=.60),
+		'Hair': toy.material('Hair' + suffix, (0.30, 0.17, 0.10), roughness=.65),
 		'Top': toy.material('Top' + suffix, 'sofa_purple'),
 		'Bottom': toy.material('Bottom' + suffix, (0.22, 0.28, 0.52)),
 		'Shoes': toy.material('Shoes' + suffix, 'white'),
 		'Sole': toy.material('Sole' + suffix, 'coral'),
-		'Ink': toy.material('Ink', 'ink', roughness=0.6),
+		'Ink': toy.material('Ink', (.077, .048, .087), roughness=.26),
 		'Accent': toy.material('Accent', 'cream'),
 		'White': toy.material('EyeWhite', 'white', roughness=0.5),
+		'Warm': toy.material('Warm detail', (.68, .32, .31)),
+		'EyeGlow': toy.material('Eye bounce', (.51, .56, .66)),
 		'Blush': toy.material('Blush', (1.0, 0.55, 0.6)),
 	}
 	return MATS[key]
 
 
-# ------------------------------------------------------------ geometría -----
-
-def tapered(name, radius, height, loc, shape, mat, bottom=None, top=None, segments=24, rings=16, grow=1.0):
-	"""Cápsula cuyo ancho va de `bottom` (abajo) a `top` (arriba): torso con hombros/cadera."""
-	obj = toy.capsule(name, radius=radius * grow, height=height * grow, loc=(0, 0, 0), mat=mat, segments=segments, rings=rings)
-	bottom = shape['hips'] if bottom is None else bottom
-	top = shape['shoulders'] if top is None else top
-	zs = [v.co.z for v in obj.data.vertices]
-	low, high = min(zs), max(zs)
-	for v in obj.data.vertices:
-		t = (v.co.z - low) / max(1e-6, high - low)
-		k = bottom + (top - bottom) * (t * t * (3 - 2 * t))
-		v.co.x *= k
-		v.co.y *= shape['depth'] * (1 + (shape['chest'] - 1) * max(0.0, 1 - abs(t - 0.62) * 4))
-	obj.location = loc
-	return obj
-
-
 def part(pieces, name, rig, slot, body='any', item=None, hides=None):
 	"""Une piezas (cada una ya asignada a su hueso) en una malla esquelética de la pieza."""
 	for obj, bone in pieces:
-		group = obj.vertex_groups.new(name=bone)
-		group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
-		if bone in avatar.HEAD_BONES:
-			obj.matrix_world = avatar.head_matrix() @ obj.matrix_world
+		if bone is not None:
+			group = obj.vertex_groups.new(name=bone)
+			group.add([v.index for v in obj.data.vertices], 1.0, 'REPLACE')
 		toy.apply_transforms(obj)
 	mesh = toy.join([obj for obj, _ in pieces], name)
 	mesh.parent = rig
@@ -93,338 +70,324 @@ def part(pieces, name, rig, slot, body='any', item=None, hides=None):
 	return mesh
 
 
-# ---------------------------------------------------------------- cuerpo ----
+# --------------------------------------------------------- fitted wardrobe ---
 
-def body_parts(rig, kind, m, prefix=''):
-	shape = BODY_SHAPES[kind]
-	p = []
-	p.append((tapered('torso', 0.17, 0.43, (0, 0, 0.615), shape, m['Skin']), 'spine'))
-	p.append((tapered('pelvis', 0.163, 0.2, (0, 0, 0.43), shape, m['Skin'], bottom=shape['hips'] * 0.84, top=shape['hips']), 'hips'))
-	p.append((toy.sphere('head', radius=0.2, scale=(1.0, 0.95, 1.15), loc=(0, 0, 0.98), mat=m['Skin']), 'head'))
-	p.append((toy.sphere('nose', radius=0.029, scale=(1.0, 0.9, 0.95), loc=(0, -0.2, 0.948), mat=m['Skin'], segments=14, rings=10), 'head'))
-	for side, arm, leg in ((1, 'arm_L', 'leg_L'), (-1, 'arm_R', 'leg_R')):
-		x = side * 0.215 * (1.04 if kind == 'M' else 0.97)
-		p.append((toy.sphere(f'ear_{side}', radius=0.046, scale=(0.5, 0.75, 1.0), loc=(side * 0.196, 0, 0.97), mat=m['Skin'], segments=14, rings=10), 'head'))
-		p.append((toy.capsule(f'upper_{side}', radius=0.05, height=0.18, loc=(x, 0, 0.665), mat=m['Skin']), arm))
-		p.append((toy.capsule(f'forearm_{side}', radius=0.047, height=0.2, loc=(x, 0, 0.55), mat=m['Skin']), arm))
-		p.append((toy.sphere(f'mitten_{side}', radius=0.06, scale=(0.85, 0.78, 1.05), loc=(x, -0.004, 0.44), mat=m['Skin'], segments=16, rings=12), arm))
-		p.append((toy.sphere(f'thumb_{side}', radius=0.024, scale=(1, 1, 1.3), loc=(x - side * 0.012, -0.045, 0.462), mat=m['Skin'], segments=10, rings=8), arm))
-		p.append((toy.capsule(f'leg_{side}', radius=0.06, height=0.32, loc=(side * 0.088, 0, 0.245), mat=m['Skin']), leg))
-	return part(p, f'{prefix}Body_{kind}', rig, 'body', kind, f'body_{kind.lower()}')
+def face_point(base, x, z, forward=.0):
+	return (x, base.front_y(x, z, -.28) - forward, z)
 
 
-def arm_x(kind):
-	return 0.215 * (1.04 if kind == 'M' else 0.97)
+def body_parts(base, rig, kind, m, prefix=''):
+	nose = ellipsoid('Button nose', face_point(base, 0, .995, .006), (.030, .029, .022), m['Skin'])
+	return part([(base.body(kind, m['Skin']), None), (nose, 'head')], f'{prefix}Body_{kind}', rig,
+		'body', kind, f'body_{kind.lower()}')
 
 
-# ----------------------------------------------------------------- caras ----
-
-def eyes_parts(rig, m, prefix=''):
-	out = []
-	def both(make):
-		return [(make(side), 'eye_L' if side > 0 else 'eye_R') for side in (1, -1)]
-	dot = lambda s: toy.sphere(f'eye_{s}', radius=0.027, scale=(1.0, 0.55, 1.18), loc=(s * 0.052, -0.18, 1.0), mat=m['Ink'], segments=14, rings=10)
-	shine = lambda s: toy.sphere(f'eye_shine_{s}', radius=0.0075, loc=(s * 0.052 + 0.008, -0.196, 1.012), mat=m['White'], segments=8, rings=6)
-	pieces = both(dot) + [(shine(s), 'eye_L' if s > 0 else 'eye_R') for s in (1, -1)]
-	out.append(part(pieces, f'{prefix}Eyes_Dot', rig, 'eyes', item='eyes_dot'))
-
-	pieces = both(dot)
-	for side in (1, -1):
-		bone = 'eye_L' if side > 0 else 'eye_R'
-		for k, ang in enumerate((-35, 0, 35)):
-			lash = toy.capsule(f'lash_{side}_{k}', radius=0.0055, height=0.032, loc=(side * (0.052 + 0.02 * math.sin(DEG(ang)) + 0.012), -0.178, 1.03), mat=m['Ink'], segments=8, rings=6)
-			lash.rotation_euler = (0, DEG(side * (30 + ang * 0.6)), 0)
-			pieces.append((lash, bone))
-	out.append(part(pieces, f'{prefix}Eyes_Lash', rig, 'eyes', item='eyes_lash'))
-
-	def happy(s):
-		arc = toy.torus(f'happy_{s}', major=0.022, minor=0.0065, loc=(s * 0.052, -0.181, 0.992), rot=(DEG(90), 0, 0), mat=m['Ink'], major_seg=16, minor_seg=6)
-		bm = bmesh.new()
-		bm.from_mesh(arc.data)
-		bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.y < -0.004], context='VERTS')  # media luna (^ ^)
-		bm.to_mesh(arc.data)
-		bm.free()
-		return arc
-	out.append(part(both(happy), f'{prefix}Eyes_Happy', rig, 'eyes', item='eyes_happy'))
-
-	pieces = []
-	for side in (1, -1):
-		bone = 'eye_L' if side > 0 else 'eye_R'
-		pieces.append((toy.sphere(f'big_{side}', radius=0.034, scale=(1.0, 0.5, 1.15), loc=(side * 0.056, -0.177, 1.0), mat=m['Ink'], segments=16, rings=10), bone))
-		pieces.append((toy.sphere(f'shine_{side}', radius=0.009, loc=(side * 0.056 + 0.01, -0.195, 1.013), mat=m['White'], segments=8, rings=6), bone))
-	out.append(part(pieces, f'{prefix}Eyes_Big', rig, 'eyes', item='eyes_big'))
-	return out
-
-
-def brows_parts(rig, m, prefix=''):
-	out = []
-	for item, radius, length, tilt, lift in (('brows_line', 0.0095, 0.052, 8, 0.0), ('brows_thick', 0.015, 0.058, 4, 0.0), ('brows_arch', 0.009, 0.05, 22, 0.006)):
+def eyes_parts(base, rig, m, prefix=''):
+	result = []
+	for variant, w, height in (('dot', .030, .039), ('lash', .035, .043), ('happy', .035, .024), ('big', .043, .052)):
 		pieces = []
-		for side in (1, -1):
-			brow = toy.capsule(f'{item}_{side}', radius=radius, height=length, loc=(side * 0.056, -0.175, 1.058 + lift), mat=m['Ink'], segments=10, rings=8)
-			brow.rotation_euler = (0, DEG(90), DEG(side * tilt))
-			pieces.append((brow, 'head'))
-		out.append(part(pieces, prefix + item.title().replace('_', '_').replace('Brows_', 'Brows_'), rig, 'brows', item=item))
-	return out
+		for s, bone in ((1, 'eye_L'), (-1, 'eye_R')):
+			x, z = s * .098, 1.070
+			if variant == 'happy':
+				pieces.append((line('Happy lid', [face_point(base, x + dx, z + dz, .009)
+					for dx, dz in ((-.034, -.005), (-.016, .015), (.015, .018), (.036, -.002))],
+					.009, m['Ink']), bone))
+				continue
+			_, y, _ = face_point(base, x, z, .003)
+			pieces.extend([
+				(ellipsoid('Glossy eye', (x, y, z), (w, .024, height), m['Ink']), bone),
+				(ellipsoid('Eye catchlight', (x - .010, y - .023, z + .013), (.009, .003, .011), m['White']), bone),
+				(ellipsoid('Bounce light', (x + .010, y - .022, z - .014), (.0045, .0028, .005), m['EyeGlow']), bone),
+			])
+			if variant == 'lash':
+				for i in range(2):
+					pieces.append((line('Lash', [face_point(base, x + s * dx, z + dz - .010 * i, .011)
+						for dx, dz in ((.020, .028), (.034 + i * .006, .042), (.047 + i * .006, .046))],
+						.006, m['Ink']), bone))
+		result.append(part(pieces, f'{prefix}Eyes_{variant.title()}', rig, 'eyes', item='eyes_' + variant))
+	return result
 
 
-def mouth_parts(rig, m, prefix=''):
+def brows_parts(base, rig, m, prefix=''):
 	out = []
-	neutral = toy.sphere('mouth_neutral', radius=0.034, scale=(1.25, 0.42, 0.42), loc=(0, -0.183, 0.885), mat=m['Ink'], segments=16, rings=10)
-	out.append(part([(neutral, 'mouth')], f'{prefix}Mouth_Neutral', rig, 'mouth', item='mouth_neutral'))
-	smile = toy.torus('mouth_smile', major=0.032, minor=0.008, loc=(0, -0.186, 0.9), rot=(DEG(90), 0, 0), mat=m['Ink'], major_seg=20, minor_seg=6)
-	bm = bmesh.new()
-	bm.from_mesh(smile.data)
-	bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.y > 0.004], context='VERTS')  # sólo la mitad de abajo
-	bm.to_mesh(smile.data)
-	bm.free()
-	out.append(part([(smile, 'mouth')], f'{prefix}Mouth_Smile', rig, 'mouth', item='mouth_smile'))
-	grin = toy.sphere('mouth_grin', radius=0.042, scale=(1.2, 0.4, 0.6), loc=(0, -0.182, 0.884), mat=m['Ink'], segments=18, rings=10)
-	bm = bmesh.new()
-	bm.from_mesh(grin.data)
-	bmesh.ops.delete(bm, geom=[v for v in bm.verts if v.co.z > 0.004], context='VERTS')
-	bm.to_mesh(grin.data)
-	bm.free()
-	tongue = toy.sphere('tongue', radius=0.02, scale=(1.2, 0.5, 0.5), loc=(0, -0.186, 0.872), mat=m['Blush'], segments=10, rings=6)
-	out.append(part([(grin, 'mouth'), (tongue, 'mouth')], f'{prefix}Mouth_Grin', rig, 'mouth', item='mouth_grin'))
+	for variant, radius, arch in (('line', .008, .008), ('thick', .013, .012), ('arch', .007, .023)):
+		pieces = [(line('Brow', [face_point(base, s * x, z, .007) for x, z in
+			((.048, 1.144), (.081, 1.144 + arch), (.117, 1.143 + arch * .6), (.142, 1.139))],
+			radius, m['Ink']), 'head') for s in (-1, 1)]
+		out.append(part(pieces, f'{prefix}Brows_{variant.title()}', rig, 'brows', item='brows_' + variant))
 	return out
 
 
-def cheeks_part(rig, m, prefix=''):
-	pieces = [(toy.sphere(f'blush_{s}', radius=0.03, scale=(1.2, 0.35, 0.75), loc=(s * 0.11, -0.168, 0.925), mat=m['Blush'], segments=12, rings=8), 'head') for s in (1, -1)]
+def mouth_parts(base, rig, m, prefix=''):
+	out = []
+	for variant in ('neutral', 'smile', 'grin'):
+		if variant == 'grin':
+			x, y, z = face_point(base, 0, .939, .004)
+			pieces = [
+				ellipsoid('Open smile', (x, y, z), (.056, .022, .029), m['Ink']),
+				ellipsoid('Tongue', (x, y - .018, z - .014), (.026, .006, .010), m['Blush']),
+			]
+		else:
+			w, lift = (.031, .010) if variant == 'neutral' else (.050, .023)
+			pieces = [line('Smile', [face_point(base, dx * w, .927 + dz * lift, .007)
+				for dx, dz in ((-1, 1), (-.5, .22), (0, 0), (.5, .22), (1, 1))], .007, m['Ink'])]
+		out.append(part([(piece, 'mouth') for piece in pieces], f'{prefix}Mouth_{variant.title()}',
+			rig, 'mouth', item='mouth_' + variant))
+	return out
+
+
+def cheeks_part(base, rig, m, prefix=''):
+	pieces = []
+	for s in (-1, 1):
+		x, z = s * .184, 1.011
+		blush = ellipsoid('Soft cheek', face_point(base, x, z, -.003), (.050, .012, .024), m['Blush'])
+		blush.rotation_euler.z = s * DEG(27)
+		pieces.append((blush, 'head'))
+		for i in range(3):
+			pieces.append((ellipsoid('Freckle', face_point(base, x + s * .014 * (i - 1),
+				z + .011 + .006 * (i % 2), .004), (.0037, .003, .0037), m['Warm']), 'head'))
 	return part(pieces, f'{prefix}Cheeks_Blush', rig, 'cheeks', item='cheeks_blush')
 
 
-# ---------------------------------------------------------------- pelos -----
+def hair_parts(base, rig, m, prefix=''):
+	hair = m['Hair']
+	out = []
 
-def hair_cap(name, mat, front=0.17, back=-0.09, scale=(1.02, 0.99, 1.14), radius=0.214, thickness=0.03):
-	bm = bmesh.new()
-	bmesh.ops.create_uvsphere(bm, u_segments=28, v_segments=16, radius=radius)
-	remove = []
-	for v in bm.verts:
-		v.co = Vector((v.co.x * scale[0], v.co.y * scale[1], v.co.z * scale[2]))
-		f = max(0.0, -v.co.y) / 0.21
-		if v.co.z < back + f * front:
-			remove.append(v)
-	bmesh.ops.delete(bm, geom=remove, context='VERTS')
-	obj = toy._new_mesh_object(name, bm, mat)
-	obj.location = (0, 0.004, 0.985)
-	mod = obj.modifiers.new('Solid', 'SOLIDIFY')
-	mod.thickness = thickness
-	mod.offset = 1
-	sub = obj.modifiers.new('Soft', 'SUBSURF')
+	def lock(label, rows):
+		x, y, z, _, d = rows[0]
+		root = (x * .92, y * .82, 1.11 + (z - 1.11) * .86, .008, d)
+		return sweep(label, [root, *rows], hair, segments=12, detail=5)
+
+	def fringe(guides, indices, spacing):
+		return [lock('Carved fringe', [(x + j * spacing * (1 + .09 * i), y + abs(j) * .013,
+			z - abs(j) * .010, r, d) for i, (x, y, z, r, d) in enumerate(guides)]) for j in indices]
+
+	def style(key, pieces, edge=.0):
+		cap = base.garment('Fitted scalp', 'M', hair,
+			[lambda p: p.z - (.317 + .077 * max(0, -p.y) / .135 - .080 * max(0, p.y) / .125
+				+ edge + .016 * math.sin(p.x * 19) * max(0, -p.y) / .135)], .029)
+		cap.vertex_groups.clear()
+		volume = cap.modifiers.new('Scalp volume', 'SOLIDIFY')
+		volume.thickness = .066
+		sub = cap.modifiers.new('Rounded hairline', 'SUBSURF')
+		sub.levels = 1
+		toy.apply_modifiers(cap)
+		accents = [mesh for mesh in pieces if mesh.data.materials[0] != hair]
+		clumps = [cap, *(mesh for mesh in pieces if mesh.data.materials[0] == hair)]
+		for mesh in clumps:
+			toy.apply_transforms(mesh)
+		sculpt = toy.join(clumps, key + ' sculpt')
+		fuse = sculpt.modifiers.new('Fused sculpt', 'REMESH')
+		fuse.mode = 'VOXEL'
+		fuse.voxel_size = .012
+		soften = sculpt.modifiers.new('Polished finish', 'SMOOTH')
+		soften.factor = .61
+		soften.iterations = 8
+		toy.apply_modifiers(sculpt)
+		detail = sculpt.modifiers.new('Game resolution', 'DECIMATE')
+		detail.ratio = min(1.0, 3800 / max(1, len(sculpt.data.polygons)))
+		toy.apply_modifiers(sculpt)
+		toy.smooth(sculpt, 180)
+		out.append(part([(sculpt, 'head'), *((mesh, 'head') for mesh in accents)], f'{prefix}Hair_{key.title()}',
+			rig, 'hair', item='hair_' + key))
+
+	style('bowl', fringe([
+		(-.117, -.126, 1.387, .052, .85), (-.103, -.238, 1.309, .065, .9),
+		(-.067, -.312, 1.234, .062, .95), (.018, -.325, 1.158, .007, .9),
+	], range(-2, 3), .063))
+	style('spiky', [
+		lock('Swept crest', [(x, -.239, 1.307, .067, 1), (x + .027, -.196, 1.408, .076, .9),
+			(x + .068, -.073, 1.474 + lift, .062, .9), (x + .108, .033, 1.472 + lift, .003, .75)])
+		for x, lift in ((-.211, -.034), (-.116, .012), (-.029, .061), (.083, .031), (.171, -.022))
+	], .007)
+
+	long = [lock('Side wave', [
+		(s * .206, -.026, 1.376, .072, 1), (s * .322, -.147, 1.216, .082, .95),
+		(s * .350, -.151, 1.040, .073, .91), (s * .332, -.121, .887, .069, .98),
+		(s * .367, -.120, .768, .005, .9),
+	]) for s in (-1, 1)]
+	long += [lock('Back wave', [(x, .214, 1.326, .071, 1), (x * 1.09, .316, 1.113, .117, .86),
+		(x * 1.25, .245, .910, .091, .93), (x * 1.37 + .028, .185, .779, .005, .85)])
+		for x in (-.215, -.124, -.021, .100, .207)]
+	style('long', long + fringe([
+		(.087, -.121, 1.386, .063, .9), (.031, -.263, 1.293, .069, .89),
+		(-.068, -.321, 1.241, .058, .78), (-.185, -.294, 1.177, .003, .68),
+	], range(-1, 2), .065))
+
+	style('ponytail', [
+		lock('Ponytail', [(0, .244, 1.301, .062, 1), (.018, .353, 1.370, .070, .91),
+			(.045, .451, 1.285, .109, .83), (.070, .482, 1.112, .094, .94),
+			(.146, .398, .981, .038, .96), (.172, .335, .948, .003, 1)]),
+		lock('Side fringe', [(-.033, -.196, 1.343, .061, .92), (-.158, -.306, 1.255, .063, .9),
+			(-.249, -.283, 1.147, .006, .6)]),
+		toy.torus('Hair tie', major=.063, minor=.016, loc=(.016, .338, 1.355),
+			rot=(DEG(71), 0, 0), mat=m['Accent'], major_seg=24, minor_seg=8),
+	], .007)
+
+	buns = []
+	for s in (-1, 1):
+		x = s * .262
+		buns += [
+			loft('Twisted bun', [(1.283, x, .052, .029, .030), (1.320, x, .057, .098, .091),
+				(1.397, x * 1.08, .063, .123, .109), (1.466, x * 1.10, .073, .090, .083),
+				(1.510, x * 1.08, .078, .021, .029)], hair, segments=32, flutes=.071),
+			toy.torus('Bun ribbon', major=.076, minor=.014, loc=(x, .059, 1.313),
+				rot=(0, s * DEG(19), 0), mat=m['Accent'], major_seg=24, minor_seg=8),
+		]
+	style('buns', buns + fringe([
+		(-.089, -.143, 1.389, .052, .90), (-.052, -.261, 1.301, .061, .87),
+		(.049, -.330, 1.228, .058, .77), (.154, -.303, 1.186, .007, .8),
+	], range(-1, 2), .059))
+
+	curls = []
+	for row, (count, polar) in enumerate(((13, 1.17), (11, .80), (7, .40), (1, 0))):
+		for i in range(count):
+			a = 2 * math.pi * (i + .33 * row) / count
+			x = .342 * math.sin(polar) * math.sin(a)
+			y = -.300 * math.sin(polar) * math.cos(a) + .021
+			z = 1.12 + .285 * math.cos(polar)
+			r = .077 + .010 * math.cos(2.44 * i + row)
+			curls.append(ellipsoid('Curl', (x, y, z), (r, r * .91, r * .89), hair, segments=16, rings=10))
+	style('curly', curls, .006)
+
+	for key in hair_assets.FIT:
+		forehead = .034 if key in ('anime', 'ayato', 'wavy') else .050
+		scalp = fitted(base, 'Hidden scalp', 'M', hair, (
+			lambda p: p.z - (.339 + forehead * max(0, -p.y) / .135 - .055 * max(0, p.y) / .125),
+		), .019)
+		pieces = [scalp, (hair_assets.fitted_shape(key, hair, base.surface()), 'head')]
+		if key == 'layers':
+			pieces.extend((piece, 'head') for piece in fringe([
+				(.010, -.125, 1.399, .068, .91), (.020, -.250, 1.351, .080, .97),
+				(-.019, -.317, 1.257, .077, .93), (-.111, -.306, 1.164, .007, .85),
+			], range(-2, 3), .061))
+		out.append(part(pieces, f'{prefix}Hair_{key.title()}', rig, 'hair', item='hair_' + key))
+	return out
+
+
+def folded_skirt(name, kind, material, lower=.216, upper=.49):
+	width = .278 if kind == 'F' else .262
+	return loft(name, [
+		(lower, 0, -.016, width * .955, .197), (lower + .024, 0, -.018, width, .226),
+		(lower + .102, 0, -.023, width * .96, .233), (upper - .049, 0, -.017, .234, .218),
+		(upper, 0, -.014, .224, .226),
+	], material, flutes=.060, segments=32)
+
+
+def fitted(base, name, kind, material, cuts, offset):
+	mesh = base.garment(name, kind, material, cuts, offset)
+	sub = mesh.modifiers.new('Soft fabric', 'SUBSURF')
 	sub.levels = 1
-	toy.apply_modifiers(obj)
-	return toy.smooth(obj, 80)
+	toy.apply_modifiers(mesh)
+	return (mesh, None)
 
 
-def fuse_hair(pieces, name, mat, cut_below=0.9, face=(0.16, 0.95), voxel=0.0105):
-	"""Funde las formas en UNA masa de pelo esculpida (como plastilina): remesh por vóxeles,
-	se despeja la cara, se recorta abajo y se suaviza. Así no quedan bordes serruchados."""
-	obj = toy.join(pieces, name)
-	for slot in obj.material_slots:
-		slot.material = mat
-	mod = obj.modifiers.new('Fuse', 'REMESH')
-	mod.mode = 'VOXEL'
-	mod.voxel_size = voxel
-	mod.adaptivity = 0.0
-	toy.apply_modifiers(obj)
-	cutters = []
-	# Cara: un óvalo adelante (más angosto que la cabeza para no comerse los mechones laterales).
-	face_y, face_w = face
-	cutters.append(toy.sphere('face_cut', radius=0.2, scale=(face_w * 0.95, 1.0, 0.8), loc=(0, -0.2 - face_y * 0.15, 0.905), segments=32, rings=20))
-	# Todo lo que queda por debajo de `cut_below` (nuca / hombros).
-	cutters.append(toy.rounded_box('low_cut', size=(1.2, 1.2, 1.0), loc=(0, 0, cut_below - 0.5), radius=0.01))
-	for cutter in cutters:
-		b = obj.modifiers.new(cutter.name, 'BOOLEAN')
-		b.operation = 'DIFFERENCE'
-		b.object = cutter
-		b.solver = 'EXACT'
-	toy.apply_modifiers(obj)
-	for cutter in cutters:
-		bpy.data.objects.remove(cutter, do_unlink=True)
-	smooth = obj.modifiers.new('Soft', 'SMOOTH')
-	smooth.factor = 0.7
-	smooth.iterations = 6
-	dec = obj.modifiers.new('Light', 'DECIMATE')
-	dec.ratio = max(0.08, min(1.0, 3200 / max(1, len(obj.data.polygons))))
-	toy.apply_modifiers(obj)
-	for poly in obj.data.polygons:
-		poly.material_index = 0
-	return toy.smooth(obj, 180)
+def sewn(base, name, kind, material, cuts, ease):
+	mesh = base.garment(name, kind, material, cuts, ease, tailored=True)
+	edge = mesh.modifiers.new('Fabric lining and hem', 'SOLIDIFY')
+	edge.thickness = .012
+	edge.offset = -1
+	toy.apply_modifiers(mesh)
+	return mesh, None
 
 
-def cap(name, mat, radius=0.218, z=0.995, scale=(1.04, 1.03, 1.1)):
-	return toy.sphere(name, radius=radius, scale=scale, loc=(0, 0.012, z), mat=mat, segments=32, rings=20)
-
-
-def hair_parts(rig, m, prefix=''):
-	H = m['Hair']
+def tops(base, rig, kind, m, prefix=''):
 	out = []
-
-	# Flequillo clásico: casco con cuatro mechones redondos sobre la frente.
-	pieces = [cap('bowl_cap', H)]
-	for k, x in enumerate((-0.12, -0.04, 0.04, 0.12)):
-		pieces.append(toy.sphere(f'bang_{k}', radius=0.062, scale=(1.15, 0.75, 0.95), loc=(x, -0.165 + abs(x) * 0.25, 1.075 - abs(x) * 0.12), mat=H, segments=16, rings=10))
-	out.append(part([(fuse_hair(pieces, 'bowl', H, cut_below=0.9), 'head')], f'{prefix}Hair_Bowl', rig, 'hair', item='hair_bowl'))
-
-	# Pinchos: casco corto + mechones gorditos hacia arriba y atrás.
-	pieces = [cap('spiky_cap', H, radius=0.212, z=0.99)]
-	for k, (x, y, tilt_x, tilt_y) in enumerate(((0, -0.1, -25, 0), (-0.09, -0.06, -15, -25), (0.09, -0.06, -15, 25), (-0.05, 0.04, 15, -20), (0.06, 0.05, 15, 20), (0, 0.1, 30, 0), (0, -0.02, 0, 0))):
-		tuft = toy.cone(f'tuft_{k}', r1=0.07, r2=0.012, depth=0.15, loc=(x, y, 1.2), mat=H, segments=12)
-		tuft.rotation_euler = (DEG(tilt_x), DEG(tilt_y), 0)
-		pieces.append(tuft)
-	out.append(part([(fuse_hair(pieces, 'spiky', H, cut_below=0.98), 'head')], f'{prefix}Hair_Spiky', rig, 'hair', item='hair_spiky'))
-
-	# Largo: casco + melena atrás + mechones a los costados de la cara.
-	pieces = [cap('long_cap', H)]
-	pieces.append(toy.capsule('long_back', radius=0.2, height=0.62, scale=(1.05, 0.62, 1.0), loc=(0, 0.075, 0.83), mat=H))
-	for side in (1, -1):
-		pieces.append(toy.capsule(f'long_lock_{side}', radius=0.058, height=0.38, loc=(side * 0.168, -0.045, 0.86), mat=H))
-	for k, x in enumerate((-0.1, 0.0, 0.1)):
-		pieces.append(toy.sphere(f'long_bang_{k}', radius=0.06, scale=(1.2, 0.75, 0.9), loc=(x, -0.168, 1.08 - abs(x) * 0.1), mat=H, segments=14, rings=10))
-	out.append(part([(fuse_hair(pieces, 'long', H, cut_below=0.6, face=(0.16, 0.74)), 'head')], f'{prefix}Hair_Long', rig, 'hair', item='hair_long'))
-
-	# Colita: casco + cola en cadena de esferas + gomita.
-	pieces = [cap('pony_cap', H)]
-	for k, (y, z, r) in enumerate(((0.215, 1.06, 0.062), (0.265, 0.97, 0.072), (0.275, 0.86, 0.066), (0.26, 0.77, 0.048))):
-		pieces.append(toy.sphere(f'pony_{k}', radius=r, loc=(0, y, z), mat=H, segments=16, rings=10))
-	for k, x in enumerate((-0.07, 0.07)):
-		pieces.append(toy.sphere(f'pony_bang_{k}', radius=0.06, scale=(1.3, 0.75, 0.9), loc=(x, -0.165, 1.08), mat=H, segments=14, rings=10))
-	hair = fuse_hair(pieces, 'pony', H, cut_below=0.7)
-	band = toy.torus('pony_band', major=0.05, minor=0.017, loc=(0, 0.24, 1.02), rot=(DEG(70), 0, 0), mat=m['Accent'])
-	out.append(part([(hair, 'head'), (band, 'head')], f'{prefix}Hair_Ponytail', rig, 'hair', item='hair_ponytail'))
-
-	# Dos rodetes.
-	pieces = [cap('buns_cap', H)]
-	for side in (1, -1):
-		pieces.append(toy.sphere(f'bun_{side}', radius=0.088, loc=(side * 0.135, 0.02, 1.2), mat=H, segments=18, rings=12))
-	for k, x in enumerate((-0.07, 0.07)):
-		pieces.append(toy.sphere(f'buns_bang_{k}', radius=0.06, scale=(1.3, 0.75, 0.9), loc=(x, -0.165, 1.08), mat=H, segments=14, rings=10))
-	hair = fuse_hair(pieces, 'buns', H, cut_below=0.9)
-	bands = [toy.torus(f'bun_band_{side}', major=0.07, minor=0.014, loc=(side * 0.125, 0.02, 1.13), rot=(DEG(side * -20), 0, 0), mat=m['Accent']) for side in (1, -1)]
-	out.append(part([(hair, 'head')] + [(b, 'head') for b in bands], f'{prefix}Hair_Buns', rig, 'hair', item='hair_buns'))
-
-	# Rulos: muchas bolitas sobre un casco, fundidas en una masa con textura de rulo.
-	pieces = [cap('curly_cap', H, radius=0.225, scale=(1.08, 1.06, 1.08))]
-	golden = math.pi * (3 - math.sqrt(5))
-	for k in range(70):
-		yk = 1 - (k / 69) * 2
-		rk = math.sqrt(max(0.0, 1 - yk * yk))
-		theta = golden * k
-		px, py, pz = math.cos(theta) * rk, math.sin(theta) * rk, yk
-		x, y, z = px * 0.235, py * 0.235 + 0.012, pz * 0.25 + 1.0
-		if z < 0.9 or (y < -0.12 and z < 1.08):
-			continue
-		pieces.append(toy.sphere(f'curl_{k}', radius=0.055, loc=(x, y, z), mat=H, segments=10, rings=8))
-	out.append(part([(fuse_hair(pieces, 'curly', H, cut_below=0.88, voxel=0.0095), 'head')], f'{prefix}Hair_Curly', rig, 'hair', item='hair_curly'))
+	for name, cuff, width, ease in (('tee', .106, .105, .031), ('tank', .103, .063, .025),
+		('hoodie', .088, .158, .040), ('dress', .097, .102, .030)):
+		pieces = [sewn(base, name, kind, m['Top'], (
+			lambda p: p.z - cuff,
+			lambda p: .193 + min(.035, abs(p.x) * .23) - p.z,
+			lambda p: width - abs(p.x),
+		), ease)]
+		pieces.append((line('Neck seam', [(-.117, -.123, .742), (-.074, -.144, .710),
+			(0, -.169, .690), (.074, -.144, .710), (.117, -.123, .742)], .010, m['Accent']), 'spine'))
+		if name == 'tee':
+			pieces.append((line('Embroidered arc', [(.035, -.172, .611), (.063, -.171, .592),
+				(.092, -.151, .619)], .008, m['Accent']), 'spine'))
+		if name == 'hoodie':
+			pieces.extend([
+				(loft('Folded hood', [(.650, 0, .087, .118, .043), (.701, 0, .131, .173, .087),
+					(.752, 0, .155, .158, .086), (.780, 0, .132, .072, .035)],
+					m['Top']), 'spine'),
+				(loft('Kangaroo pocket', [(.458, 0, -.187, .096, .027), (.487, 0, -.202, .115, .032),
+					(.536, 0, -.207, .089, .027), (.551, 0, -.189, .069, .017)],
+					m['Top'], segments=20), 'spine'),
+			])
+			for s in (-1, 1):
+				pieces.append((line('Drawcord', [(s * .058, -.151, .712), (s * .055, -.190, .646),
+					(s * .032, -.226, .570 - .009 * s)], .008, m['Accent']), 'spine'))
+		if name == 'dress':
+			pieces.append((folded_skirt('Dress pleats', kind, m['Top']), 'hips'))
+			pieces.append((line('Sash trim', [(-.204, -.117, .477), (-.112, -.210, .479),
+				(0, -.246, .477), (.112, -.210, .479), (.204, -.117, .477)],
+				.013, m['Accent']), 'hips'))
+		out.append(part(pieces, f'{prefix}Top_{name.title()}_{kind}', rig, 'top', kind, 'top_' + name,
+			hides='bottom' if name == 'dress' else None))
 	return out
 
 
-# ----------------------------------------------------------------- ropa -----
-
-GROW = 1.06  # la ropa queda apenas más grande que el cuerpo (no se "pelea" con la piel)
-
-
-def tops(rig, kind, m, prefix=''):
-	shape = BODY_SHAPES[kind]
-	ax = arm_x(kind)
-	T = m['Top']
+def bottoms(base, rig, kind, m, prefix=''):
 	out = []
-
-	def shell(name):
-		return (tapered(name, 0.17, 0.43, (0, 0, 0.615), shape, T, grow=GROW), 'spine')
-
-	def sleeves(length):
-		res = []
-		for side, bone in ((1, 'arm_L'), (-1, 'arm_R')):
-			top_z = 0.75
-			res.append((toy.capsule(f'sleeve_{side}', radius=0.06, height=length, loc=(ax * side, 0, top_z - length / 2 + 0.03), mat=T), bone))
-		return res
-
-	out.append(part([shell('tee')] + sleeves(0.17), f'{prefix}Top_Tee_{kind}', rig, 'top', kind, 'top_tee'))
-	out.append(part([shell('tank')], f'{prefix}Top_Tank_{kind}', rig, 'top', kind, 'top_tank'))
-
-	hood = [shell('hoodie')] + sleeves(0.33)
-	hood.append((toy.sphere('hood', radius=0.17, scale=(1.15, 0.7, 0.55), loc=(0, 0.12, 0.84), mat=T), 'spine'))
-	hood.append((toy.rounded_box('pocket', size=(0.2, 0.05, 0.09), loc=(0, -0.145, 0.53), radius=0.03, mat=T), 'spine'))
-	for s in (1, -1):
-		hood.append((toy.capsule(f'string_{s}', radius=0.008, height=0.1, loc=(s * 0.035, -0.15, 0.73), mat=m['Accent'], segments=8, rings=6), 'spine'))
-	out.append(part(hood, f'{prefix}Top_Hoodie_{kind}', rig, 'top', kind, 'top_hoodie'))
-
-	dress = [shell('dress')] + sleeves(0.12)
-	skirt = toy.cone('dress_skirt', r1=0.27 * shape['hips'], r2=0.17 * shape['hips'], depth=0.26, loc=(0, 0, 0.33), mat=T, segments=28, bevel=0.04)
-	skirt.scale = (1, 0.86, 1)
-	dress.append((skirt, 'hips'))
-	dress.append((toy.torus('dress_belt', major=0.17 * shape['hips'], minor=0.014, loc=(0, 0, 0.47), mat=m['Accent']), 'hips'))
-	out.append(part(dress, f'{prefix}Top_Dress_{kind}', rig, 'top', kind, 'top_dress', hides='bottom'))
-	return out
-
-
-def bottoms(rig, kind, m, prefix=''):
-	shape = BODY_SHAPES[kind]
-	B = m['Bottom']
-	out = []
-
-	def pelvis(name):
-		# Se angosta hacia las piernas: si no, la bermuda parecía un pañal.
-		return (tapered(name, 0.163, 0.2, (0, 0, 0.43), shape, B, bottom=shape['hips'] * 0.84, top=shape['hips'], grow=GROW), 'hips')
-
-	def legs(length, radius=0.066):
-		res = []
-		for side, bone in ((1, 'leg_L'), (-1, 'leg_R')):
-			res.append((toy.capsule(f'pant_{side}', radius=radius, height=length, loc=(side * 0.088, 0, 0.4 - length / 2 + 0.02), mat=B), bone))
-		return res
-
-	out.append(part([pelvis('pants')] + legs(0.33), f'{prefix}Bottom_Pants_{kind}', rig, 'bottom', kind, 'bottom_pants'))
-	out.append(part([pelvis('shorts')] + legs(0.15, 0.07), f'{prefix}Bottom_Shorts_{kind}', rig, 'bottom', kind, 'bottom_shorts'))
-	skirt = toy.cone('skirt', r1=0.25 * shape['hips'], r2=0.17 * shape['hips'], depth=0.2, loc=(0, 0, 0.33), mat=B, segments=28, bevel=0.035)
-	skirt.scale = (1, 0.86, 1)
-	out.append(part([pelvis('skirt_top'), (skirt, 'hips')], f'{prefix}Bottom_Skirt_{kind}', rig, 'bottom', kind, 'bottom_skirt'))
+	for name, start in (('pants', .023), ('shorts', .039), ('skirt', None)):
+		if name == 'skirt':
+			pieces = [(folded_skirt('Skirt pleats', kind, m['Bottom'], lower=.238), 'hips')]
+		else:
+			pieces = [sewn(base, name, kind, m['Bottom'], (lambda p: p.z - start, lambda p: .119 - p.z), .023)]
+		out.append(part(pieces, f'{prefix}Bottom_{name.title()}_{kind}', rig, 'bottom', kind, 'bottom_' + name))
 	return out
 
 
 def shoes(rig, m, prefix=''):
 	out = []
-	pieces = []
-	for side, bone in ((1, 'leg_L'), (-1, 'leg_R')):
-		x = side * 0.088
-		pieces.append((toy.rounded_box(f'sneaker_{side}', size=(0.13, 0.215, 0.1), loc=(x, -0.03, 0.07), radius=0.046, mat=m['Shoes']), bone))
-		pieces.append((toy.rounded_box(f'sneaker_sole_{side}', size=(0.126, 0.205, 0.03), loc=(x, -0.03, 0.016), radius=0.013, mat=m['Sole']), bone))
-	out.append(part(pieces, f'{prefix}Shoes_Sneakers', rig, 'shoes', item='shoes_sneakers'))
-	pieces = []
-	for side, bone in ((1, 'leg_L'), (-1, 'leg_R')):
-		x = side * 0.088
-		pieces.append((toy.rounded_box(f'boot_{side}', size=(0.14, 0.22, 0.2), loc=(x, -0.025, 0.115), radius=0.055, mat=m['Shoes']), bone))
-		pieces.append((toy.torus(f'boot_cuff_{side}', major=0.072, minor=0.018, loc=(x, 0, 0.215), mat=m['Sole']), bone))
-		pieces.append((toy.rounded_box(f'boot_sole_{side}', size=(0.134, 0.215, 0.035), loc=(x, -0.025, 0.018), radius=0.014, mat=m['Sole']), bone))
-	out.append(part(pieces, f'{prefix}Shoes_Boots', rig, 'shoes', item='shoes_boots'))
+	for name in ('sneakers', 'boots'):
+		pieces = []
+		for s, bone in ((1, 'knee_L'), (-1, 'knee_R')):
+			x = s * .111
+			pieces.extend([
+				(loft('Padded sole', [(.005, x, -.013, .073, .087), (.018, x, -.018, .103, .120),
+					(.042, x, -.021, .103, .122), (.052, x, -.021, .094, .112)], m['Sole']), bone),
+				(loft('Soft toe', [(.029, x, -.019, .092, .108), (.064, x, -.025, .100, .118),
+					(.101, x, -.003, .089, .104), (.134, x, .004, .081, .088),
+					(.163 if name == 'boots' else .142, x, .006, .077, .084)], m['Shoes']), bone),
+			])
+			for i in range(2):
+				pieces.append((line('Stitched lace', [(x - .036, -.097 - .020 * i, .112 - .010 * i),
+					(x + .028, -.102 - .020 * i, .112 - .010 * i)], .008, m['Accent']), bone))
+			if name == 'boots':
+				pieces.append((loft('Boot cuff', [(.144, x, .004, .081, .089), (.160, x, .006, .089, .093),
+					(.181, x, .008, .080, .090)], m['Sole'], segments=20), bone))
+		out.append(part(pieces, f'{prefix}Shoes_{name.title()}', rig, 'shoes', item='shoes_' + name))
 	return out
 
 
-# ---------------------------------------------------------------- armado ----
+def wardrobe(base, rig, kind, m, prefix=''):
+	return [
+		body_parts(base, rig, kind, m, prefix),
+		*tops(base, rig, kind, m, prefix),
+		*bottoms(base, rig, kind, m, prefix),
+	]
+
+
+def details(base, rig, m, prefix=''):
+	return [
+		*eyes_parts(base, rig, m, prefix), *brows_parts(base, rig, m, prefix),
+		*mouth_parts(base, rig, m, prefix), cheeks_part(base, rig, m, prefix),
+		*hair_parts(base, rig, m, prefix), *shoes(rig, m, prefix),
+	]
+
 
 def build_modular():
-	m = mats()
-	rig = avatar.build_armature()
-	rig.name = 'AvatarModular'
-	parts = []
-	for kind in ('M', 'F'):
-		parts.append(body_parts(rig, kind, m))
-		parts += tops(rig, kind, m)
-		parts += bottoms(rig, kind, m)
-	parts += eyes_parts(rig, m)
-	parts += brows_parts(rig, m)
-	parts += mouth_parts(rig, m)
-	parts.append(cheeks_part(rig, m))
-	parts += hair_parts(rig, m)
-	parts += shoes(rig, m)
-	rig.animation_data_create()
-	for make in avatar.ANIMATIONS:
-		make(rig)
-	rig.animation_data.action = None
-	avatar.reset_pose(rig)
-	return rig, parts
+	base = Chibi()
+	try:
+		m = mats()
+		rig = base.rig()
+		rig.name = 'AvatarModular'
+		parts = wardrobe(base, rig, 'M', m) + wardrobe(base, rig, 'F', m) + details(base, rig, m)
+		animate(rig)
+		return rig, parts
+	finally:
+		base.cleanup()
 
 
 # Un "look" = qué pieza va en cada lugar + colores. Sirve para la vista previa y como presets.
@@ -445,42 +408,35 @@ LOOKS = {
 
 
 def build_look(name, x=0.0):
-	"""Arma UN avatar con un look (para vista previa): sólo las piezas elegidas, colores propios."""
+	"""One complete preset using the same rig and surfaces as the runtime."""
 	look = LOOKS[name]
 	m = mats(f'_{name}')
-	colors = look.get('colors', {})
 	for key, mat_key in (('skin', 'Skin'), ('hair', 'Hair'), ('top', 'Top'), ('bottom', 'Bottom'), ('shoes', 'Shoes'), ('sole', 'Sole')):
-		if key in colors:
-			c = colors[key]
-			c = toy.PALETTE[c] if isinstance(c, str) else c
+		if key in look['colors']:
+			color = look['colors'][key]
+			color = toy.PALETTE[color] if isinstance(color, str) else color
 			bsdf = next(n for n in m[mat_key].node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
-			bsdf.inputs['Base Color'].default_value = tuple(toy.srgb_to_linear(v) for v in c) + (1.0,)
-	rig = avatar.build_armature()
-	rig.name = f'Look_{name}'
-	kind = look['body']
-	prefix = f'{name}_'
-	keep = []
-	keep.append(body_parts(rig, kind, m, prefix))
-	slots = {
-		'top': lambda: tops(rig, kind, m, prefix), 'bottom': lambda: bottoms(rig, kind, m, prefix),
-		'eyes': lambda: eyes_parts(rig, m, prefix), 'brows': lambda: brows_parts(rig, m, prefix),
-		'mouth': lambda: mouth_parts(rig, m, prefix), 'hair': lambda: hair_parts(rig, m, prefix),
-		'shoes': lambda: shoes(rig, m, prefix), 'cheeks': lambda: [cheeks_part(rig, m, prefix)],
-	}
-	for slot, make in slots.items():
-		wanted = look.get(slot)
-		for mesh in make():
-			if mesh.get('pelacord_item') == wanted:
-				keep.append(mesh)
-			else:
+			bsdf.inputs['Base Color'].default_value = tuple(toy.srgb_to_linear(v) for v in color) + (1.0,)
+	base = Chibi()
+	try:
+		rig = base.rig()
+		rig.name = f'Look_{name}'
+		pieces = wardrobe(base, rig, look['body'], m, name + '_') + details(base, rig, m, name + '_')
+		for mesh in pieces:
+			slot = mesh.get('pelacord_slot')
+			if slot != 'body' and mesh.get('pelacord_item') != look.get(slot):
 				bpy.data.objects.remove(mesh, do_unlink=True)
-	rig.location.x = x
-	return rig
+		rig.location.x = x
+		return rig
+	finally:
+		base.cleanup()
 
 
 # --------------------------------------------------------------- catálogo ---
 
 ITEM_NAMES = {
+	'hair_anime': 'Corto en capas', 'hair_sidepart': 'Raya al costado', 'hair_layers': 'Melena en capas',
+	'hair_ayato': 'Flequillo largo', 'hair_highpony': 'Colita alta', 'hair_wavy': 'Ondas y flequillo',
 	'hair_bowl': 'Flequillo clásico', 'hair_spiky': 'Pinchos', 'hair_long': 'Pelo largo', 'hair_ponytail': 'Colita',
 	'hair_buns': 'Dos rodetes', 'hair_curly': 'Rulos', 'eyes_dot': 'Ojitos', 'eyes_lash': 'Pestañas', 'eyes_happy': 'Ojos felices',
 	'eyes_big': 'Ojos grandes', 'brows_line': 'Cejas finas', 'brows_thick': 'Cejas gruesas', 'brows_arch': 'Cejas arqueadas',
@@ -498,8 +454,8 @@ PALETTES = {
 }
 
 # Lo básico es gratis (para que nadie arranque "pelado"); lo demás se compra con monedas.
-FREE = {'hair_bowl', 'hair_long', 'eyes_dot', 'brows_line', 'mouth_neutral', 'top_tee', 'bottom_pants', 'shoes_sneakers'}
-PRICES = {'hair': 120, 'eyes': 60, 'brows': 40, 'mouth': 60, 'cheeks': 50, 'top': 150, 'bottom': 120, 'shoes': 100}
+FREE = {'eyes_dot', 'brows_line', 'mouth_neutral', 'top_tee', 'bottom_pants', 'shoes_sneakers'}
+PRICES = {'eyes': 60, 'brows': 40, 'mouth': 60, 'cheeks': 50, 'top': 150, 'bottom': 120, 'shoes': 100}
 
 
 def wardrobe_catalog(parts):
@@ -513,7 +469,7 @@ def wardrobe_catalog(parts):
 			continue
 		seen[item] = {
 			'id': item, 'name': ITEM_NAMES.get(item, item), 'slot': slot,
-			'price': 0 if item in FREE else PRICES.get(slot, 100),
+			'price': 0 if slot == 'hair' or item in FREE else PRICES.get(slot, 100),
 			'recolor': {'hair': 'Hair', 'top': 'Top', 'bottom': 'Bottom', 'shoes': 'Shoes'}.get(slot),
 			'meshes': [mesh.name],
 		}

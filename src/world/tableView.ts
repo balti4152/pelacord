@@ -174,17 +174,146 @@ function label(text: string, active: boolean): CSS2DObject {
 	return new CSS2DObject(el);
 }
 
+/** Todo lo de la mesa se ve 1.45 veces más grande (antes quedaba chiquito en el medio). */
+const SCALE = 1.45;
+
+interface Tween {
+	obj: THREE.Object3D;
+	fromP: THREE.Vector3;
+	toP: THREE.Vector3;
+	fromQ: THREE.Quaternion;
+	toQ: THREE.Quaternion;
+	fromS: number;
+	t: number;
+	dur: number;
+	arc: number;
+	delay: number;
+	bounce: boolean;
+}
+
 export class TableView {
 	private group = new THREE.Group();
+	/** Dónde estaba cada cosa en el dibujo anterior (para animar de ahí a donde va ahora). */
+	private prev = new Map<string, {p: THREE.Vector3; q: THREE.Quaternion}>();
+	private tweens: Tween[] = [];
+	private pulses: THREE.Object3D[] = [];
+	private floaters: THREE.Object3D[] = [];
+	private confetti: Array<{mesh: THREE.Mesh; v: THREE.Vector3; spin: THREE.Vector3; life: number}> = [];
+	private lastWinner: string | null = null;
+	private lastSessionId = '';
+	private time = 0;
 
 	constructor(root: THREE.Object3D) {
+		this.group.scale.setScalar(SCALE);
 		root.add(this.group);
 	}
 
 	clear(): void {
-		for (const child of [...this.group.children]) child.removeFromParent();
-		this.group.traverse(() => {});
-		this.group.clear();
+		this.prev.clear();
+		for (const child of this.group.children) {
+			const key = child.userData.key as string | undefined;
+			// Si estaba a mitad de una animación, se recuerda a dónde iba (no dónde quedó a medias).
+			const tween = this.tweens.find((tw) => tw.obj === child);
+			if (key) this.prev.set(key, {p: (tween?.toP ?? child.position).clone(), q: (tween?.toQ ?? child.quaternion).clone()});
+		}
+		for (const child of [...this.group.children]) if (!child.userData.confetti) child.removeFromParent();
+		this.tweens = [];
+		this.pulses = [];
+		this.floaters = [];
+	}
+
+	/** Anima un objeto recién dibujado: desde donde estaba antes, o desde `from` si es nuevo. */
+	private animate(obj: THREE.Object3D, key: string, opts: {from?: THREE.Vector3; fromQ?: THREE.Quaternion; pop?: boolean; arc?: number; dur?: number; delay?: number; bounce?: boolean} = {}): void {
+		obj.userData.key = key;
+		const before = this.prev.get(key);
+		const toP = obj.position.clone();
+		const toQ = obj.quaternion.clone();
+		let fromP: THREE.Vector3 | null = null;
+		let fromQ = toQ.clone();
+		let fromS = 1;
+		if (before) {
+			if (before.p.distanceTo(toP) < 0.002 && before.q.angleTo(toQ) < 0.01) return;
+			fromP = before.p;
+			fromQ = before.q;
+		} else if (opts.from) {
+			fromP = opts.from.clone();
+			if (opts.fromQ) fromQ = opts.fromQ;
+		} else if (opts.pop) {
+			fromP = toP.clone().add(new THREE.Vector3(0, 0.2, 0));
+			fromS = 0.01;
+		}
+		if (!fromP) return;
+		obj.position.copy(fromP);
+		obj.quaternion.copy(fromQ);
+		obj.scale.setScalar(fromS);
+		this.tweens.push({obj, fromP, toP, fromQ, toQ, fromS, t: 0, dur: opts.dur ?? 0.38, arc: opts.arc ?? (before ? 0.04 : 0.12), delay: opts.delay ?? 0, bounce: Boolean(opts.bounce)});
+	}
+
+	/** Se llama en cada cuadro (desde el motor). */
+	tick(dt: number): void {
+		this.time += dt;
+		const ease = (x: number) => 1 - Math.pow(1 - x, 3);
+		const back = (x: number) => 1 + 2.2 * Math.pow(x - 1, 3) + 1.2 * Math.pow(x - 1, 2);
+		const bounce = (x: number) => {
+			const n = 7.5625;
+			const d = 2.75;
+			if (x < 1 / d) return n * x * x;
+			if (x < 2 / d) return n * (x - 1.5 / d) * (x - 1.5 / d) + 0.75;
+			if (x < 2.5 / d) return n * (x - 2.25 / d) * (x - 2.25 / d) + 0.9375;
+			return n * (x - 2.625 / d) * (x - 2.625 / d) + 0.984375;
+		};
+		this.tweens = this.tweens.filter((tw) => {
+			if (tw.delay > 0) {
+				tw.delay -= dt;
+				return true;
+			}
+			tw.t = Math.min(1, tw.t + dt / tw.dur);
+			const k = tw.bounce ? bounce(tw.t) : ease(tw.t);
+			tw.obj.position.lerpVectors(tw.fromP, tw.toP, k);
+			if (!tw.bounce) tw.obj.position.y += Math.sin(tw.t * Math.PI) * tw.arc;
+			tw.obj.quaternion.slerpQuaternions(tw.fromQ, tw.toQ, ease(tw.t));
+			tw.obj.scale.setScalar(tw.fromS < 1 ? Math.max(0.01, back(tw.t)) : 1);
+			if (tw.t >= 1) tw.obj.scale.setScalar(1);
+			return tw.t < 1;
+		});
+		for (const p of this.pulses) {
+			const s = 1 + Math.sin(this.time * 5) * 0.12;
+			p.scale.set(s, s, s);
+		}
+		for (const f of this.floaters) {
+			if (this.tweens.some((tw) => tw.obj === f)) continue;
+			f.position.y = (f.userData.baseY as number) + Math.sin(this.time * 3.2 + (f.userData.phase as number)) * 0.012;
+		}
+		this.confetti = this.confetti.filter((c) => {
+			c.life -= dt;
+			c.v.y -= 2.2 * dt;
+			c.mesh.position.addScaledVector(c.v, dt);
+			c.mesh.rotation.x += c.spin.x * dt;
+			c.mesh.rotation.y += c.spin.y * dt;
+			if (c.mesh.position.y < 0.01) {
+				c.mesh.position.y = 0.01;
+				c.v.multiplyScalar(0.3);
+			}
+			if (c.life <= 0) {
+				c.mesh.removeFromParent();
+				return false;
+			}
+			return true;
+		});
+	}
+
+	/** Confeti cuando alguien gana. */
+	private celebrate(): void {
+		const colors = [0xff4d5e, 0xffc93c, 0x3ccf7a, 0x4f8dff, 0xff6fae, 0xffffff];
+		for (let i = 0; i < 90; i++) {
+			const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.03, 0.018), new THREE.MeshBasicMaterial({color: colors[i % colors.length], side: THREE.DoubleSide, toneMapped: false}));
+			mesh.position.set(0, 0.15, 0);
+			mesh.userData.confetti = true;
+			this.group.add(mesh);
+			const a = Math.random() * Math.PI * 2;
+			const sp = 0.4 + Math.random() * 0.8;
+			this.confetti.push({mesh, v: new THREE.Vector3(Math.cos(a) * sp, 1.2 + Math.random() * 1.1, Math.sin(a) * sp), spin: new THREE.Vector3(Math.random() * 12, Math.random() * 12, 0), life: 2.4 + Math.random()});
+		}
 	}
 
 	/**
@@ -193,7 +322,17 @@ export class TableView {
 	 */
 	render(session: TableSession | null, me: string, angleOf: (player: string) => number, names: (id: string) => string): void {
 		this.clear();
-		if (!session) return;
+		if (!session) {
+			this.lastWinner = null;
+			return;
+		}
+		if (session.id !== this.lastSessionId) {
+			this.lastSessionId = session.id;
+			this.prev.clear();
+			this.lastWinner = null;
+		}
+		if (session.winner && session.winner !== this.lastWinner) this.celebrate();
+		this.lastWinner = session.winner;
 		const myAngle = session.players.includes(me) ? angleOf(me) : angleOf(session.players[0]);
 		this.group.rotation.y = myAngle;
 		const local = (player: string) => angleOf(player) - myAngle;
@@ -205,13 +344,14 @@ export class TableView {
 			const a = local(player);
 			const count = session.game === 'cards' ? ` · ${session.hands?.[player]?.length ?? 0}` : session.game === 'memo' ? ` · ${session.score?.[player] ?? 0}` : '';
 			const tag = label(`${player === me ? 'Vos' : names(player)}${count}`, player === turnPlayer && !session.winner);
-			tag.position.set(Math.sin(a) * 1.0, 0.32, Math.cos(a) * 1.0);
+			tag.position.set(Math.sin(a) * 0.86, 0.3, Math.cos(a) * 0.86);
 			this.group.add(tag);
 			if (player === turnPlayer && !session.winner && !session.draw) {
-				const ring = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.012, 8, 32), new THREE.MeshBasicMaterial({color: 0x66e6b3}));
+				const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.014, 8, 32), new THREE.MeshBasicMaterial({color: 0x66e6b3, toneMapped: false}));
 				ring.rotation.x = -Math.PI / 2;
-				ring.position.set(Math.sin(a) * 0.86, 0.01, Math.cos(a) * 0.86);
+				ring.position.set(Math.sin(a) * 0.62, 0.012, Math.cos(a) * 0.62);
 				this.group.add(ring);
+				this.pulses.push(ring);
 			}
 		});
 
@@ -236,11 +376,17 @@ export class TableView {
 		this.group.add(pile);
 		// Pila de descarte (las últimas 3 cartas, la de arriba bien visible) y el color actual.
 		const discard = s.discard ?? [];
+		const deckPos = new THREE.Vector3(-0.17, 0.03, -0.02);
 		discard.slice(-3).forEach((card, i, arr) => {
 			const m = cardMesh(cardFace(card), back);
 			m.position.set(0.12 + i * 0.006, 0.006 + i * CARD_T, 0.0);
 			m.rotation.y = (i - arr.length + 1) * 0.18;
 			this.group.add(m);
+			// Recién jugada: vuela desde la mano de quien la tiró (la mía, desde donde estaba en mi mano).
+			const owner = s.players[(s.turn - (s.direction ?? 1) + s.players.length * 4) % s.players.length];
+			const a = local(owner);
+			const from = new THREE.Vector3(Math.sin(a) * 0.62, 0.25, Math.cos(a) * 0.62);
+			this.animate(m, `card:${card.id}`, {from, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, a + 2.4, 0)), arc: 0.22, dur: 0.45});
 		});
 		const colorRing = new THREE.Mesh(new THREE.TorusGeometry(0.14, 0.012, 8, 40), new THREE.MeshBasicMaterial({color: CARD_COLOR_HEX[s.color ?? 'r']}));
 		colorRing.rotation.x = -Math.PI / 2;
@@ -266,6 +412,14 @@ export class TableView {
 					holder.rotation.y = -x * 0.6;
 					holder.userData.pick = {type: 'card', id: card.id};
 					this.group.add(holder);
+					// Las que levanto salen volando del mazo; las que puedo jugar flotan un poquito.
+					const baseY = holder.position.y;
+					this.animate(holder, `card:${card.id}`, {from: deckPos, fromQ: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI, 0, 0)), arc: 0.2, dur: 0.42, delay: i * 0.015});
+					if (playable) {
+						holder.userData.baseY = baseY;
+						holder.userData.phase = i * 0.7;
+						this.floaters.push(holder);
+					}
 				});
 			} else {
 				// Los demás: el dorso de sus cartas en abanico frente a su silla.
@@ -276,6 +430,7 @@ export class TableView {
 					m.position.set(Math.sin(a) * 0.72 + Math.cos(a) * off, 0.01 + i * 0.001, Math.cos(a) * 0.72 - Math.sin(a) * off);
 					m.rotation.y = a + off * 3;
 					this.group.add(m);
+					this.animate(m, `back:${player}:${i}`, {from: deckPos, arc: 0.15, dur: 0.4});
 				}
 			}
 		}
@@ -311,6 +466,7 @@ export class TableView {
 					bar.position.set(x, 0.06, z);
 					bar.castShadow = true;
 					this.group.add(bar);
+					this.animate(bar, `ttt:${i}:${r}`, {pop: true, dur: 0.34});
 				}
 			} else {
 				const ring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.02, 12, 28), colorB);
@@ -318,6 +474,7 @@ export class TableView {
 				ring.position.set(x, 0.06, z);
 				ring.castShadow = true;
 				this.group.add(ring);
+				this.animate(ring, `ttt:${i}`, {pop: true, dur: 0.34});
 			}
 		});
 	}
@@ -342,8 +499,12 @@ export class TableView {
 			const owner = board[i];
 			const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, owner ? 0.025 : 0.006, 20), owner ? (owner === s.players[0] ? red : yellow) : hole);
 			disc.position.set(x, owner ? 0.045 : 0.033, z);
-			if (owner) disc.castShadow = true;
 			this.group.add(disc);
+			if (owner) {
+				disc.castShadow = true;
+				// La ficha cae desde arriba de su columna y rebota.
+				this.animate(disc, `c4:${i}`, {from: new THREE.Vector3(x, 0.55, z), dur: 0.6, bounce: true, arc: 0});
+			}
 		}
 		for (let c = 0; c < cols; c++) {
 			if (!myTurn || cuatroDrop(board, c) < 0) continue;
@@ -365,6 +526,7 @@ export class TableView {
 			if (myTurn && !up) m.userData.pick = {type: 'cell', i};
 			if (s.matched![i] !== undefined) m.position.y = 0.006;
 			this.group.add(m);
+			this.animate(m, `memo:${i}`, {arc: 0.1, dur: 0.35});
 		});
 	}
 

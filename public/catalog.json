@@ -370,7 +370,7 @@
    "id": "hair_spiky",
    "name": "Pinchos",
    "slot": "hair",
-   "price": 120,
+   "price": 0,
    "recolor": "Hair",
    "meshes": [
     "Hair_Spiky"
@@ -392,7 +392,7 @@
    "id": "hair_ponytail",
    "name": "Colita",
    "slot": "hair",
-   "price": 120,
+   "price": 0,
    "recolor": "Hair",
    "meshes": [
     "Hair_Ponytail"
@@ -403,7 +403,7 @@
    "id": "hair_buns",
    "name": "Dos rodetes",
    "slot": "hair",
-   "price": 120,
+   "price": 0,
    "recolor": "Hair",
    "meshes": [
     "Hair_Buns"
@@ -414,7 +414,7 @@
    "id": "hair_curly",
    "name": "Rulos",
    "slot": "hair",
-   "price": 120,
+   "price": 0,
    "recolor": "Hair",
    "meshes": [
     "Hair_Curly"
@@ -444,6 +444,72 @@
    "glb": "models/avatar_modular.glb"
   },
   {
+   "id": "hair_anime",
+   "name": "Corto en capas",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Anime"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_sidepart",
+   "name": "Raya al costado",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Sidepart"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_layers",
+   "name": "Melena en capas",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Layers"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_ayato",
+   "name": "Flequillo largo",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Ayato"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_highpony",
+   "name": "Colita alta",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Highpony"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
+   "id": "hair_wavy",
+   "name": "Ondas y flequillo",
+   "slot": "hair",
+   "price": 0,
+   "recolor": "Hair",
+   "meshes": [
+    "Hair_Wavy"
+   ],
+   "glb": "models/avatar_modular.glb"
+  },
+  {
    "id": "costume_cone",
    "name": "Cono de tránsito",
    "slot": "hat",
@@ -457,7 +523,10 @@
    "slot": "hat",
    "price": 300,
    "glb": "models/costume_frog.glb",
-   "attach": "head"
+   "attach": "head",
+   "hides": [
+    "hair"
+   ]
   },
   {
    "id": "costume_pirate",
@@ -476,7 +545,8 @@
    "attach": "spine",
    "hides": [
     "top",
-    "hat"
+    "hat",
+    "hair"
    ]
   },
   {

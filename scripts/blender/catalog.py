@@ -13,9 +13,9 @@ START_COINS = 500
 
 COSTUMES = [
 	{'id': 'costume_cone', 'name': 'Cono de tránsito', 'slot': 'hat', 'price': 250, 'glb': 'models/costume_cone.glb', 'attach': 'head'},
-	{'id': 'costume_frog', 'name': 'Gorro de rana', 'slot': 'hat', 'price': 300, 'glb': 'models/costume_frog.glb', 'attach': 'head'},
+	{'id': 'costume_frog', 'name': 'Gorro de rana', 'slot': 'hat', 'price': 300, 'glb': 'models/costume_frog.glb', 'attach': 'head', 'hides': ['hair']},
 	{'id': 'costume_pirate', 'name': 'Sombrero pirata', 'slot': 'hat', 'price': 300, 'glb': 'models/costume_pirate.glb', 'attach': 'head'},
-	{'id': 'costume_hotdog', 'name': 'Traje de pancho', 'slot': 'costume', 'price': 450, 'glb': 'models/costume_hotdog.glb', 'attach': 'spine', 'hides': ['top', 'hat']},
+	{'id': 'costume_hotdog', 'name': 'Traje de pancho', 'slot': 'costume', 'price': 450, 'glb': 'models/costume_hotdog.glb', 'attach': 'spine', 'hides': ['top', 'hat', 'hair']},
 ]
 
 

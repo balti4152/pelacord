@@ -30,6 +30,10 @@ export function App(): JSX.Element {
 	const [moviesOpen, setMoviesOpen] = useState(false);
 	/** Mundo 3D (salas, casa, tienda, juegos y audio espacial). */
 	const [worldOpen, setWorldOpen] = useState(false);
+	const [worldMounted, setWorldMounted] = useState(false);
+	useEffect(() => {
+		if (worldOpen) setWorldMounted(true);
+	}, [worldOpen]);
 	const [sharePickerOpen, setSharePickerOpen] = useState(false);
 	const [dragging, setDragging] = useState(false);
 	const [droppedFiles, setDroppedFiles] = useState<File[] | null>(null);
@@ -262,9 +266,10 @@ export function App(): JSX.Element {
 						setWorldOpen(false);
 					}}
 				/>
-				{worldOpen ? (
-					<WorldView onClose={() => setWorldOpen(false)} onOpenMovies={() => { setWorldOpen(false); setMoviesOpen(true); }} />
-				) : moviesOpen ? (
+				{/* El mundo queda montado aunque vuelvas a la parte 2D: al volver aparecés donde estabas, y
+				    los demás te ven ahí (gris, "ausente"). */}
+				{worldMounted ? <WorldView hidden={!worldOpen} onClose={() => setWorldOpen(false)} /> : null}
+				{worldOpen ? null : moviesOpen ? (
 					<MoviesView onClose={() => setMoviesOpen(false)} />
 				) : musicOpen ? (
 					<MusicView onClose={() => setMusicOpen(false)} />

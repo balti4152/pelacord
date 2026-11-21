@@ -28,11 +28,17 @@ def finish(parts, name, attach):
 		toy.apply_transforms(p)
 	obj = toy.join(parts, name)
 	obj['pelacord_attach'] = attach
-	# Los sombreros (y el pancho, que envuelve la cabeza) siguen a la cabeza agrandada del avatar.
-	if attach == 'head' or name == 'Costume_Hotdog':
-		import avatar
-		obj.matrix_world = avatar.head_matrix() @ obj.matrix_world
-		toy.apply_transforms(obj)
+	# Ajuste al FBX chibi en espacio de reposo, antes de enganchar al hueso.
+	for vertex in obj.data.vertices:
+		x, y, z = vertex.co
+		if name == 'Costume_Frog':
+			vertex.co = (1.55 * x, 1.54 * y, 1.082 + 1.38 * (z - 1.0))
+		elif name == 'Costume_Hotdog':
+			vertex.co = (1.70 * x, 1.61 * y, .17 + 1.18 * (z - .17))
+		elif name == 'Costume_Cone':
+			vertex.co = (1.23 * x, 1.23 * y, z + .332)
+		else:
+			vertex.co = (1.43 * x, 1.36 * y, z + .304)
 	return obj
 
 
@@ -49,7 +55,7 @@ def cone_hat():
 	]
 	obj = finish(parts, 'Costume_Cone', 'head')
 	# Cono "torcido" con gracia: un poco ladeado, girando desde la coronilla.
-	toy.set_origin(obj, (0, 0, HEAD_TOP - 0.08))
+	toy.set_origin(obj, (0, 0, HEAD_TOP + .252))
 	obj.rotation_euler = (DEG(-6), DEG(9), 0)
 	toy.apply_transforms(obj)
 	return obj

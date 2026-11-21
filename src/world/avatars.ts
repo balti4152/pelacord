@@ -26,8 +26,11 @@ export function loadGLB(url: string): Promise<GLTF> {
 
 const AVATAR_URL = 'models/avatar_modular.glb';
 const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
-type BaseAnim = 'idle' | 'walk' | 'sit';
-const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', sit: 'Sit'};
+export type BaseAnim = 'idle' | 'walk' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
+/** Gestos de una sola vez (se mezclan encima de lo que esté haciendo). */
+export type OneShot = 'Wave' | 'Slap' | 'Cheer' | 'Bow' | 'Shrug';
+const ONE_SHOTS = new Set(['Wave', 'Slap', 'Cheer', 'Bow', 'Shrug']);
 
 /**
  * Huesos que mueve DE VERDAD cada animación.
@@ -40,10 +43,15 @@ const CLIP_BONES: Record<string, string[] | null> = {
 	Idle: null,
 	Walk: null,
 	Sit: null,
+	Dance: null,
+	Fish: null,
 	Blink: ['eye_L', 'eye_R'],
 	Talk: ['mouth', 'head'],
-	Wave: ['arm_R', 'arm_L', 'head'],
+	Wave: ['arm_R', 'arm_L', 'elbow_R', 'head'],
 	Slap: ['arm_R', 'spine', 'head'],
+	Cheer: ['hips', 'arm_L', 'arm_R', 'head'],
+	Bow: ['spine', 'head', 'arm_L', 'arm_R'],
+	Shrug: ['arm_L', 'arm_R', 'head'],
 };
 const clipCache = new Map<THREE.AnimationClip, THREE.AnimationClip>();
 
@@ -79,6 +87,7 @@ export class Avatar {
 	private lookKey = '';
 	private ready: Promise<void>;
 	private disposed = false;
+	private ghost = false;
 
 	constructor(private catalog: Catalog, look: Look) {
 		this.ready = this.init(look);
@@ -118,7 +127,7 @@ export class Avatar {
 		for (const source of gltf.animations) {
 			const clip = onlyBones(source);
 			const action = this.mixer.clipAction(clip);
-			if (clip.name === 'Wave' || clip.name === 'Slap' || clip.name === 'Blink') {
+			if (ONE_SHOTS.has(clip.name) || clip.name === 'Blink') {
 				action.setLoop(THREE.LoopOnce, 1);
 				action.clampWhenFinished = false;
 			}
@@ -132,7 +141,7 @@ export class Avatar {
 		}
 		this.mixer.addEventListener('finished', (event) => {
 			const action = (event as unknown as {action: THREE.AnimationAction}).action;
-			if (action === this.actions.Wave || action === this.actions.Slap) action.fadeOut(0.2);
+			if (ONE_SHOTS.has(action.getClip().name)) action.fadeOut(0.2);
 		});
 		this.actions.Idle?.play();
 		await this.setLook(look);
@@ -143,7 +152,9 @@ export class Avatar {
 		const key = JSON.stringify(look);
 		if (key === this.lookKey || !this.model) return;
 		this.lookKey = key;
-		const hidden = new Set([...hidesOf(this.catalog, look.top), ...hidesOf(this.catalog, look.costume)]);
+		const costumeHides = hidesOf(this.catalog, look.costume);
+		const hidden = new Set([...hidesOf(this.catalog, look.top), ...costumeHides,
+			...hidesOf(this.catalog, costumeHides.includes('hat') ? null : look.hat)]);
 		this.model.traverse((obj) => {
 			const data = obj.userData as {pelacord_slot?: string; pelacord_body?: string; pelacord_item?: string};
 			if (!data.pelacord_slot) return;
@@ -159,6 +170,11 @@ export class Avatar {
 		for (const [name, mat] of this.materials) {
 			const key2 = COLOR_MATERIALS[name];
 			if (key2 && look.colors[key2]) mat.color.set(look.colors[key2]);
+			mat.userData.original = mat.color.clone();
+		}
+		if (this.ghost) {
+			this.ghost = false;
+			this.setGhost(true);
 		}
 		for (const old of this.costumes) old.removeFromParent();
 		this.costumes = [];
@@ -192,11 +208,42 @@ export class Avatar {
 		this.base = anim;
 	}
 
+	/**
+	 * Modo "ausente": gris y medio transparente (está en la parte 2D de PelaCord, pero su personaje
+	 * se queda donde lo dejó).
+	 */
+	setGhost(on: boolean): void {
+		if (on === this.ghost) return;
+		this.ghost = on;
+		for (const mat of this.materials.values()) {
+			const original = (mat.userData.original as THREE.Color | undefined) ?? mat.color.clone();
+			mat.userData.original = original;
+			mat.transparent = on;
+			mat.opacity = on ? 0.42 : 1;
+			mat.depthWrite = !on;
+			if (on) {
+				const grey = original.r * 0.3 + original.g * 0.59 + original.b * 0.11;
+				mat.color.setRGB(grey * 0.8 + 0.12, grey * 0.8 + 0.12, grey * 0.85 + 0.16);
+			} else {
+				mat.color.copy(original);
+			}
+			mat.needsUpdate = true;
+		}
+		this.root.traverse((obj) => {
+			const mesh = obj as THREE.Mesh;
+			if (mesh.isMesh) mesh.castShadow = !on;
+		});
+	}
+
+	isGhost(): boolean {
+		return this.ghost;
+	}
+
 	getBase(): BaseAnim {
 		return this.base;
 	}
 
-	play(name: 'Wave' | 'Slap'): void {
+	play(name: OneShot): void {
 		const action = this.actions[name];
 		if (!action) return;
 		action.reset().setEffectiveWeight(1).fadeIn(0.1).play();
