@@ -1,8 +1,8 @@
 import {useEffect, useMemo, useRef, useState} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Bed, Check, Coins, Crown, Dices, Footprints, Glasses, Lamp, Lock, Monitor, Music, Plus, Popcorn, Search, Shirt,
-	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Play, Film, ScreenShare, Power, Send,
+	Armchair, Bed, Check, Coins, Crown, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
+	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import {Avatar} from '@/world/avatars';
@@ -40,8 +40,8 @@ export function AvatarPreview({catalog, look}: {catalog: Catalog; look: Look}): 
 		floor.receiveShadow = true;
 		scene.add(floor);
 		const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
-		camera.position.set(0, 0.95, 3.2);
-		camera.lookAt(0, 0.66, 0);
+		camera.position.set(0, 1.05, 4.15);
+		camera.lookAt(0, 0.88, 0);
 		const avatar = new Avatar(catalog, look);
 		avatarRef.current = avatar;
 		scene.add(avatar.root);
@@ -65,6 +65,7 @@ export function AvatarPreview({catalog, look}: {catalog: Catalog; look: Look}): 
 			const h = el.clientHeight || w;
 			renderer.setSize(w, h, false);
 			camera.aspect = w / h;
+			camera.zoom = Math.min(1, camera.aspect / .55);
 			camera.updateProjectionMatrix();
 		};
 		resize();
@@ -95,7 +96,7 @@ export function AvatarPreview({catalog, look}: {catalog: Catalog; look: Look}): 
 	return <div className="t-preview" ref={ref} title="Arrastralo para darlo vuelta" />;
 }
 
-function Panel({title, icon: Icon, onClose, className = '', children, coins}: {title: string; icon: LucideIcon; onClose?: () => void; className?: string; children: React.ReactNode; coins?: number}): JSX.Element {
+export function Panel({title, icon: Icon, onClose, className = '', children, coins}: {title: string; icon: LucideIcon; onClose?: () => void; className?: string; children: React.ReactNode; coins?: number}): JSX.Element {
 	return (
 		<section className={`t-panel ${className}`} onKeyDown={(e) => e.stopPropagation()}>
 			<header className="t-panel-head">
@@ -245,7 +246,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 
 // ----------------------------------------------------------------- tienda --
 
-export function ShopPanel({catalog, kind, onClose, onTry}: {catalog: Catalog; kind: 'clothes' | 'furniture'; onClose: () => void; onTry: (item: CatalogItem) => void}): JSX.Element {
+export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog: Catalog; kind: 'clothes' | 'furniture'; onClose: () => void; onTry: (item: CatalogItem) => void; onSupplies?: () => void}): JSX.Element {
 	const profile = useProfile();
 	const sections = kind === 'furniture'
 		? [...new Set(catalog.items.filter((i) => i.slot === 'furniture').map((i) => i.category ?? 'deco'))]
@@ -256,6 +257,7 @@ export function ShopPanel({catalog, kind, onClose, onTry}: {catalog: Catalog; ki
 	const items = catalog.items.filter((i) => (kind === 'furniture' ? i.slot === 'furniture' && (i.category ?? 'deco') === section : i.slot === section));
 	return (
 		<Panel title={kind === 'furniture' ? 'Muebles' : 'Ropa y estilo'} icon={kind === 'furniture' ? Armchair : Shirt} onClose={onClose} className="t-shop" coins={profile.coins}>
+			{onSupplies ? <button type="button" className="t-btn is-soft t-pet-shop-link" onClick={onSupplies}><Sparkles size={16} /> Esferas de captura</button> : null}
 			<nav className="t-tabs">
 				{sections.map((s) => {
 					const Icon = SLOT_ICON[s] ?? Sparkles;
@@ -380,86 +382,15 @@ export function InvitePanel({friends, onInvite, onClose}: {friends: Array<{id: s
 	);
 }
 
-// ------------------------------------------------------------------ tele ---
-
-export function TvPanel({inVoice, sharing, onJoinVoice, onShare, onStopShare, onSearchMusic, results, searching, onPlay, nowPlaying, movieRooms, onOpenMovies, onClose}: {
-	inVoice: boolean;
-	sharing: boolean;
-	onJoinVoice: () => void;
-	onShare: () => void;
-	onStopShare: () => void;
-	onSearchMusic: (q: string) => void;
-	results: Array<{id: string; title: string; author: string; thumbnail: string}>;
-	searching: boolean;
-	onPlay: (index: number) => void;
-	nowPlaying: string | null;
-	movieRooms: Array<{id: string; title: string; host: string}>;
-	onOpenMovies: () => void;
-	onClose: () => void;
-}): JSX.Element {
-	const [tab, setTab] = useState<'music' | 'screen' | 'movies'>('music');
-	const [query, setQuery] = useState('');
-	return (
-		<Panel title="La tele" icon={Monitor} onClose={onClose} className="t-tv">
-			<p className="t-hint">Lo que pongas acá lo ven y escuchan todos los que están en la llamada.</p>
-			{!inVoice ? (
-				<div className="t-callout">
-					<p>Para compartir con los demás tenés que estar en un canal de voz.</p>
-					<button type="button" className="t-btn is-primary" onClick={onJoinVoice}>Unirme a la voz</button>
-				</div>
-			) : null}
-			<nav className="t-tabs">
-				<button type="button" className={tab === 'music' ? 'is-active' : ''} onClick={() => setTab('music')}><Music size={15} strokeWidth={2.6} /> Música</button>
-				<button type="button" className={tab === 'movies' ? 'is-active' : ''} onClick={() => setTab('movies')}><Film size={15} strokeWidth={2.6} /> Pelaflix</button>
-				<button type="button" className={tab === 'screen' ? 'is-active' : ''} onClick={() => setTab('screen')}><ScreenShare size={15} strokeWidth={2.6} /> Pantalla</button>
-			</nav>
-			{tab === 'music' ? (
-				<>
-					{nowPlaying ? <p className="t-now"><Music size={14} strokeWidth={2.8} /> Suena: {nowPlaying}</p> : null}
-					<form className="t-search" onSubmit={(e) => { e.preventDefault(); onSearchMusic(query); }}>
-						<Search size={16} strokeWidth={2.6} />
-						<input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar una canción…" autoFocus />
-						<button type="submit" className="t-btn is-primary is-small">Buscar</button>
-					</form>
-					<ul className="t-list t-results">
-						{searching ? <li className="t-hint">Buscando…</li> : null}
-						{results.map((r, i) => (
-							<li key={r.id}>
-								<img src={r.thumbnail} alt="" />
-								<span className="t-list-name"><strong>{r.title}</strong><small>{r.author}</small></span>
-								<button type="button" className="t-btn is-primary is-small" disabled={!inVoice} onClick={() => onPlay(i)}><Play size={13} strokeWidth={3} /></button>
-							</li>
-						))}
-					</ul>
-				</>
-			) : null}
-			{tab === 'movies' ? (
-				<>
-					{movieRooms.length ? (
-						<ul className="t-list">
-							{movieRooms.map((room) => (
-								<li key={room.id}><Popcorn size={16} strokeWidth={2.6} /><span className="t-list-name"><strong>{room.title}</strong><small>de {room.host}</small></span></li>
-							))}
-						</ul>
-					) : <p className="t-empty">Nadie está mirando nada todavía.</p>}
-					<button type="button" className="t-btn is-primary" onClick={onOpenMovies}><Film size={15} strokeWidth={2.6} /> Abrir Pelaflix</button>
-					<p className="t-hint">La película que se está mirando aparece en la tele del Cine y del Living.</p>
-				</>
-			) : null}
-			{tab === 'screen' ? (
-				<div className="t-row">
-					{sharing ? (
-						<button type="button" className="t-btn is-danger" onClick={onStopShare}><Power size={15} strokeWidth={2.8} /> Dejar de compartir</button>
-					) : (
-						<button type="button" className="t-btn is-primary" disabled={!inVoice} onClick={onShare}><ScreenShare size={15} strokeWidth={2.8} /> Compartir mi pantalla en la tele</button>
-					)}
-				</div>
-			) : null}
-		</Panel>
-	);
-}
-
 // ------------------------------------------------------------------ mesa ---
+
+const GAME_ART: Record<TableGameKind, {icon: LucideIcon; from: string; to: string}> = {
+	cards: {icon: Layers, from: '#ff6b5b', to: '#ffb547'},
+	tateti: {icon: Grid3x3, from: '#4fb3ff', to: '#8a5cff'},
+	cuatro: {icon: CircleDot, from: '#ffc93c', to: '#ff6b5b'},
+	memo: {icon: Brain, from: '#38d39f', to: '#4fb3ff'},
+};
+const SEAT_COLORS = ['#ff6b5b', '#4fb3ff', '#ffc93c', '#38d39f', '#8a5cff', '#e0365a'];
 
 export function TablePanel({session, me, seated, names, onStart, onLeave, colorPick, onColor, onEnd}: {
 	session: TableSession | null;
@@ -473,60 +404,106 @@ export function TablePanel({session, me, seated, names, onStart, onLeave, colorP
 	onEnd: () => void;
 }): JSX.Element {
 	const [bots, setBots] = useState(Math.max(0, 2 - seated.length));
+	const [pick, setPick] = useState<TableGameKind>('cards');
 	if (!session) {
+		const game = TABLE_GAMES.find((g) => g.id === pick)!;
+		const total = seated.length + bots;
+		const ok = total >= game.min;
 		return (
-			<div className="t-table t-table-lobby">
-				<header><Dices size={20} strokeWidth={2.6} /><strong>Mesa de juegos</strong><span className="t-table-count"><Users size={14} strokeWidth={2.6} /> {seated.length} sentados</span></header>
-				<div className="t-game-grid">
+			<div className="tg-lobby">
+				<header className="tg-lobby-head">
+					<span className="tg-badge"><Dices size={22} strokeWidth={2.6} /></span>
+					<div>
+						<h2>Mesa de juegos</h2>
+						<p>Elegí un juego. Los que se sienten en la mesa juegan con vos.</p>
+					</div>
+					<button type="button" className="t-btn is-soft is-small" onClick={onLeave}>Levantarme <kbd>E</kbd></button>
+				</header>
+				<div className="tg-games">
 					{TABLE_GAMES.map((g) => {
-						const total = seated.length + bots;
-						const ok = total >= g.min;
+						const art = GAME_ART[g.id];
+						const Icon = art.icon;
 						return (
-							<button key={g.id} type="button" className="t-game" disabled={!ok} onClick={() => onStart(g.id, bots)}>
+							<button key={g.id} type="button" className={`tg-game${pick === g.id ? ' is-picked' : ''}`} onClick={() => setPick(g.id)}>
+								<span className="tg-game-art" style={{background: `linear-gradient(135deg, ${art.from}, ${art.to})`}}>
+									<Icon size={38} strokeWidth={2.4} />
+									<i /><i /><i />
+								</span>
 								<strong>{g.name}</strong>
 								<small>{g.desc}</small>
-								<span>{g.min === g.max ? `${g.min} jugadores` : `${g.min} a ${g.max}`}</span>
+								<span className="tg-game-count"><Users size={12} strokeWidth={3} /> {g.min === g.max ? g.min : `${g.min}-${g.max}`}</span>
 							</button>
 						);
 					})}
 				</div>
-				<div className="t-row t-bots">
-					<Bot size={16} strokeWidth={2.6} /> Compus
-					<button type="button" className="t-btn is-soft is-small" onClick={() => setBots((b) => Math.max(0, b - 1))}><Minus size={13} strokeWidth={3} /></button>
-					<strong>{bots}</strong>
-					<button type="button" className="t-btn is-soft is-small" onClick={() => setBots((b) => Math.min(5, b + 1))}><Plus size={13} strokeWidth={3} /></button>
-					<button type="button" className="t-btn is-soft is-small t-leave" onClick={onLeave}>Levantarme (E)</button>
-				</div>
+				<footer className="tg-lobby-foot">
+					<div className="tg-players">
+						{seated.map((id, i) => (
+							<span key={id} className="tg-chip" style={{'--c': SEAT_COLORS[i % 6]} as React.CSSProperties}>
+								<span className="tg-dot">{names(id).slice(0, 1).toUpperCase()}</span>{id === me ? 'Vos' : names(id)}
+							</span>
+						))}
+						{Array.from({length: bots}, (_, i) => (
+							<span key={`b${i}`} className="tg-chip is-bot"><span className="tg-dot"><Bot size={12} strokeWidth={3} /></span>Compu {i + 1}</span>
+						))}
+					</div>
+					<div className="tg-bots">
+						<span><Bot size={15} strokeWidth={2.8} /> Compus</span>
+						<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.max(0, b - 1))} aria-label="Menos compus"><Minus size={14} strokeWidth={3} /></button>
+						<strong>{bots}</strong>
+						<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.min(5, b + 1))} aria-label="Más compus"><Plus size={14} strokeWidth={3} /></button>
+					</div>
+					<button type="button" className="t-btn is-primary tg-play" disabled={!ok} onClick={() => onStart(pick, bots)}>
+						<Play size={16} strokeWidth={3} /> {ok ? `¡A jugar ${game.name}!` : `Faltan ${game.min - total} jugadores`}
+					</button>
+				</footer>
 			</div>
 		);
 	}
 	const turn = session.players[session.turn];
 	const game = TABLE_GAMES.find((g) => g.id === session.game);
-	const done = session.winner || session.draw;
+	const art = GAME_ART[session.game];
+	const done = Boolean(session.winner || session.draw);
+	const mine = turn === me && !done;
 	return (
-		<div className="t-table">
-			<header>
-				<Dices size={20} strokeWidth={2.6} />
-				<strong>{game?.name}</strong>
-				<span className={`t-turn${turn === me && !done ? ' is-mine' : ''}`}>
-					{done ? (session.winner ? (session.winner === me ? '¡Ganaste!' : `Ganó ${names(session.winner)}`) : 'Empate') : turn === me ? 'Te toca' : `Turno de ${names(turn)}`}
-				</span>
-			</header>
-			<p className="t-note">{session.note}</p>
-			{session.game === 'cards' && turn === me && !done ? <p className="t-hint">Tocá una carta que coincida en color o número, o el mazo para levantar.</p> : null}
+		<>
+			<div className="tg-hud">
+				<div className="tg-hud-top">
+					<span className="tg-title" style={{background: `linear-gradient(135deg, ${art.from}, ${art.to})`}}><art.icon size={16} strokeWidth={2.8} /> {game?.name}</span>
+					<span className={`tg-turn${mine ? ' is-mine' : ''}${done ? ' is-done' : ''}`}>
+						{done ? (session.winner ? (session.winner === me ? <><Trophy size={18} strokeWidth={2.8} /> ¡Ganaste!</> : <><Trophy size={18} strokeWidth={2.8} /> Ganó {names(session.winner)}</>) : 'Empate') : mine ? '¡Te toca!' : `Juega ${names(turn)}`}
+					</span>
+				</div>
+				<div className="tg-players is-row">
+					{session.players.map((p, i) => {
+						const count = session.game === 'cards' ? session.hands?.[p]?.length ?? 0 : session.game === 'memo' ? session.score?.[p] ?? 0 : null;
+						return (
+							<span key={p} className={`tg-chip${p === turn && !done ? ' is-turn' : ''}${p === session.winner ? ' is-winner' : ''}`} style={{'--c': SEAT_COLORS[i % 6]} as React.CSSProperties}>
+								<span className="tg-dot">{p.startsWith('bot:') ? <Bot size={12} strokeWidth={3} /> : names(p).slice(0, 1).toUpperCase()}</span>
+								{p === me ? 'Vos' : names(p)}
+								{count !== null ? <em>{session.game === 'cards' ? <Layers size={11} strokeWidth={3} /> : <Sparkles size={11} strokeWidth={3} />}{count}</em> : null}
+							</span>
+						);
+					})}
+				</div>
+				{session.note ? <p className="tg-note">{session.note}</p> : null}
+				{session.game === 'cards' && mine ? <p className="tg-tip">Tocá una carta que coincida en color o número, o el mazo para levantar.</p> : null}
+			</div>
+			<div className="tg-actions">
+				{done && session.host === me ? <button type="button" className="t-btn is-primary is-small" onClick={onEnd}><Play size={13} strokeWidth={3} /> Otra partida</button> : null}
+				{session.host === me && !done ? <button type="button" className="t-btn is-soft is-small" onClick={onEnd}><Trash2 size={13} strokeWidth={3} /> Terminar</button> : null}
+				<button type="button" className="t-btn is-soft is-small" onClick={onLeave}>Levantarme <kbd>E</kbd></button>
+			</div>
 			{colorPick ? (
-				<div className="t-colors">
-					<span>Elegí el color:</span>
-					{(['r', 'y', 'g', 'b'] as CardColor[]).map((c) => (
-						<button key={c} type="button" className="t-color" style={{background: CARD_COLOR_HEX[c]}} onClick={() => onColor(c)} aria-label={c} />
-					))}
+				<div className="tg-colors">
+					<strong>¿Qué color pedís?</strong>
+					<div>
+						{(['r', 'y', 'g', 'b'] as CardColor[]).map((c) => (
+							<button key={c} type="button" className="tg-color" style={{background: CARD_COLOR_HEX[c]}} onClick={() => onColor(c)} aria-label={c} />
+						))}
+					</div>
 				</div>
 			) : null}
-			<div className="t-row">
-				{done && session.host === me ? <button type="button" className="t-btn is-primary is-small" onClick={onEnd}>Otra partida</button> : null}
-				{session.host === me && !done ? <button type="button" className="t-btn is-soft is-small" onClick={onEnd}><Trash2 size={13} strokeWidth={3} /> Terminar</button> : null}
-				<button type="button" className="t-btn is-soft is-small t-leave" onClick={onLeave}>Levantarme (E)</button>
-			</div>
-		</div>
+		</>
 	);
 }

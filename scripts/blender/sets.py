@@ -407,7 +407,11 @@ def build_house():
 	random.seed(12)
 	for i in range(14):
 		toy.sphere(f'wstar_{i}', radius=0.02, loc=(-1.6 + random.uniform(-0.9, 0.9), -3.95, 1.7 + random.uniform(-0.5, 0.5)), mat=glow, segments=6, rings=4)
-	neon_moon('HouseMoon', (2.6, -4.08, 2.1), size=0.35)
+	neon_moon('HouseMoon', (3.7, -4.08, 2.5), size=0.3)
+	# La tele de la casa: cada uno pone su música o su película (se escucha sólo acá adentro).
+	toy.rounded_box('ScreenFrame', size=(2.6, 0.12, 1.55), loc=(1.3, -3.95, 1.6), radius=0.06, mat=toy.material('HouseTvFrame', (0.08, 0.06, 0.1)))
+	toy.rounded_box('Screen', size=(2.4, 0.04, 1.35), loc=(1.3, -3.88, 1.6), radius=0.015, mat=screen_mat())
+	toy.rounded_box('HouseTvStand', size=(2.2, 0.5, 0.5), loc=(1.3, -3.7, 0.25), radius=0.08, mat=toy.material('HouseTvStand', 'wood'))
 	toy.point_light('HouseFill', (0, 0.5, 3.0), color=(1.0, 0.85, 0.75), energy=320, radius=2.0)
 	toy.point_light('HouseFillFront', (0, 4.2, 2.3), color=(1.0, 0.88, 0.78), energy=260, radius=2.0)
 	toy.empty('Spawn', loc=(0, 3.0, 0))

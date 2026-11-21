@@ -143,20 +143,20 @@ def build_body(colors=None, suffix=''):
 	return body
 
 
-def build_armature():
+def build_armature(bones=BONES, scale_face=True):
 	data = bpy.data.armatures.new('AvatarRig')
 	rig = bpy.data.objects.new('Avatar', data)
 	toy.link(rig)
 	bpy.context.view_layer.objects.active = rig
 	with toy._ctx(rig):
 		bpy.ops.object.mode_set(mode='EDIT')
-		for name, (head, tail, parent) in BONES.items():
+		for name, (head, tail, parent) in bones.items():
 			bone = data.edit_bones.new(name)
 			# Los huesos de la cara siguen a la cabeza agrandada (si no, el parpadeo y la boca escalan
 			# desde un punto corrido).
-			if name in ('mouth', 'eye_L', 'eye_R'):
+			if scale_face and name in ('mouth', 'eye_L', 'eye_R'):
 				head, tail = scale_head_point(head), scale_head_point(tail)
-			elif name == 'head':
+			elif scale_face and name == 'head':
 				tail = scale_head_point(tail)
 			bone.head = head
 			bone.tail = tail
@@ -288,7 +288,91 @@ def anim_slap(rig):
 	key(rig, 21, 'head', rot=(0, 0, 0))
 
 
-ANIMATIONS = (anim_idle, anim_walk, anim_sit, anim_talk, anim_blink, anim_wave, anim_slap)
+def anim_dance(rig):
+	"""Baile de muñeco (loop de 1 s): rebote, cadera de lado a lado y brazos arriba alternados."""
+	new_action(rig, 'Dance')
+	for f, side in ((1, 1), (13, -1), (25, 1)):
+		key(rig, f, 'spine', rot=(3, 0, 9 * side))
+		key(rig, f, 'head', rot=(4, 0, -7 * side))
+		key(rig, f, 'arm_L', rot=(-20, 0, -(150 if side > 0 else 40)))
+		key(rig, f, 'arm_R', rot=(-20, 0, 40 if side > 0 else 150))
+		key(rig, f, 'leg_L', rot=(-14 if side > 0 else 0, 0, -3))
+		key(rig, f, 'leg_R', rot=(0 if side > 0 else -14, 0, 3))
+	for f, up in ((1, 0.0), (7, 0.05), (13, 0.0), (19, 0.05), (25, 0.0)):
+		key(rig, f, 'hips', loc=(0, up, 0))
+
+
+def anim_fish(rig):
+	"""Pescar: los dos brazos adelante sosteniendo la caña, con un leve vaivén (loop de 2 s)."""
+	new_action(rig, 'Fish')
+	for f, sway in ((1, 0), (25, 3), (49, 0)):
+		key(rig, f, 'arm_L', rot=(-62 - sway, 0, 14))
+		key(rig, f, 'arm_R', rot=(-70 - sway, 0, -10))
+		key(rig, f, 'spine', rot=(4, 0, 0))
+		key(rig, f, 'head', rot=(6 + sway, 0, 0))
+		key(rig, f, 'hips', loc=(0, sway * 0.002, 0))
+
+
+def anim_robot(rig):
+	"""Baile robot (loop de 1.3 s): brazos en escuadra que suben y bajan a golpes, cabeza que gira."""
+	new_action(rig, 'Robot')
+	poses = ((1, 1), (8, 1), (9, -1), (16, -1), (17, 1), (24, 1), (25, -1), (32, -1), (33, 1))
+	for f, side in poses:
+		key(rig, f, 'arm_L', rot=(-90, 0, -10 if side > 0 else -70))
+		key(rig, f, 'arm_R', rot=(-90, 0, 70 if side > 0 else 10))
+		key(rig, f, 'head', rot=(0, 18 * side, 0))
+		key(rig, f, 'spine', rot=(0, -8 * side, 0))
+		key(rig, f, 'hips', loc=(0, 0.015 if side > 0 else 0.0, 0))
+
+
+def anim_clap(rig):
+	"""Aplaudir (loop de 0.5 s): manos adelante que se juntan."""
+	new_action(rig, 'Clap')
+	for f, open_ in ((1, 1), (4, 0), (7, 1), (10, 0), (13, 1)):
+		key(rig, f, 'arm_L', rot=(-75, 0, -30 if open_ else 12))
+		key(rig, f, 'arm_R', rot=(-75, 0, 30 if open_ else -12))
+		key(rig, f, 'head', rot=(4 if open_ else 0, 0, 0))
+
+
+def anim_cheer(rig):
+	"""Festejo (una vez): salto con los dos brazos arriba."""
+	new_action(rig, 'Cheer')
+	key(rig, 1, 'hips', loc=(0, 0, 0))
+	key(rig, 1, 'arm_L', rot=(0, 0, -6))
+	key(rig, 1, 'arm_R', rot=(0, 0, 6))
+	key(rig, 5, 'hips', loc=(0, -0.05, 0))
+	key(rig, 10, 'hips', loc=(0, 0.16, 0))
+	key(rig, 10, 'arm_L', rot=(0, 0, -165))
+	key(rig, 10, 'arm_R', rot=(0, 0, 165))
+	key(rig, 10, 'head', rot=(-12, 0, 0))
+	key(rig, 16, 'hips', loc=(0, 0, 0))
+	key(rig, 20, 'arm_L', rot=(0, 0, -150))
+	key(rig, 20, 'arm_R', rot=(0, 0, 150))
+	key(rig, 28, 'arm_L', rot=(0, 0, -6))
+	key(rig, 28, 'arm_R', rot=(0, 0, 6))
+	key(rig, 28, 'head', rot=(0, 0, 0))
+
+
+def anim_bow(rig):
+	"""Reverencia (una vez)."""
+	new_action(rig, 'Bow')
+	for f, bend, arm in ((1, 0, 6), (10, 38, 20), (22, 38, 20), (32, 0, 6)):
+		key(rig, f, 'spine', rot=(bend, 0, 0))
+		key(rig, f, 'head', rot=(bend * 0.3, 0, 0))
+		key(rig, f, 'arm_L', rot=(-arm, 0, -6))
+		key(rig, f, 'arm_R', rot=(-arm * 0.3, 0, 6))
+
+
+def anim_shrug(rig):
+	"""Ni idea (una vez): hombros arriba y cabeza de costado."""
+	new_action(rig, 'Shrug')
+	for f, k in ((1, 0), (8, 1), (20, 1), (28, 0)):
+		key(rig, f, 'arm_L', rot=(-25 * k, 0, -6 - 40 * k))
+		key(rig, f, 'arm_R', rot=(-25 * k, 0, 6 + 40 * k))
+		key(rig, f, 'head', rot=(0, 0, 12 * k))
+
+
+ANIMATIONS = (anim_idle, anim_walk, anim_sit, anim_talk, anim_blink, anim_wave, anim_slap, anim_dance, anim_fish, anim_robot, anim_clap, anim_cheer, anim_bow, anim_shrug)
 
 
 def build(colors=None, suffix=''):

@@ -7,8 +7,13 @@
  */
 import * as THREE from 'three';
 import {CSS2DObject, CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import {Avatar, loadGLB} from '@/world/avatars';
-import {type Anim, type Catalog, DEFAULT_LOOK, type Emote, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId} from '@/world/core';
+import {Avatar, type BaseAnim, loadGLB} from '@/world/avatars';
+import {Ambience} from '@/world/ambience';
+import {CAPTURE_RANGE, CityPets} from '@/world/cityPets';
+import {isPetId, type PetId} from '@/world/petCatalog';
+import {PetCompanion} from '@/world/petCompanion';
+import {Npcs} from '@/world/npcs';
+import {type Anim, type Catalog, type Emote, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId} from '@/world/core';
 import {iconSvg} from '@/world/icons';
 
 const WALK_SPEED = 2.5;
@@ -25,6 +30,8 @@ interface Bounds {
 	maxZ: number;
 	radius: number;
 	obstacles: Array<{x: number; z: number; r: number}>;
+	/** Zonas caminables sueltas (por ejemplo costanera + muelle): se queda en la más cercana. */
+	rects?: Array<[number, number, number, number]>;
 }
 
 const box = (minX: number, maxX: number, minZ: number, maxZ: number, obstacles: Bounds['obstacles'] = []): Bounds => ({kind: 'box', minX, maxX, minZ, maxZ, radius: 0, obstacles});
@@ -35,6 +42,10 @@ const BOUNDS: Record<string, Bounds> = {
 	campfire: {kind: 'circle', minX: 0, maxX: 0, minZ: 0, maxZ: 0, radius: 4.6, obstacles: [{x: 0, z: 0, r: 0.85}]},
 	shop: box(-4.6, 4.6, -4.4, 2.6),
 	games: box(-4.6, 4.6, -4.2, 4.1, [{x: 0, z: 0.5, r: 1.3}]),
+	port: {
+		...box(-7.2, 7.2, -5.0, 3.6, [{x: 4.8, z: -2.35, r: 1.45}, {x: -6.2, z: -4.5, r: 0.6}, {x: -4.9, z: -4.9, r: 0.4}, {x: 6.7, z: -4.6, r: 0.4}, {x: 3.0, z: -1.7, r: 0.45}]),
+		rects: [[-7.2, 7.2, -5.0, -1.6], [-2.55, -0.45, -1.6, 3.6]],
+	},
 	house: box(-4.1, 4.1, -3.7, 3.6),
 };
 
@@ -43,7 +54,9 @@ export type Interaction =
 	| {kind: 'door'; room: RoomId; label: string}
 	| {kind: 'exit'; label: string}
 	| {kind: 'tv'; label: string}
-	| {kind: 'npc'; label: string}
+	| {kind: 'npc'; npc: string; label: string}
+	| {kind: 'fish'; label: string}
+	| {kind: 'pet'; id: string; label: string}
 	| {kind: 'hotspot'; hotspot: string; label: string}
 	| {kind: 'stand'; label: string};
 
@@ -55,6 +68,10 @@ export interface EngineCallbacks {
 	onPlayerClick(id: string): void;
 	onPlace(x: number, z: number, rot: number): void;
 	onFurniturePick(uid: string): void;
+	/** Mientras pesca: E / clic para recoger (lo maneja WorldView con el minijuego). */
+	onFishAction?(): void;
+	/** Entró o salió el modo "ver la tele" (cámara cerca de la pantalla). */
+	onTvView?(on: boolean): void;
 }
 
 interface Actor {
@@ -68,6 +85,7 @@ interface Actor {
 	seat: string | null;
 	look: Look;
 	anim: Anim;
+	companion?: PetCompanion;
 }
 
 interface Seat {
@@ -84,7 +102,7 @@ interface Door {
 	name: string;
 }
 
-const ROOM_TITLES: Record<string, string> = {living: 'el Living', cinema: 'el Cine', campfire: 'el Campamento', shop: 'la Tienda', games: 'la Casa de juegos', house: 'Mi casa'};
+const ROOM_TITLES: Record<string, string> = {living: 'el Living', cinema: 'el Cine', campfire: 'el Campamento', shop: 'la Tienda', games: 'la Casa de juegos', house: 'Mi casa', port: 'el Puerto'};
 
 function makeLabel(name: string, color: string, avatarUrl?: string): {el: HTMLDivElement; obj: CSS2DObject} {
 	const el = document.createElement('div');
@@ -120,11 +138,6 @@ function lighten(hex: string, amount = 0.18): THREE.Color {
 	return new THREE.Color().setHSL(hsl.h, hsl.s, Math.min(1, hsl.l + amount));
 }
 
-const NPC_LOOK: Look = {
-	...DEFAULT_LOOK, body: 'F', hair: 'hair_buns', eyes: 'eyes_lash', mouth: 'mouth_smile', cheeks: 'cheeks_blush', top: 'top_hoodie', bottom: 'bottom_skirt',
-	colors: {skin: '#e0a476', hair: '#a8322a', top: '#f5b326', bottom: '#2f3b78', shoes: '#f4f4f4', sole: '#ff7350'},
-};
-
 export class WorldEngine {
 	private renderer: THREE.WebGLRenderer;
 	private labels: CSS2DRenderer;
@@ -142,7 +155,16 @@ export class WorldEngine {
 	private hotspots: Array<{kind: string; pos: THREE.Vector3}> = [];
 	private exitPoint: THREE.Vector3 | null = null;
 	private tvPoint: THREE.Vector3 | null = null;
-	private npc: Actor | null = null;
+	private npcs: Npcs;
+	private pets = new CityPets();
+	private ambience: Ambience;
+	private active = true;
+	/** Suena música en la tele de esta sala: los que están quietos bailan. */
+	private musicOn = false;
+	/** Modo "ver la tele": la cámara se acerca y deja la pantalla grande (se sale al moverse). */
+	private tvView = false;
+	private fishing: {spot: THREE.Vector3; dir: THREE.Vector3; bite: boolean; rod: THREE.Object3D; line: THREE.Line; bobber: THREE.Mesh; started: number} | null = null;
+	private fishSpots: Array<{pos: THREE.Vector3; dir: THREE.Vector3}> = [];
 	private me: Actor | null = null;
 	private meId = '';
 	private others = new Map<string, Actor>();
@@ -193,7 +215,8 @@ export class WorldEngine {
 		container.append(this.labels.domElement);
 
 		this.scene.add(this.roomGroup, this.furnitureGroup, this.actorsGroup, this.tableRoot);
-		this.scene.add(new THREE.HemisphereLight(0xd9ccff, 0x3a2552, 1.25));
+		this.skyFill = new THREE.HemisphereLight(0xd9ccff, 0x3a2552, 1.25);
+		this.scene.add(this.skyFill);
 		const sun = new THREE.DirectionalLight(0xfff0dd, 1.5);
 		sun.position.set(-4, 10, -6);
 		sun.castShadow = true;
@@ -203,6 +226,9 @@ export class WorldEngine {
 		sun.shadow.bias = -0.0008;
 		this.scene.add(sun, sun.target);
 		this.sun = sun;
+
+		this.npcs = new Npcs((id, name, color, look, label) => this.createActor(id, name, color, look, undefined, label));
+		this.ambience = new Ambience(this.scene);
 
 		this.promptEl = document.createElement('div');
 		this.promptEl.className = 'w-prompt';
@@ -226,6 +252,7 @@ export class WorldEngine {
 	}
 
 	private sun: THREE.DirectionalLight;
+	private skyFill: THREE.HemisphereLight;
 
 	// ------------------------------------------------------------ salas ----
 
@@ -251,6 +278,7 @@ export class WorldEngine {
 		this.collectMarkers(scene);
 		this.screenMesh = (scene.getObjectByName('Screen') as THREE.Mesh) ?? null;
 		this.screenOriginal = this.screenMesh ? (this.screenMesh.material as THREE.Material) : null;
+		if (this.screenMesh) planarScreenUv(this.screenMesh.geometry);
 		this.tvPoint = null;
 		if (this.screenMesh) {
 			const p = new THREE.Vector3();
@@ -263,11 +291,25 @@ export class WorldEngine {
 		this.tableCenter = table ? table.getWorldPosition(new THREE.Vector3()) : null;
 		this.tableRoot.position.copy(this.tableCenter ?? new THREE.Vector3(0, -50, 0));
 		this.exitPoint = room === 'city' ? null : this.clamp(new THREE.Vector3(this.spawn.x, 0, this.spawn.z - 0.7));
-		this.setupNpc(room === 'shop' ? scene.getObjectByName('Shopkeeper') : null);
+		this.npcs.setup(room, scene, (p) => this.clamp(p));
+		if (room === 'city') {
+			this.roomGroup.add(this.pets.root);
+			void this.pets.enterCity();
+		}
+		this.ambience.setup(room, scene);
+		this.skyFill.color.set(room === 'city' ? 0xf2dcff : 0xd9ccff);
+		this.skyFill.groundColor.set(room === 'city' ? 0xaf7e7a : 0x3a2552);
+		this.skyFill.intensity = room === 'city' ? 1.51 : 1.25;
+		this.sun.color.set(room === 'city' ? 0xffd6ac : 0xfff0dd);
+		this.sun.intensity = room === 'city' ? 2.25 : 1.5;
+		this.sun.shadow.normalBias = room === 'city' ? .034 : 0;
+		this.stopFishing();
+		this.setTvView(false);
 		this.sun.position.set(-4, room === 'city' ? 16 : 10, -6);
 		if (isHouse) await this.setHouse(house ?? []);
 		if (this.me) {
 			const arrival = room === 'city' && fromRoom ? this.doors.find((d) => d.room === (fromRoom.startsWith('house:') ? 'house' : fromRoom)) : null;
+			this.me.companion?.reset();
 			this.me.pos.copy(arrival ? arrival.pos : this.spawn);
 			this.me.target.copy(this.me.pos);
 			this.me.ry = arrival ? arrival.ry : 0;
@@ -281,12 +323,14 @@ export class WorldEngine {
 	}
 
 	private clearRoom(): void {
+		this.pets.clear();
 		this.roomGroup.clear();
 		this.furnitureGroup.clear();
 		for (const seat of this.seats) seat.ring.removeFromParent();
 		this.seats = [];
 		this.doors = [];
 		this.hotspots = [];
+		this.fishSpots = [];
 		this.furnitureClickable.clear();
 		this.screenMesh = null;
 		this.prompt.visible = false;
@@ -297,7 +341,7 @@ export class WorldEngine {
 		root.traverse((obj) => {
 			const mesh = obj as THREE.Mesh;
 			if (mesh.isMesh) {
-				mesh.castShadow = isFurniture || !/Room|Floor|Ground|Clearing|Rug|Plank|Plaza|Street|Path|Trail|Stars/i.test(mesh.name);
+				mesh.castShadow = isFurniture || !/Room|Floor|Ground|Clearing|Rug|Plank|Plaza|Street|Path|Trail|Stars|Cloudbank|Park hill/i.test(mesh.name);
 				mesh.receiveShadow = true;
 			}
 			const light = obj as THREE.Light;
@@ -354,22 +398,11 @@ export class WorldEngine {
 				this.doors.push({room: (door === 'house' ? `house:${this.meId}` : door) as RoomId, pos, ry: Math.atan2(dir.x, dir.z), name: door});
 			}
 			const hotspot = obj.userData?.pelacord_hotspot as string | undefined;
-			if (hotspot) this.hotspots.push({kind: hotspot, pos: obj.getWorldPosition(new THREE.Vector3()).setY(0)});
+			if (hotspot === 'fish') {
+				const dir = obj.getWorldDirection(new THREE.Vector3()).setY(0).normalize();
+				this.fishSpots.push({pos: obj.getWorldPosition(new THREE.Vector3()).setY(0), dir});
+			} else if (hotspot) this.hotspots.push({kind: hotspot, pos: obj.getWorldPosition(new THREE.Vector3()).setY(0)});
 		});
-	}
-
-	private setupNpc(marker: THREE.Object3D | null | undefined): void {
-		if (this.npc) {
-			this.npc.avatar.dispose();
-			this.npc = null;
-		}
-		if (!marker) return;
-		const actor = this.createActor('npc', 'Mili · vendedora', '#f5b326', NPC_LOOK);
-		actor.pos.copy(marker.getWorldPosition(new THREE.Vector3()).setY(0));
-		actor.target.copy(actor.pos);
-		actor.ry = Math.PI;
-		actor.labelEl.classList.add('is-npc');
-		this.npc = actor;
 	}
 
 	async setHouse(items: PlacedFurniture[]): Promise<void> {
@@ -430,13 +463,24 @@ export class WorldEngine {
 		this.announce(true);
 	}
 
-	private createActor(id: string, name: string, color: string, look: Look, avatarUrl?: string): Actor {
+	private createActor(id: string, name: string, color: string, look: Look, avatarUrl?: string, label = true): Actor {
 		const avatar = new Avatar(this.catalog, look);
 		const {el, obj} = makeLabel(name, color, avatarUrl);
-		avatar.root.add(obj);
+		if (label) avatar.root.add(obj);
 		avatar.root.userData.playerId = id;
 		this.actorsGroup.add(avatar.root);
 		return {id, avatar, label: obj, labelEl: el, pos: new THREE.Vector3(), target: new THREE.Vector3(), ry: 0, seat: null, look, anim: 'idle'};
+	}
+
+	setEquippedPet(pet: PetId | null): void {
+		if (this.me) this.setCompanion(this.me, pet);
+	}
+
+	private setCompanion(actor: Actor, species: unknown): void {
+		const pet = isPetId(species) ? species : undefined;
+		if (actor.companion?.species === pet) return;
+		actor.companion?.dispose();
+		actor.companion = pet ? new PetCompanion(pet, this.actorsGroup, (position) => this.clamp(position)) : undefined;
 	}
 
 	syncPeers(states: PlayerState[], info: Record<string, {name: string; avatarUrl?: string}>): void {
@@ -445,6 +489,7 @@ export class WorldEngine {
 		for (const [id, actor] of this.others) {
 			if (keep.has(id)) continue;
 			actor.avatar.dispose();
+			actor.companion?.dispose();
 			this.others.delete(id);
 		}
 		for (const s of here) {
@@ -456,9 +501,12 @@ export class WorldEngine {
 				this.others.set(s.id, actor);
 			}
 			void actor.avatar.setLook(s.look);
+			actor.avatar.setGhost(Boolean(s.away));
+			actor.labelEl.classList.toggle('is-away', Boolean(s.away));
 			actor.look = s.look;
 			actor.seat = s.seat;
 			actor.anim = s.anim;
+			this.setCompanion(actor, s.equippedPet);
 			actor.labelEl.querySelector('.w-name-text')!.textContent = name;
 			const reported = new THREE.Vector3(s.x, 0, s.z);
 			if (actor.pos.distanceTo(reported) > 2 || s.anim === 'sit') actor.pos.copy(reported);
@@ -486,12 +534,42 @@ export class WorldEngine {
 			actor.avatar.setTalking(true);
 			setTimeout(() => actor.avatar.setTalking(this.speaking.has(actor.id)), 1400);
 			this.pop(actor, null, 'sprites/jaja.svg');
+		} else if (emote === 'cheer') {
+			actor.avatar.play('Cheer');
+			this.pop(actor, iconSvg('party', 34), null);
+		} else if (emote === 'bow') {
+			actor.avatar.play('Bow');
+			this.pop(actor, iconSvg('crown', 30), null);
+		} else if (emote === 'shrug') {
+			actor.avatar.play('Shrug');
+			this.pop(actor, iconSvg('question', 34), null);
+		} else if (emote === 'heart') {
+			actor.avatar.play('Wave');
+			this.pop(actor, iconSvg('heart', 36), null, 'is-heart');
 		}
 	}
 
-	private pop(actor: Actor, svg: string | null, image: string | null): void {
+	/**
+	 * Bailes y aplausos: quedan puestos hasta que te movés (y los demás los ven, porque viajan como
+	 * estado del personaje). Llamarlo con el mismo baile otra vez lo corta.
+	 */
+	setLoopEmote(anim: 'dance' | 'robot' | 'clap'): void {
+		const me = this.me;
+		if (!me) return;
+		if (me.seat) this.standUp();
+		if (this.fishing) this.stopFishing();
+		me.target.copy(me.pos);
+		me.anim = me.anim === anim ? 'idle' : anim;
+		this.announce(true);
+	}
+
+	myAnim(): Anim {
+		return this.me?.anim ?? 'idle';
+	}
+
+	private pop(actor: Actor, svg: string | null, image: string | null, extra = ''): void {
 		const el = document.createElement('div');
-		el.className = image ? 'w-pop is-sprite' : 'w-pop';
+		el.className = `${image ? 'w-pop is-sprite' : 'w-pop'} ${extra}`.trim();
 		if (image) {
 			const img = document.createElement('img');
 			img.src = image;
@@ -596,6 +674,205 @@ export class WorldEngine {
 		mesh.material = new THREE.MeshBasicMaterial({map: texture, toneMapped: false});
 	}
 
+	/** Lo que suena en la tele, dibujado en la pantalla (portada, título, barra, play/pausa). */
+	setScreenMusic(info: {title: string; author?: string; thumbnail?: string; positionMs: number; duration: number; paused: boolean; next?: string | null; loading?: boolean} | null): void {
+		const mesh = this.screenMesh;
+		if (!mesh || !info) return;
+		const second = Math.floor(info.positionMs / 1000);
+		const key = `m:${info.title}|${info.thumbnail}|${second}|${info.paused}|${info.next}|${info.loading}|${this.musicCard?.image ? 1 : 0}`;
+		if (key === this.screenKey) return;
+		this.screenKey = key;
+		this.screenVideo?.pause();
+		if (!this.musicCard) {
+			const canvas = document.createElement('canvas');
+			canvas.width = 1024;
+			canvas.height = 576;
+			const texture = new THREE.CanvasTexture(canvas);
+			texture.colorSpace = THREE.SRGBColorSpace;
+			texture.wrapS = THREE.RepeatWrapping;
+			texture.repeat.x = -1;
+			this.musicCard = {canvas, texture, image: null, imageUrl: '', material: new THREE.MeshBasicMaterial({map: texture, toneMapped: false})};
+		}
+		const card = this.musicCard;
+		if (info.thumbnail && info.thumbnail !== card.imageUrl) {
+			card.imageUrl = info.thumbnail;
+			card.image = null;
+			const img = new Image();
+			img.crossOrigin = 'anonymous';
+			img.onload = () => {
+				if (card.imageUrl !== info.thumbnail) return;
+				card.image = img;
+				this.screenKey = '';
+			};
+			img.src = info.thumbnail;
+		}
+		drawMusicCard(card.canvas, info, card.image);
+		card.texture.needsUpdate = true;
+		mesh.material = card.material;
+	}
+
+	private musicCard: {canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; image: HTMLImageElement | null; imageUrl: string; material: THREE.MeshBasicMaterial} | null = null;
+
+	/** Dónde cae la pantalla de la tele en la ventana (para ponerle encima el reproductor de Pelaflix). */
+	screenRect(): {left: number; top: number; width: number; height: number} | null {
+		const mesh = this.screenMesh;
+		if (!mesh || !this.active) return null;
+		const geometry = mesh.geometry;
+		if (!geometry.boundingBox) geometry.computeBoundingBox();
+		const bb = geometry.boundingBox!;
+		const width = this.container.clientWidth;
+		const height = this.container.clientHeight;
+		let minX = Infinity;
+		let minY = Infinity;
+		let maxX = -Infinity;
+		let maxY = -Infinity;
+		const v = new THREE.Vector3();
+		for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y]) for (const z of [bb.min.z, bb.max.z]) {
+			v.set(x, y, z).applyMatrix4(mesh.matrixWorld).project(this.camera);
+			if (v.z > 1) return null;
+			minX = Math.min(minX, ((v.x + 1) / 2) * width);
+			maxX = Math.max(maxX, ((v.x + 1) / 2) * width);
+			minY = Math.min(minY, ((1 - v.y) / 2) * height);
+			maxY = Math.max(maxY, ((1 - v.y) / 2) * height);
+		}
+		if (maxX < 0 || maxY < 0 || minX > width || minY > height) return null;
+		return {left: minX, top: minY, width: maxX - minX, height: maxY - minY};
+	}
+
+	/** Qué tan lejos estoy de la tele (null si en esta sala no hay tele). */
+	distanceToScreen(): number | null {
+		if (!this.screenMesh || !this.me) return null;
+		const p = this.screenMesh.getWorldPosition(new THREE.Vector3());
+		return Math.hypot(this.me.pos.x - p.x, this.me.pos.z - p.z);
+	}
+
+	hasScreen(): boolean {
+		return this.screenMesh !== null;
+	}
+
+	/** Música en la tele de esta sala: los que están quietos bailan. */
+	setMusicOn(on: boolean): void {
+		this.musicOn = on;
+	}
+
+	/** Pausa el mundo (cuando se pasa a la parte 2D de PelaCord): no dibuja ni escucha el teclado. */
+	setActive(on: boolean): void {
+		this.active = on;
+		this.keys.clear();
+		if (!on) this.stopFishing();
+		this.labels.domElement.style.display = on ? '' : 'none';
+	}
+
+	// ------------------------------------------------------------- pesca ---
+
+	private nearestFishSpot(): {pos: THREE.Vector3; dir: THREE.Vector3} | null {
+		if (!this.me || !this.fishSpots.length) return null;
+		let best: {pos: THREE.Vector3; dir: THREE.Vector3} | null = null;
+		let bestD = 1.6;
+		for (const spot of this.fishSpots) {
+			const d = Math.hypot(this.me.pos.x - spot.pos.x, this.me.pos.z - spot.pos.z);
+			if (d < bestD) {
+				best = spot;
+				bestD = d;
+			}
+		}
+		return best;
+	}
+
+	isFishing(): boolean {
+		return this.fishing !== null;
+	}
+
+	/** El lugar donde está pescando es hondo (la punta del muelle): salen cosas más raras. */
+	isDeepSpot(): boolean {
+		return Boolean(this.fishing && this.fishing.spot.z > 2.0);
+	}
+
+	/** Color de la caña que se ve en la mano (cambia con la que compraste). */
+	rodColor = '#c9a464';
+
+	private startFishing(spot: {pos: THREE.Vector3; dir: THREE.Vector3}): void {
+		if (!this.me) return;
+		this.me.pos.copy(spot.pos);
+		this.me.target.copy(spot.pos);
+		this.me.ry = Math.atan2(spot.dir.x, spot.dir.z);
+		this.me.anim = 'fish';
+		// Caña: palo fino que sale de las manos hacia adelante y arriba.
+		const rod = new THREE.Group();
+		const stick = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.022, 1.7, 8), new THREE.MeshStandardMaterial({color: this.rodColor, roughness: 0.45, metalness: this.rodColor === '#ffc93c' ? 0.5 : 0}));
+		stick.position.set(0, 0.78, 0);
+		const reel = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.05, 14), new THREE.MeshStandardMaterial({color: 0xe8b23a, roughness: 0.4}));
+		reel.rotation.z = Math.PI / 2;
+		reel.position.set(0.05, 0.2, 0);
+		rod.add(stick, reel);
+		rod.position.set(-0.04, 0.62, 0.32);
+		rod.rotation.x = 0.85;
+		this.me.avatar.root.add(rod);
+		const bobber = new THREE.Mesh(new THREE.SphereGeometry(0.07, 14, 10), new THREE.MeshStandardMaterial({color: 0xff4a4a, roughness: 0.35}));
+		const white = new THREE.Mesh(new THREE.SphereGeometry(0.071, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({color: 0xffffff}));
+		bobber.add(white);
+		const target = spot.pos.clone().add(spot.dir.clone().multiplyScalar(2.4));
+		bobber.position.set(target.x, 0.9, target.z);
+		this.scene.add(bobber);
+		const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({color: 0xf4f0ff, transparent: true, opacity: 0.8}));
+		line.frustumCulled = false;
+		this.scene.add(line);
+		this.fishing = {spot: spot.pos.clone(), dir: spot.dir.clone(), bite: false, rod, line, bobber, started: this.clock.elapsedTime};
+		this.announce(true);
+		this.cb.onFishAction?.();
+	}
+
+	/** Pica un pez: el corcho se hunde y aparece el "!". */
+	setBite(on: boolean): void {
+		if (!this.fishing || !this.me) return;
+		this.fishing.bite = on;
+		if (on) this.pop(this.me, iconSvg('alert', 34), null);
+	}
+
+	/** Deja de pescar (y, si sacó algo, lo muestra un ratito arriba de la cabeza). */
+	stopFishing(caught: {color: string} | null = null): void {
+		const f = this.fishing;
+		if (!f) return;
+		this.fishing = null;
+		f.rod.removeFromParent();
+		f.line.removeFromParent();
+		f.line.geometry.dispose();
+		f.bobber.removeFromParent();
+		if (this.me) {
+			if (caught) {
+				const fish = makeFishMesh(caught.color);
+				fish.position.set(0, 2.05, 0);
+				this.me.avatar.root.add(fish);
+				this.me.avatar.play('Wave');
+				const born = performance.now();
+				const spin = () => {
+					const age = (performance.now() - born) / 1000;
+					fish.rotation.y = age * 4;
+					fish.position.y = 2.05 + Math.sin(age * 6) * 0.05;
+					if (age < 1.8 && fish.parent) requestAnimationFrame(spin);
+					else fish.removeFromParent();
+				};
+				spin();
+			}
+			this.me.anim = 'idle';
+			this.announce(true);
+		}
+	}
+
+	private updateFishing(t: number): void {
+		const f = this.fishing;
+		if (!f || !this.me) return;
+		const bob = f.bite ? -0.1 + Math.sin(t * 22) * 0.05 : Math.sin(t * 2.4) * 0.025;
+		const settle = Math.min(1, (t - f.started) * 2.5);
+		f.bobber.position.y = THREE.MathUtils.lerp(0.9, 0.04, settle) + bob;
+		const tip = new THREE.Vector3(0, 1.62, 0);
+		f.rod.localToWorld(tip);
+		const positions = f.line.geometry.attributes.position as THREE.BufferAttribute;
+		positions.setXYZ(0, tip.x, tip.y, tip.z);
+		positions.setXYZ(1, f.bobber.position.x, f.bobber.position.y + 0.05, f.bobber.position.z);
+		positions.needsUpdate = true;
+	}
+
 	// ----------------------------------------------------------- decorar ---
 
 	setDecorating(item: {id: string; color?: string | null; rot: number} | null): void {
@@ -637,6 +914,7 @@ export class WorldEngine {
 	private onKeyDown = (event: KeyboardEvent): void => {
 		const target = event.target as HTMLElement | null;
 		if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+		if (!this.active) return;
 		const key = event.key.toLowerCase();
 		if (['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'].includes(key)) {
 			this.keys.add(key);
@@ -693,11 +971,27 @@ export class WorldEngine {
 
 	onTableClick: ((obj: THREE.Object3D) => void) | null = null;
 
+	/** Cosas que se animan cuadro a cuadro desde afuera (la mesa de juegos). */
+	readonly tickers = new Set<(dt: number) => void>();
+
 	private clamp(point: THREE.Vector3): THREE.Vector3 {
 		const b = this.bounds;
 		if (b.kind === 'circle') {
 			const length = Math.hypot(point.x, point.z);
 			if (length > b.radius) point.multiplyScalar(b.radius / length);
+		} else if (b.rects) {
+			let best: [number, number] | null = null;
+			let bestD = Infinity;
+			for (const [x1, x2, z1, z2] of b.rects) {
+				const x = THREE.MathUtils.clamp(point.x, x1, x2);
+				const z = THREE.MathUtils.clamp(point.z, z1, z2);
+				const d = (x - point.x) ** 2 + (z - point.z) ** 2;
+				if (d < bestD) {
+					bestD = d;
+					best = [x, z];
+				}
+			}
+			if (best) [point.x, point.z] = best;
 		} else {
 			point.x = THREE.MathUtils.clamp(point.x, b.minX, b.maxX);
 			point.z = THREE.MathUtils.clamp(point.z, b.minZ, b.maxZ);
@@ -760,6 +1054,11 @@ export class WorldEngine {
 	/** Modo decorar: clic en un mueble lo agarra para moverlo. */
 	editMode = false;
 
+	capturePet(id: string, commit: (species: PetId) => boolean): PetId | null {
+		if (this.room !== 'city' || !this.me || this.me.seat) return null;
+		return this.pets.tryCapture(id, this.me.pos, commit);
+	}
+
 	/** La tecla E: hace lo que dice el cartel. */
 	interact(): void {
 		const action = this.current;
@@ -781,8 +1080,13 @@ export class WorldEngine {
 			this.cb.onDoor('city');
 			return;
 		}
-		if (action.kind === 'npc' && this.npc) {
-			this.npc.avatar.play('Wave');
+		if (action.kind === 'npc') this.npcs.wave(action.npc);
+		if (action.kind === 'fish') {
+			if (this.fishing) this.cb.onFishAction?.();
+			else {
+				const spot = this.nearestFishSpot();
+				if (spot) this.startFishing(spot);
+			}
 		}
 		this.cb.onInteract(action);
 	}
@@ -815,6 +1119,7 @@ export class WorldEngine {
 		this.me.anim = 'idle';
 		this.me.avatar.setBase('idle');
 		this.leaveTable();
+		this.setTvView(false);
 		this.announce(true);
 	}
 
@@ -842,14 +1147,52 @@ export class WorldEngine {
 
 	// ------------------------------------------------------------- cuadro ---
 
+	/** Prende o apaga el modo "ver la tele". */
+	setTvView(on: boolean): void {
+		const next = on && this.screenMesh !== null;
+		if (next === this.tvView) return;
+		this.tvView = next;
+		this.cb.onTvView?.(next);
+	}
+
+	isTvView(): boolean {
+		return this.tvView;
+	}
+
+	/** Dónde poner la cámara para que la pantalla ocupe ~3/4 del ancho (sin taparlo todo). */
+	private tvCamera(): {pos: THREE.Vector3; look: THREE.Vector3} | null {
+		const mesh = this.screenMesh;
+		if (!mesh) return null;
+		if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+		const size = mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+		const center = mesh.getWorldPosition(new THREE.Vector3());
+		const width = Math.max(size.x, size.z) * Math.max(mesh.getWorldScale(new THREE.Vector3()).x, 1e-3);
+		// Hacia dónde mira la pantalla: hacia el lado donde está la sala (la puerta de entrada).
+		const normal = new THREE.Vector3(0, 0, Math.sign(this.spawn.z - center.z) || -1);
+		const vfov = THREE.MathUtils.degToRad(this.camera.fov);
+		const hfov = 2 * Math.atan(Math.tan(vfov / 2) * this.camera.aspect);
+		const distance = (width / 0.74) / 2 / Math.tan(hfov / 2);
+		const pos = center.clone().add(normal.multiplyScalar(distance));
+		pos.y = center.y + 0.55;
+		return {pos, look: center};
+	}
+
 	private cameraGoal(): THREE.Vector3 {
+		if (this.tvView) {
+			const tv = this.tvCamera();
+			if (tv) return tv.pos;
+		}
 		const focus = this.me ? this.me.pos : this.spawn;
 		if (this.tableSeat !== null && this.tableCenter) {
 			const angle = this.tableAngle(this.tableSeat);
-			return new THREE.Vector3(this.tableCenter.x + Math.sin(angle) * 2.1, this.tableCenter.y + 2.3, this.tableCenter.z + Math.cos(angle) * 2.1);
+			return new THREE.Vector3(this.tableCenter.x + Math.sin(angle) * 2.05, this.tableCenter.y + 2.2, this.tableCenter.z + Math.cos(angle) * 2.05);
 		}
-		if (this.room === 'city' || this.room === 'campfire') {
-			const far = this.room === 'city' ? 1.25 : 1.1;
+		if (this.room === 'city') {
+			const edge = Math.min(1, Math.abs(focus.x) / 14);
+			return new THREE.Vector3(focus.x * .93 + .48, (4.04 + 1.9 * edge ** 4) * this.zoom, focus.z - 8.35 * this.zoom);
+		}
+		if (this.room === 'campfire' || this.room === 'port') {
+			const far = this.room === 'campfire' ? 1.1 : 1.25;
 			return new THREE.Vector3(focus.x, 5.4 * this.zoom * far, focus.z - 7.2 * this.zoom * far);
 		}
 		// Adentro: más alta y mirando más hacia abajo, y sin pasarse del borde de la sala (si no se
@@ -862,40 +1205,49 @@ export class WorldEngine {
 	private loop = (): void => {
 		if (this.disposed) return;
 		this.frame = requestAnimationFrame(this.loop);
+		if (!this.active) {
+			this.clock.getDelta();
+			return;
+		}
 		// Tiempo real (hasta 1/4 s): así caminar va a la misma velocidad aunque la PC dé pocos cuadros.
 		const dt = Math.min(0.25, this.clock.getDelta());
 		const t = this.clock.elapsedTime;
 		if (this.me) this.stepMe(this.me, dt);
 		for (const actor of this.others.values()) this.stepOther(actor, dt);
-		if (this.npc) {
-			this.npc.avatar.root.position.copy(this.npc.pos);
-			if (this.me) {
-				const dx = this.me.pos.x - this.npc.pos.x;
-				const dz = this.me.pos.z - this.npc.pos.z;
-				if (Math.hypot(dx, dz) < 4) this.npc.ry += (Math.atan2(dx, dz) - this.npc.ry) * Math.min(1, dt * 3);
-			}
-			this.npc.avatar.root.rotation.y = this.npc.ry;
-			this.npc.avatar.update(dt);
-		}
+		this.npcs.update(dt, this.me?.pos ?? null, this.musicOn, (a, d) => this.turn(a, d.wanted, d.dt));
+		this.pets.update(dt);
+		this.ambience.update(dt, t);
+		this.updateFishing(t);
+		for (const tick of this.tickers) tick(dt);
 		const taken = new Set<string>([...this.others.values()].map((a) => a.seat).filter(Boolean) as string[]);
 		if (this.me?.seat) taken.add(this.me.seat);
+		for (const name of this.npcs.takenSeats()) for (const seat of this.seats) if (seat.object.name === name) taken.add(seat.id);
 		for (const seat of this.seats) {
 			seat.ring.visible = !taken.has(seat.id) && this.tableSeat === null;
 			const s = 1 + Math.sin(t * 3 + seat.ring.position.x) * 0.06;
 			seat.ring.scale.set(s, s, s);
 		}
 		this.updatePrompt(taken);
+		// Mirando la tele: sin carteles ni mi nombre encima de la pantalla.
+		if (this.tvView || this.tableSeat !== null) this.prompt.visible = false;
+		if (this.me) {
+			this.me.label.visible = !this.tvView && this.tableSeat === null;
+			// En la mesa la cámara va detrás de mi silla: mi propia cabeza tapaba mis cartas.
+			this.me.avatar.root.visible = this.tableSeat === null;
+		}
 
 		const goal = this.cameraGoal();
 		this.camPos.lerp(goal, 1 - Math.pow(0.0015, dt));
 		this.camera.position.copy(this.camPos);
-		const inside = this.room !== 'city' && this.room !== 'campfire';
-		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + 0.9 : (this.me?.pos.z ?? 0) + 0.6;
-		const lookGoal = this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? 0.8 : 1), 0.6, lookZ);
+		const inside = this.room !== 'city' && this.room !== 'campfire' && this.room !== 'port';
+		const city = this.room === 'city';
+		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + .9 : (this.me?.pos.z ?? 0) + (city ? 2.15 : .6);
+		const tvCam = this.tvView ? this.tvCamera() : null;
+		const lookGoal = tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), city ? 1.65 : .6, lookZ);
 		this.camLook.lerp(lookGoal, 1 - Math.pow(0.0015, dt));
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
-		this.sun.position.set((this.me?.pos.x ?? 0) - 4, 12, (this.me?.pos.z ?? 0) - 6);
+		this.sun.position.set((this.me?.pos.x ?? 0) - (city ? 8.4 : 4), city ? 10.8 : 12, (this.me?.pos.z ?? 0) - 6);
 
 		this.renderer.render(this.scene, this.camera);
 		this.labels.render(this.scene, this.camera);
@@ -912,6 +1264,8 @@ export class WorldEngine {
 		const typing = this.decorating !== null;
 		if ((ix || iz) && !typing && this.tableSeat === null) {
 			if (actor.seat) this.standUp();
+			if (this.fishing) this.stopFishing();
+			this.setTvView(false);
 			const length = Math.hypot(ix, iz);
 			const speed = this.keys.has('shift') ? RUN_SPEED : WALK_SPEED;
 			const next = actor.pos.clone().add(new THREE.Vector3((ix / length) * speed * dt, 0, (iz / length) * speed * dt));
@@ -941,8 +1295,13 @@ export class WorldEngine {
 				this.announce();
 			}
 		}
-		actor.avatar.setBase(actor.anim);
+		actor.avatar.setBase(this.visualAnim(actor.anim));
 		this.place(actor, dt);
+	}
+
+	/** Lo que se VE: quieto con música en la sala = bailando. */
+	private visualAnim(anim: Anim): BaseAnim {
+		return anim === 'idle' && this.musicOn ? 'dance' : anim;
 	}
 
 	private stepOther(actor: Actor, dt: number): void {
@@ -953,14 +1312,14 @@ export class WorldEngine {
 				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, RUN_SPEED * dt)));
 				this.turn(actor, Math.atan2(toTarget.x, toTarget.z), dt);
 			}
-			actor.avatar.setBase(distance > 0.05 ? 'walk' : 'idle');
+			actor.avatar.setBase(distance > 0.05 ? 'walk' : this.visualAnim('idle'));
 		} else {
-			actor.avatar.setBase(actor.anim);
+			actor.avatar.setBase(actor.avatar.isGhost() ? 'idle' : this.visualAnim(actor.anim));
 		}
 		this.place(actor, dt);
 	}
 
-	private turn(actor: Actor, wanted: number, dt: number): void {
+	private turn(actor: {ry: number}, wanted: number, dt: number): void {
 		let delta = wanted - actor.ry;
 		delta = Math.atan2(Math.sin(delta), Math.cos(delta));
 		actor.ry += delta * Math.min(1, dt * 14);
@@ -973,6 +1332,7 @@ export class WorldEngine {
 		actor.avatar.setTalking(talking);
 		actor.labelEl.classList.toggle('is-speaking', talking);
 		actor.avatar.update(dt);
+		actor.companion?.update(actor.pos, actor.ry, dt);
 	}
 
 	/** Busca lo más cercano con lo que se puede interactuar y muestra el cartel "E …". */
@@ -987,7 +1347,9 @@ export class WorldEngine {
 			if (real < range && (!best || d < best.d)) best = {action, at, d};
 		};
 		if (me && !this.decorating) {
-			if (me.seat) {
+			if (this.fishing) {
+				best = {action: {kind: 'fish', label: this.fishing.bite ? '¡Recoger!' : 'Esperando que pique… (E para soltar)'}, at: me.pos.clone(), d: 0};
+			} else if (me.seat) {
 				best = {action: {kind: 'stand', label: this.tableSeat !== null ? 'Levantarte de la mesa' : 'Pararte'}, at: me.pos.clone().setY(1.95), d: 0};
 			} else {
 				for (const seat of this.seats) {
@@ -998,9 +1360,14 @@ export class WorldEngine {
 				for (const door of this.doors) consider({kind: 'door', room: door.room, label: `Entrar a ${ROOM_TITLES[door.name] ?? door.name}`}, door.pos.clone().setY(2.4), DOOR_RANGE);
 				if (this.exitPoint) consider({kind: 'exit', label: 'Salir a la ciudad'}, this.exitPoint.clone().setY(1.6), 1.3);
 				if (this.tvPoint) consider({kind: 'tv', label: 'Usar la tele'}, this.tvPoint.clone().setY(1.6), 1.8);
-				if (this.npc) consider({kind: 'npc', label: 'Hablar con Mili'}, this.npc.pos.clone().setY(2.2), 2.2);
+				for (const npc of this.npcs.talkers()) consider({kind: 'npc', npc: npc.kind, label: npc.label}, npc.pos.clone().setY(2.2), 2.2);
+				const spot = this.nearestFishSpot();
+				if (spot) consider({kind: 'fish', label: 'Pescar'}, spot.pos.clone().setY(1.6), 1.5, 0.3);
+				if (this.room === 'city') {
+					for (const pet of this.pets.targets()) consider({kind: 'pet', id: pet.id, label: `Atrapar a ${pet.name}`}, pet.position, CAPTURE_RANGE);
+				}
 				for (const h of this.hotspots) {
-					const label = h.kind === 'clothes' ? 'Ver ropa' : h.kind === 'furniture' ? 'Ver muebles' : h.kind === 'fitting' ? 'Probador' : 'Caja';
+					const label = h.kind === 'clothes' ? 'Ver ropa' : h.kind === 'furniture' ? 'Ver muebles' : h.kind === 'fitting' ? 'Probador' : h.kind === 'fishmarket' ? 'Vender pescado' : 'Caja';
 					consider({kind: 'hotspot', hotspot: h.kind, label}, h.pos.clone().setY(1.7), 1.25);
 				}
 			}
@@ -1013,7 +1380,7 @@ export class WorldEngine {
 		}
 		const key = `${found.action.kind}:${found.action.label}`;
 		if (!this.current || `${this.current.kind}:${this.current.label}` !== key) {
-			const icon = found.action.kind === 'seat' ? 'sofa' : found.action.kind === 'door' ? 'door' : found.action.kind === 'exit' ? 'exit' : found.action.kind === 'tv' ? 'tv' : found.action.kind === 'npc' ? 'chat' : found.action.kind === 'hotspot' ? 'shirt' : 'sofa';
+			const icon = found.action.kind === 'seat' ? 'sofa' : found.action.kind === 'door' ? 'door' : found.action.kind === 'exit' ? 'exit' : found.action.kind === 'tv' ? 'tv' : found.action.kind === 'npc' ? 'chat' : found.action.kind === 'fish' ? 'fish' : found.action.kind === 'pet' ? 'paw' : found.action.kind === 'hotspot' ? ((found.action as {hotspot: string}).hotspot === 'fishmarket' ? 'fish' : 'shirt') : 'sofa';
 			this.promptEl.innerHTML = `<kbd>E</kbd><span class="w-prompt-icon">${iconSvg(icon, 15)}</span><span>${found.action.label}</span>`;
 		}
 		this.current = found.action;
@@ -1044,11 +1411,180 @@ export class WorldEngine {
 		window.removeEventListener('keyup', this.onKeyUp);
 		window.removeEventListener('blur', this.onBlur);
 		this.me?.avatar.dispose();
-		this.npc?.avatar.dispose();
-		for (const actor of this.others.values()) actor.avatar.dispose();
+		this.me?.companion?.dispose();
+		this.npcs.dispose();
+		this.pets.dispose();
+		this.ambience.dispose();
+		for (const actor of this.others.values()) {
+			actor.avatar.dispose();
+			actor.companion?.dispose();
+		}
 		this.screenVideo?.pause();
 		this.renderer.dispose();
 		this.renderer.domElement.remove();
 		this.labels.domElement.remove();
 	}
+}
+
+/**
+ * La pantalla viene de Blender sin coordenadas de textura (UV): sin esto el video o el cartel de la
+ * tele se veía como un color liso (era el "no se ve nada en la tele"). Se proyecta de frente.
+ */
+function planarScreenUv(geometry: THREE.BufferGeometry): void {
+	if (geometry.userData.planarUv) return;
+	geometry.computeBoundingBox();
+	const bb = geometry.boundingBox!;
+	const size = bb.getSize(new THREE.Vector3());
+	// Los dos ejes más largos son el ancho y el alto de la pantalla.
+	const axes = (['x', 'y', 'z'] as const).slice().sort((a, b) => size[b] - size[a]);
+	const [ua, va] = axes[0] === 'y' ? [axes[1], axes[0]] : [axes[0], axes[1]];
+	const pos = geometry.attributes.position as THREE.BufferAttribute;
+	const uv = new Float32Array(pos.count * 2);
+	for (let i = 0; i < pos.count; i++) {
+		const p = new THREE.Vector3().fromBufferAttribute(pos, i);
+		uv[i * 2] = (p[ua] - bb.min[ua]) / (size[ua] || 1);
+		uv[i * 2 + 1] = (p[va] - bb.min[va]) / (size[va] || 1);
+	}
+	geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+	geometry.userData.planarUv = true;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+	ctx.beginPath();
+	ctx.moveTo(x + r, y);
+	ctx.arcTo(x + w, y, x + w, y + h, r);
+	ctx.arcTo(x + w, y + h, x, y + h, r);
+	ctx.arcTo(x, y + h, x, y, r);
+	ctx.arcTo(x, y, x + w, y, r);
+	ctx.closePath();
+}
+
+function clockText(ms: number): string {
+	const total = Math.max(0, Math.floor(ms / 1000));
+	return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function fitText(ctx: CanvasRenderingContext2D, text: string, max: number): string {
+	if (ctx.measureText(text).width <= max) return text;
+	let cut = text;
+	while (cut.length > 1 && ctx.measureText(`${cut}…`).width > max) cut = cut.slice(0, -1);
+	return `${cut}…`;
+}
+
+/** La pantalla de "sonando ahora" de la tele. */
+function drawMusicCard(
+	canvas: HTMLCanvasElement,
+	info: {title: string; author?: string; positionMs: number; duration: number; paused: boolean; next?: string | null; loading?: boolean},
+	image: HTMLImageElement | null,
+): void {
+	const ctx = canvas.getContext('2d')!;
+	const W = canvas.width;
+	const H = canvas.height;
+	const gradient = ctx.createLinearGradient(0, 0, W, H);
+	gradient.addColorStop(0, '#2b1650');
+	gradient.addColorStop(1, '#6b2f7d');
+	ctx.fillStyle = gradient;
+	ctx.fillRect(0, 0, W, H);
+	if (image) {
+		ctx.save();
+		ctx.globalAlpha = 0.28;
+		ctx.filter = 'blur(18px)';
+		ctx.drawImage(image, -60, -60, W + 120, H + 120);
+		ctx.restore();
+	}
+	const size = 300;
+	const x0 = 70;
+	const y0 = 90;
+	ctx.save();
+	roundRect(ctx, x0, y0, size, size, 28);
+	ctx.clip();
+	if (image) {
+		const scale = Math.max(size / image.width, size / image.height);
+		ctx.drawImage(image, x0 + size / 2 - (image.width * scale) / 2, y0 + size / 2 - (image.height * scale) / 2, image.width * scale, image.height * scale);
+	} else {
+		ctx.fillStyle = '#3d2466';
+		ctx.fillRect(x0, y0, size, size);
+	}
+	ctx.restore();
+	ctx.lineWidth = 6;
+	ctx.strokeStyle = 'rgba(255,244,221,0.9)';
+	roundRect(ctx, x0, y0, size, size, 28);
+	ctx.stroke();
+	const tx = x0 + size + 50;
+	const maxW = W - tx - 60;
+	ctx.fillStyle = '#ffd36b';
+	ctx.font = 'bold 30px "Fredoka", "Segoe UI", sans-serif';
+	ctx.fillText(info.loading ? 'CARGANDO…' : info.paused ? 'EN PAUSA' : 'SONANDO AHORA', tx, 130);
+	ctx.fillStyle = '#fff4dd';
+	ctx.font = 'bold 52px "Fredoka", "Segoe UI", sans-serif';
+	const lines: string[] = [];
+	let line = '';
+	for (const word of info.title.split(' ')) {
+		const test = line ? `${line} ${word}` : word;
+		if (ctx.measureText(test).width > maxW && line) {
+			lines.push(line);
+			line = word;
+		} else line = test;
+	}
+	if (line) lines.push(line);
+	lines.slice(0, 2).forEach((l, i) => ctx.fillText(fitText(ctx, l, maxW), tx, 200 + i * 60));
+	if (info.author) {
+		ctx.fillStyle = 'rgba(255,244,221,0.7)';
+		ctx.font = '34px "Fredoka", "Segoe UI", sans-serif';
+		ctx.fillText(fitText(ctx, info.author, maxW), tx, 200 + Math.min(2, lines.length) * 60 + 10);
+	}
+	const by = 360;
+	ctx.fillStyle = '#fff4dd';
+	ctx.beginPath();
+	ctx.arc(tx + 28, by, 28, 0, Math.PI * 2);
+	ctx.fill();
+	ctx.fillStyle = '#4a2370';
+	if (info.paused) {
+		ctx.beginPath();
+		ctx.moveTo(tx + 20, by - 14);
+		ctx.lineTo(tx + 40, by);
+		ctx.lineTo(tx + 20, by + 14);
+		ctx.fill();
+	} else {
+		ctx.fillRect(tx + 17, by - 13, 8, 26);
+		ctx.fillRect(tx + 31, by - 13, 8, 26);
+	}
+	const barX = tx + 76;
+	const barW = maxW - 76;
+	ctx.fillStyle = 'rgba(255,244,221,0.25)';
+	roundRect(ctx, barX, by - 7, barW, 14, 7);
+	ctx.fill();
+	const ratio = info.duration > 0 ? Math.min(1, info.positionMs / (info.duration * 1000)) : 0;
+	ctx.fillStyle = '#ffd36b';
+	roundRect(ctx, barX, by - 7, Math.max(14, barW * ratio), 14, 7);
+	ctx.fill();
+	ctx.fillStyle = 'rgba(255,244,221,0.8)';
+	ctx.font = '26px "Fredoka", "Segoe UI", sans-serif';
+	ctx.fillText(clockText(info.positionMs), barX, by + 46);
+	ctx.textAlign = 'right';
+	ctx.fillText(info.duration ? clockText(info.duration * 1000) : '', barX + barW, by + 46);
+	ctx.textAlign = 'left';
+	if (info.next) {
+		ctx.fillStyle = 'rgba(0,0,0,0.25)';
+		roundRect(ctx, 70, 452, W - 140, 70, 20);
+		ctx.fill();
+		ctx.fillStyle = 'rgba(255,244,221,0.85)';
+		ctx.font = '28px "Fredoka", "Segoe UI", sans-serif';
+		ctx.fillText(fitText(ctx, `A continuación: ${info.next}`, W - 200), 100, 497);
+	}
+}
+
+/** Un pececito de juguete (para mostrar lo que se pescó). */
+export function makeFishMesh(color: string): THREE.Group {
+	const group = new THREE.Group();
+	const mat = new THREE.MeshStandardMaterial({color, roughness: 0.4});
+	const body = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), mat);
+	body.scale.set(1.5, 0.9, 0.55);
+	const tail = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.18, 4), mat);
+	tail.rotation.z = Math.PI / 2;
+	tail.position.x = -0.28;
+	const eye = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({color: 0x1a1020}));
+	eye.position.set(0.15, 0.04, 0.07);
+	group.add(body, tail, eye);
+	return group;
 }
