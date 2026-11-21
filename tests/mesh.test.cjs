@@ -12,6 +12,7 @@ app.whenReady().then(async () => {
 		backgroundColor: '#0b0912',
 		webPreferences: {contextIsolation: true, nodeIntegration: false, backgroundThrottling: false},
 	});
+	win.webContents.setAudioMuted(true);
 	win.webContents.on('console-message', (_event, _level, message) => console.log(`[pagina] ${message}`));
 	await win.loadURL('http://localhost:5175/tests/mesh-test.html');
 	const js = (code) => win.webContents.executeJavaScript(code).catch((error) => `ERROR ${error.message}`);
@@ -21,5 +22,5 @@ app.whenReady().then(async () => {
 		return JSON.stringify(window.__resultado);
 	})()`);
 	console.log(`[prueba] ${resultado}`);
-	app.quit();
+	app.exit(typeof resultado === 'string' && resultado.startsWith('{') && JSON.parse(resultado).ok ? 0 : 1);
 });

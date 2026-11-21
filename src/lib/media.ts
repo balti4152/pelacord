@@ -42,6 +42,7 @@ export class VoiceMesh {
 	private states = new Map<string, RTCPeerConnectionState>();
 	private pendingCandidates = new Map<string, RTCIceCandidateInit[]>();
 	private remoteReady = new Set<string>();
+	private signallingReady = new Set<string>();
 	private makingOffer = new Set<string>();
 	private listeners = new Set<() => void>();
 	private unsubSignal: (() => void) | null = null;
@@ -49,6 +50,7 @@ export class VoiceMesh {
 	private peerSessions = new Map<string, string | undefined>();
 	private micRequest: Promise<void> | null = null;
 	private micGeneration = 0;
+	private micUnavailable = false;
 	private screenGeneration = 0;
 	/** Peers del canal con los que HAY que estar conectado. El vigilante reconecta solo. */
 	private desired = new Set<string>();
@@ -205,6 +207,7 @@ export class VoiceMesh {
 		this.peerSessions.clear();
 		this.micGeneration += 1;
 		this.micRequest = null;
+		this.micUnavailable = false;
 		this.screenGeneration += 1;
 		this.unsubSignal?.();
 		this.unsubSignal = null;
@@ -226,6 +229,7 @@ export class VoiceMesh {
 		this.makingOffer.clear();
 		this.pendingCandidates.clear();
 		this.remoteReady.clear();
+		this.signallingReady.clear();
 		this.local?.getTracks().forEach((track) => track.stop());
 		this.local = null;
 		this.screen?.getTracks().forEach((track) => track.stop());
@@ -329,12 +333,17 @@ export class VoiceMesh {
 	private async captureMic(generation: number): Promise<void> {
 		const constraints = this.micConstraints();
 		const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(() => null);
-		if (!stream) return;
-		const nextTrack = stream.getAudioTracks()[0];
-		if (generation !== this.micGeneration || !nextTrack) {
-			stream.getTracks().forEach((track) => track.stop());
+		if (generation !== this.micGeneration) {
+			stream?.getTracks().forEach((track) => track.stop());
 			return;
 		}
+		const nextTrack = stream?.getAudioTracks()[0];
+		if (!stream || !nextTrack) {
+			this.micUnavailable = !this.local;
+			if (this.micUnavailable) await this.ensureTracksOnAll();
+			return;
+		}
+		this.micUnavailable = false;
 		nextTrack.enabled = !this.muted;
 		this.local?.getTracks().forEach((track) => track.stop());
 		this.local = stream;
@@ -346,10 +355,8 @@ export class VoiceMesh {
 	/** Conecta con un peer del canal. La negociación la maneja onnegotiationneeded. */
 	async connect(peerId: string): Promise<void> {
 		if (peerId === this.myId) return;
-		const alreadyDesired = this.desired.has(peerId);
 		this.desired.add(peerId);
-		const pc = await this.pcFor(peerId);
-		if (!alreadyDesired && this.room && this.pcs.get(peerId) === pc) this.send(peerId, {kind: 'ready'});
+		await this.openPeer(peerId);
 	}
 
 	disconnect(peerId: string): void {
@@ -421,6 +428,28 @@ export class VoiceMesh {
 		this.getTransport()?.sendSignal(to, {...payload, ...scope});
 	}
 
+	private async openPeer(peerId: string): Promise<void> {
+		const pc = await this.pcFor(peerId);
+		if (this.peerSessions.get(peerId) && this.pcs.get(peerId) === pc) this.send(peerId, {kind: 'ready'});
+	}
+
+	private async sendOffer(peerId: string, pc: RTCPeerConnection): Promise<void> {
+		if (this.pcs.get(peerId) !== pc || pc.signalingState !== 'stable' || this.makingOffer.has(peerId)) return;
+		// En una sesión nueva inicia una sola punta, después de que la otra confirmó el canal.
+		if (this.peerSessions.get(peerId) && !pc.remoteDescription && (this.myId > peerId || !this.signallingReady.has(peerId))) return;
+		this.makingOffer.add(peerId);
+		try {
+			await pc.setLocalDescription();
+			if (this.pcs.get(peerId) === pc && pc.localDescription?.type === 'offer') {
+				this.send(peerId, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
+			}
+		} catch (error) {
+			if (this.pcs.get(peerId) === pc) console.warn(`[pelacord-media] ${peerId}: no pude armar la oferta`, String(error));
+		} finally {
+			if (this.pcs.get(peerId) === pc) this.makingOffer.delete(peerId);
+		}
+	}
+
 	private async pcFor(peerId: string): Promise<RTCPeerConnection> {
 		const existing = this.pcs.get(peerId);
 		if (existing) return existing;
@@ -432,18 +461,7 @@ export class VoiceMesh {
 		this.diagnostics.set(peerId, {sent: 0, received: 0, ice: 'new'});
 
 		// Perfect negotiation: cualquier lado renegocia cuando cambian sus pistas.
-		pc.onnegotiationneeded = async () => {
-			if (this.pcs.get(peerId) !== pc) return;
-			try {
-				this.makingOffer.add(peerId);
-				await pc.setLocalDescription();
-				if (this.pcs.get(peerId) === pc) this.send(peerId, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
-			} catch {
-				// se reintenta en el próximo cambio
-			} finally {
-				if (this.pcs.get(peerId) === pc) this.makingOffer.delete(peerId);
-			}
-		};
+		pc.onnegotiationneeded = () => { void this.sendOffer(peerId, pc); };
 
 		pc.onicecandidate = (event) => {
 			if (this.pcs.get(peerId) !== pc) return;
@@ -555,6 +573,10 @@ export class VoiceMesh {
 		if (voiceTrack && this.local) {
 			if (roles.voice) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
 			else roles.voice = pc.addTrack(voiceTrack, this.local);
+		} else if (this.micUnavailable && this.peerSessions.get(peerId) && this.myId < peerId &&
+			!pc.getTransceivers().some(({receiver}) => receiver.track.kind === 'audio')) {
+			// Aun con el micrófono denegado, quien inicia puede ofrecer recibir la voz del otro.
+			pc.addTransceiver('audio', {direction: 'recvonly'});
 		}
 		if (this.pcs.get(peerId) !== pc) return;
 		const screenTrack = this.screen?.getVideoTracks()[0] ?? null;
@@ -621,6 +643,7 @@ export class VoiceMesh {
 		this.makingOffer.delete(peerId);
 		this.pendingCandidates.delete(peerId);
 		this.remoteReady.delete(peerId);
+		this.signallingReady.delete(peerId);
 		this.diagnostics.delete(peerId);
 		this.disconnectedAt.delete(peerId);
 		this.connectingAt.delete(peerId);
@@ -688,7 +711,7 @@ export class VoiceMesh {
 	private async rebuild(peerId: string): Promise<void> {
 		this.send(peerId, {kind: 'reset'});
 		this.drop(peerId);
-		if (this.desired.has(peerId)) await this.pcFor(peerId);
+		if (this.desired.has(peerId)) await this.openPeer(peerId);
 	}
 
 	/** Rearma toda la malla: corta y vuelve a empezar (lo usa el botón "Reconectar" de la llamada). */
@@ -717,7 +740,7 @@ export class VoiceMesh {
 				if (!pc) {
 					// Se espera lo que diga el rearme (si nunca se conectó, no hay espera).
 					if ((this.rebuildAt.get(peerId) ?? 0) > now) continue;
-					void this.pcFor(peerId);
+					void this.openPeer(peerId);
 					continue;
 				}
 				if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
@@ -732,6 +755,7 @@ export class VoiceMesh {
 				}
 				if (pc.connectionState === 'connecting' || pc.connectionState === 'new') {
 					const since = this.connectingAt.get(peerId) ?? now;
+					if (pc.connectionState === 'new' && this.peerSessions.get(peerId)) this.send(peerId, {kind: 'ready'});
 					if (now - since > 12000) this.tryIceRestart(peerId, pc);
 				}
 			}
@@ -782,7 +806,7 @@ export class VoiceMesh {
 		if (payload.kind === 'reset') {
 			console.log(`[pelacord-media] ${from}: pidió rearmar la conexión`);
 			this.drop(from);
-			if (this.desired.has(from)) await this.pcFor(from);
+			if (this.desired.has(from)) await this.openPeer(from);
 			return;
 		}
 
@@ -790,7 +814,16 @@ export class VoiceMesh {
 		if (this.pcs.get(from) !== pc) return;
 		const polite = this.myId > from;
 		if (payload.kind === 'ready') {
-			if (pc.signalingState === 'have-local-offer') this.send(from, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
+			if (!this.peerSessions.get(from)) return;
+			const firstReady = !this.signallingReady.has(from);
+			this.signallingReady.add(from);
+			// El primer aviso pudo salir antes de que el otro recibiera nuestra presencia.
+			if (firstReady) this.send(from, {kind: 'ready'});
+			if (pc.signalingState === 'have-local-offer') {
+				this.send(from, {kind: 'offer', sdp: plainSdp(pc.localDescription)});
+			} else if (!pc.remoteDescription && pc.getTransceivers().length) {
+				await this.sendOffer(from, pc);
+			}
 			return;
 		}
 
@@ -798,9 +831,6 @@ export class VoiceMesh {
 			const collision = this.makingOffer.has(from) || pc.signalingState !== 'stable';
 			if (!polite && collision) return; // el "impolítico" ignora la oferta y gana la suya
 			try {
-				if (collision) {
-					await pc.setLocalDescription({type: 'rollback'});
-				}
 				await pc.setRemoteDescription(payload.sdp);
 			} catch (error) {
 				// Se muestra QUÉ canales trae el otro y cuáles tengo yo: si se desalinean, WebRTC

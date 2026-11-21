@@ -6,6 +6,7 @@ app.setPath('downloads', process.env.PELACORD_TEST_PROFILE);
 app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 app.commandLine.appendSwitch('use-fake-ui-for-media-stream');
 app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.on('web-contents-created', (_event, contents) => contents.setAudioMuted(true));
 app.whenReady().then(() => {
 	session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
 		const url = new URL(details.url);

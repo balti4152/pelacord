@@ -82,6 +82,10 @@ async function startElectron(id, root, fixtureUrl, signalling = '0') {
 	const pending = new Map();
 	ws.on('message', (data) => {
 		const message = JSON.parse(data);
+		if (message.method === 'Runtime.consoleAPICalled') {
+			const log = message.params.args.map((arg) => arg.value ?? arg.description).join(' ');
+			if (log.includes('[pelacord-media]')) logs += `${log}\n`;
+		}
 		const callback = pending.get(message.id);
 		if (!callback) return;
 		pending.delete(message.id);
@@ -114,6 +118,7 @@ async function startElectron(id, root, fixtureUrl, signalling = '0') {
 		};
 	`;
 	await call('Page.enable');
+	await call('Runtime.enable');
 	await eventually(() => js(`location.origin === ${JSON.stringify(devUrl)}`), `${id} local origin`);
 	await js(`(() => { ${seed} })()`);
 	await call('Page.navigate', {url: `${devUrl}/?desktop-test=${id}`});
@@ -234,7 +239,11 @@ async function run() {
 	await delay(2800);
 	assert.equal(await a.js('lastAudio.paused'), false);
 	assert.ok(Math.abs((await a.js('lastAudio.currentTime')) - (await b.js('lastAudio.currentTime'))) < 2);
-	for (const peer of [a, b]) await eventually(() => peer.js(`document.querySelector('.voice-panel-sub')?.textContent === 'Voz conectada'`), 'voice after switch');
+	for (const peer of [a, b]) {
+		await eventually(() => peer.js(`document.querySelector('.voice-panel-sub')?.textContent === 'Voz conectada'`), 'voice after switch').catch((error) => {
+			throw new Error(`${error.message}\nA: ${a.logs()}\nB: ${b.logs()}`);
+		});
+	}
 	for (const peer of [a, b]) {
 		await eventually(() => peer.js(`[...document.querySelectorAll('audio')].filter((audio) => audio.srcObject && !audio.paused).length === 1`), 'one voice player per peer');
 		assert.equal(await peer.js(`document.querySelector('audio').srcObject.getAudioTracks().length`), 1);
@@ -264,6 +273,15 @@ async function run() {
 		await capture('chat', b);
 	}
 	console.log('OK music tabs are independent');
+	for (let attempt = 1; attempt <= 8; attempt += 1) {
+		const traveler = attempt % 2 === 0 ? a : b;
+		await join(traveler, 'Gaming');
+		await join(traveler, 'General');
+		await Promise.all([a, b].map((peer) => eventually(() => peer.js(`document.querySelector('.voice-panel-sub')?.textContent === 'Voz conectada' && [...document.querySelectorAll('audio')].some((audio) => audio.srcObject && !audio.paused)`), `voice round trip ${attempt}`, 4500))).catch((error) => {
+			throw new Error(`${error.message}\nA: ${a.logs()}\nB: ${b.logs()}`);
+		});
+	}
+	console.log('OK eight rapid voice round trips, alternating between both peers');
 	if (process.env.PELACORD_TEST_YOUTUBE) {
 		const url = await a.js(`pelacordTransport.getAudioUrl('jNQXAC9IVRw')`);
 		assert.ok(url, 'real YouTube audio resolved');
