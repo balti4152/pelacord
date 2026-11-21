@@ -313,7 +313,7 @@ function handleMessage(socket, raw) {
 		if (type === 'hello') return;
 	}
 	const neighbor = socketIds.get(socket);
-	if (!neighbor || !['presence', 'music', 'movie-room', 'signal', 'messages', 'command', 'leave'].includes(type)) return;
+	if (!neighbor || !['presence', 'music', 'movie-room', 'world', 'signal', 'messages', 'command', 'leave'].includes(type)) return;
 	if (typeof msgId !== 'string' || !rememberMessage(msgId)) return;
 	if (type === 'leave') {
 		// Cerró la app: se lo saca YA de la llamada y de la lista (antes se esperaba a que su
@@ -574,6 +574,12 @@ ipcMain.on('pelacord:music', (_event, payload) => {
 });
 
 /** Difunde el estado de mi sala de Pelaflix (película, minuto y si está pausada). */
+/** Mundo 3D: posición, look, gestos y juegos de mesa (difundido, o dirigido con `to`). */
+ipcMain.on('pelacord:world', (_event, message) => {
+	if (!myPeerId || !message || !message.payload) return;
+	broadcast({type: 'world', from: myPeerId, to: message.to, payload: message.payload});
+});
+
 ipcMain.on('pelacord:movie-room', (_event, payload) => {
 	if (!myPeerId) return;
 	broadcast({type: 'movie-room', from: myPeerId, payload});

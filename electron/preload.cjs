@@ -11,6 +11,13 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	sendMusic: (payload) => ipcRenderer.send('pelacord:music', payload),
 	/** Pelaflix: difunde el estado de mi sala (película, minuto, pausa). */
 	sendMovieRoom: (payload) => ipcRenderer.send('pelacord:movie-room', payload),
+	/** Mundo 3D: estado del jugador, gestos y jugadas de los juegos de mesa. */
+	sendWorld: (payload, to) => ipcRenderer.send('pelacord:world', {to, payload}),
+	onWorld: (callback) => {
+		const handler = (_event, message) => callback(message);
+		ipcRenderer.on('pelacord:world', handler);
+		return () => ipcRenderer.removeListener('pelacord:world', handler);
+	},
 	onMovieRoom: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:movie-room', handler);

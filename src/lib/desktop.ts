@@ -71,6 +71,9 @@ interface DesktopTransport {
 	sendMusic(payload: unknown): void;
 	onMusic(callback: (message: PeerMessage<unknown>) => void): () => void;
 	/** Pelaflix: el host de cada sala difunde su estado (película, minuto, pausa) por la malla. */
+	/** Mundo 3D: estado del jugador, gestos y juegos (difundido o a un peer con `to`). */
+	sendWorld?(payload: unknown, to?: string): void;
+	onWorld?(callback: (message: PeerMessage<unknown>) => void): () => void;
 	sendMovieRoom(payload: unknown): void;
 	onMovieRoom(callback: (message: PeerMessage<unknown>) => void): () => void;
 	/** El log de mensajes: reconciliación del historial por la malla (con destinatario o difundido). */

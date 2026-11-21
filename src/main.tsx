@@ -6,6 +6,7 @@ import {StoreProvider} from '@/state/store';
 import '@/styles/theme.css';
 import '@/styles/global.css';
 import '@/styles/app.css';
+import '@/styles/world.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {

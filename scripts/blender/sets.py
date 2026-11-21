@@ -388,14 +388,41 @@ def build_ui():
 	return 'ui_props.glb'
 
 
+def build_house():
+	"""Mi casa: habitación vacía (los muebles los pone cada uno con lo que compró en la tienda)."""
+	room_shell(9, 8, 'night_purple', 'floor_plum')
+	wood_a = toy.material('HousePlank_A', (0.55, 0.34, 0.2))
+	wood_b = toy.material('HousePlank_B', (0.48, 0.29, 0.17))
+	planks = [toy.rounded_box(f'hplank_{i}', size=(0.48, 8.0, 0.04), loc=(-4.25 + i * 0.5, 0, 0.02), radius=0.015, mat=wood_a if i % 2 else wood_b) for i in range(18)]
+	for p in planks:
+		toy.apply_transforms(p)
+	toy.join(planks, 'Floor')
+	# Ventana con cielo de noche y estrellitas (da profundidad aunque la casa esté vacía).
+	sky = toy.material('WindowSky', 'midnight_blue', emission=0.6, emission_color=(0.15, 0.2, 0.5))
+	frame = toy.material('WindowFrame', 'cream')
+	toy.rounded_box('WindowFrame', size=(2.2, 0.12, 1.4), loc=(-1.6, -4.05, 1.7), radius=0.05, mat=frame)
+	toy.rounded_box('WindowSky', size=(2.0, 0.06, 1.2), loc=(-1.6, -3.99, 1.7), radius=0.03, mat=sky)
+	glow = toy.material('StarGlow', 'white', emission=6.0)
+	random.seed(12)
+	for i in range(14):
+		toy.sphere(f'wstar_{i}', radius=0.02, loc=(-1.6 + random.uniform(-0.9, 0.9), -3.95, 1.7 + random.uniform(-0.5, 0.5)), mat=glow, segments=6, rings=4)
+	neon_moon('HouseMoon', (2.6, -4.08, 2.1), size=0.35)
+	toy.point_light('HouseFill', (0, 0.5, 3.0), color=(1.0, 0.85, 0.75), energy=320, radius=2.0)
+	toy.point_light('HouseFillFront', (0, 4.2, 2.3), color=(1.0, 0.88, 0.78), energy=260, radius=2.0)
+	toy.empty('Spawn', loc=(0, 3.0, 0))
+	return 'room_house.glb'
+
+
 SETS = {
 	'living': build_living,
+	'house': build_house,
 	'cinema': build_cinema,
 	'campfire': build_campfire,
 	'ui': build_ui,
 }
 
 PREVIEWS = {
+	'house': dict(target=(0, 0, 0.6), distance=8.0, height=6.0, angle_deg=180, background='night_purple', floor=False, lens=30),
 	'living': dict(target=(-0.4, 0.6, 0.5), distance=3.9, height=1.9, angle_deg=30, background='night_purple', floor=False, lens=32),
 	'cinema': dict(target=(0, -1.0, 1.2), distance=9.0, height=3.8, angle_deg=162, background='dark_crimson', floor=False, lens=30),
 	'campfire': dict(target=(0, 0, 0.4), distance=7.2, height=3.6, angle_deg=-30, background='midnight_blue', floor=False, lens=32),
