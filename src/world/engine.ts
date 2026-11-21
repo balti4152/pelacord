@@ -536,7 +536,7 @@ export class WorldEngine {
 			actor.companion?.dispose();
 			this.others.delete(id);
 		}
-		for (const s of here) {
+		for (let s of here) {
 			let actor = this.others.get(s.id);
 			const name = info[s.id]?.name ?? s.name;
 			if (!actor) {
@@ -553,6 +553,14 @@ export class WorldEngine {
 			this.setCompanion(actor, s.equippedPet);
 			actor.labelEl.querySelector('.w-name-text')!.textContent = name;
 			const reported = new THREE.Vector3(s.x, 0, s.z);
+			// Sentado: se usa el asiento de verdad (con su altura y hacia dónde mira). Antes quedaba a la
+			// altura del piso y se veía hundido en el sillón.
+			const seat = s.anim === 'sit' && s.seat ? this.seats.find((x) => x.id === s.seat) : undefined;
+			if (seat) {
+				seat.object.getWorldPosition(reported);
+				const dir = seat.object.getWorldDirection(new THREE.Vector3());
+				s = {...s, ry: Math.atan2(dir.x, dir.z)};
+			}
 			if (actor.pos.distanceTo(reported) > 2 || s.anim === 'sit') actor.pos.copy(reported);
 			actor.target.set(s.tx ?? s.x, 0, s.tz ?? s.z);
 			if (!isMoving(s.anim)) actor.target.copy(reported);
@@ -1391,6 +1399,8 @@ export class WorldEngine {
 			}
 			actor.avatar.setBase(distance > 0.05 ? (actor.anim as BaseAnim) : this.visualAnim('idle'));
 		} else {
+			// Quieto: se acomoda suave adonde dice que está (antes podía quedar hasta 2 m corrido).
+			if (!actor.seat && actor.pos.distanceTo(actor.target) > 0.02) actor.pos.lerp(actor.target, Math.min(1, dt * 6));
 			actor.avatar.setBase(actor.avatar.isGhost() ? 'idle' : this.visualAnim(actor.anim));
 		}
 		this.place(actor, dt);

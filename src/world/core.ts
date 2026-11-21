@@ -259,6 +259,8 @@ export function addCoins(amount: number): void {
 // --------------------------------------------------------------------- red --
 
 const STALE_MS = 9000;
+/** La última hora (del reloj de cada uno) que mandó cada jugador: para ordenar sus mensajes. */
+const sentAt = new Map<string, number>();
 let peers: Record<string, PlayerState> = {};
 const peerListeners = new Set<() => void>();
 const emoteListeners = new Set<(m: Extract<WorldMessage, {kind: 'emote'}>) => void>();
@@ -288,11 +290,16 @@ function startNet(): void {
 		const message = payload as WorldMessage | null;
 		if (!message || typeof message !== 'object') return;
 		if (message.kind === 'state' && message.s?.id === from) {
-			const previous = peers[from];
-			if (previous && previous.t > message.s.t) return;
+			// Orden: se compara la hora DEL QUE LO MANDA con su mensaje anterior (no con mi hora).
+			// Antes se mezclaban: si su reloj estaba atrasado, se descartaban sus mensajes, se quedaba
+			// congelado y después "desaparecía".
+			const lastSent = sentAt.get(from) ?? -Infinity;
+			if (message.s.t < lastSent) return;
+			sentAt.set(from, message.s.t);
 			peers = {...peers, [from]: {...message.s, t: Date.now()}};
 			emitPeers();
 		} else if (message.kind === 'leave' && message.id === from) {
+			sentAt.delete(from);
 			if (!peers[from]) return;
 			const next = {...peers};
 			delete next[from];
@@ -307,6 +314,7 @@ function startNet(): void {
 		}
 	});
 	transport?.onPeerLeft?.(({id}) => {
+		sentAt.delete(id);
 		if (!peers[id]) return;
 		const next = {...peers};
 		delete next[id];
@@ -318,7 +326,10 @@ function startNet(): void {
 		let changed = false;
 		const next: Record<string, PlayerState> = {};
 		for (const [id, state] of Object.entries(peers)) {
-			if (now - state.t > STALE_MS) changed = true;
+			if (now - state.t > STALE_MS) {
+				changed = true;
+				sentAt.delete(id);
+			}
 			else next[id] = state;
 		}
 		if (changed) {

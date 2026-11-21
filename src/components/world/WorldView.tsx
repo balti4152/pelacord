@@ -15,7 +15,7 @@ import {type Interaction, WorldEngine} from '@/world/engine';
 import {BAITS, biteWaitMs, currentBait, type FishKind, keepFish, rodById, rollFish, useBait} from '@/world/fish';
 import {PETS} from '@/world/petCatalog';
 import {recordPetCapture} from '@/world/pets';
-import {spatialVoices} from '@/world/spatialAudio';
+import {spatialVoices, type VoicePlace} from '@/world/spatialAudio';
 import {type CardColor, table, useTableSession} from '@/world/tableGames';
 import {TableView} from '@/world/tableView';
 import {currentTrack, startTv, tv, tvPosition, useTvs, volumeForDistance} from '@/world/tv';
@@ -434,25 +434,36 @@ export function WorldView({onClose, hidden = false}: {onClose: () => void; hidde
 
 	// Audio espacial (apagado mientras estás en la parte 2D).
 	useEffect(() => {
-		spatialVoices.setActive(spatial && !hidden);
+		// Las voces pasan por acá siempre que estés en el mundo: así cada lugar es una sala aparte
+		// (si están en lugares distintos no se escuchan). El botón de auriculares sólo prende el 3D.
+		// También en la parte 2D: tu personaje sigue en su lugar, así que la regla de salas sigue.
+		spatialVoices.setActive(true);
 		try {
 			localStorage.setItem(SPATIAL_KEY, spatial ? '1' : '0');
 		} catch {
 			// sin almacenamiento
 		}
 		return () => spatialVoices.setActive(false);
-	}, [spatial, hidden]);
+	}, [spatial]);
 	useEffect(() => {
 		const timer = setInterval(() => {
 			const engine = engineRef.current;
 			if (!engine || !spatialVoices.isActive()) return;
 			const {me, peers: here} = engine.positions();
-			const positions: Record<string, {x: number; z: number} | null> = {};
-			for (const id of Object.keys(peers)) positions[id] = here[id] ?? null;
+			const positions: Record<string, VoicePlace> = {};
+			for (const [id, p] of Object.entries(peers)) {
+				// Cada lugar es una sala aparte (también para los que están en la parte 2D: su personaje
+				// sigue ahí). Los que nunca entraron al mundo no figuran acá y se escuchan normal.
+				if (p.room !== roomRef.current) positions[id] = 'muted';
+				else if (p.away || hiddenRef.current) positions[id] = 'flat';
+				else positions[id] = spatialRef.current ? (here[id] ?? 'flat') : 'flat';
+			}
 			spatialVoices.update(me, positions);
 		}, 80);
 		return () => clearInterval(timer);
 	}, [peers]);
+	const spatialRef = useRef(spatial);
+	spatialRef.current = spatial;
 
 	// Decorar.
 	useEffect(() => {

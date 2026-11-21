@@ -101,6 +101,13 @@ export function startTv(id: string): void {
 		for (const wire of message.list) changed = accept(wire) || changed;
 		if (changed) emit();
 	});
+	// Al entrar, se pide el estado de las teles a los demás (así no arranco con un contador viejo).
+	getDesktopTransport()?.sendWorld?.({kind: 'tv-hello'});
+	getDesktopTransport()?.onWorld?.(({payload, from}) => {
+		const message = payload as {kind?: string} | null;
+		if (message?.kind !== 'tv-hello') return;
+		broadcast(Object.values(tvs).filter((t) => t.mode !== 'off').map(toWire), from);
+	});
 	// Cada tanto se reenvía lo que está prendido: el que entra tarde se entera solo.
 	setInterval(() => {
 		const active = Object.values(tvs).filter((tv) => tv.mode !== 'off').map(toWire);
@@ -113,7 +120,9 @@ export function setTv(room: RoomId, change: (current: TvState) => Partial<TvWire
 	const now = Date.now();
 	const current: TvState = tvs[room] ?? {room, t: 0, by: '', mode: 'off', queue: [], index: 0, positionMs: 0, paused: false, anchor: now};
 	const patch = change(current);
-	lastT = Math.max(lastT + 1, now);
+	// Reloj de Lamport puro (NO la hora de la PC): si el reloj de un amigo estaba atrasado, sus cambios
+	// parecían "viejos", se descartaban y el reenvío de los demás le pisaba la música (no arrancaba nunca).
+	lastT += 1;
 	const next: TvState = {
 		...current,
 		positionMs: tvPosition(current, now),

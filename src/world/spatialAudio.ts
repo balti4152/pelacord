@@ -16,6 +16,7 @@ interface VoiceNode {
 	source: MediaStreamAudioSourceNode;
 	panner: PannerNode;
 	gain: GainNode;
+	volume: number;
 }
 
 export interface Listener {
@@ -25,14 +26,22 @@ export interface Listener {
 	ry: number;
 }
 
+export type VoicePlace = {x: number; z: number} | 'flat' | 'muted' | null;
+
 class SpatialVoices {
 	private ctx: AudioContext | null = null;
 	private nodes = new Map<string, VoiceNode>();
 	private active = false;
 	private sinkId = 'default';
 	private listeners = new Set<() => void>();
-	/** Posición de cada peer en MI sala (null = no está en mi sala → se escucha normal). */
-	private positions: Record<string, {x: number; z: number} | null> = {};
+	/**
+	 * Dónde está cada uno respecto de mí:
+	 *  - {x, z}: en mi misma sala, con audio 3D (sale desde su personaje).
+	 *  - 'flat': en mi sala, pero con el audio 3D apagado (se escucha normal).
+	 *  - 'muted': está en OTRO lugar del mundo → no se escucha (cada lugar es una sala aparte).
+	 *  - null: no está en el mundo (en la parte 2D) → se escucha normal.
+	 */
+	private positions: Record<string, VoicePlace> = {};
 
 	isActive(): boolean {
 		return this.active;
@@ -98,16 +107,16 @@ class SpatialVoices {
 				});
 				const gain = ctx.createGain();
 				source.connect(panner).connect(gain).connect(ctx.destination);
-				node = {stream: voice.stream, source, panner, gain};
+				node = {stream: voice.stream, source, panner, gain, volume: voice.volume};
 				this.nodes.set(voice.peerId, node);
 			}
-			node.gain.gain.setTargetAtTime(deafened ? 0 : voice.volume, ctx.currentTime, 0.05);
+			node.volume = deafened ? 0 : voice.volume;
 		}
 		this.place();
 	}
 
 	/** Actualiza dónde estoy yo y dónde está cada uno (se llama en cada cuadro del mundo). */
-	update(listener: Listener, positions: Record<string, {x: number; z: number} | null>): void {
+	update(listener: Listener, positions: Record<string, VoicePlace>): void {
 		this.positions = positions;
 		if (!this.active || !this.ctx) return;
 		const l = this.ctx.listener;
@@ -136,7 +145,9 @@ class SpatialVoices {
 		const t = this.ctx.currentTime;
 		for (const [id, node] of this.nodes) {
 			const pos = this.positions[id];
-			if (pos) {
+			// En otro lugar del mundo: silencio (con un fundido cortito para que no haga "click").
+			node.gain.gain.setTargetAtTime(pos === 'muted' ? 0 : node.volume, t, 0.08);
+			if (pos && typeof pos === 'object') {
 				node.panner.panningModel = 'HRTF';
 				node.panner.distanceModel = 'inverse';
 				node.panner.positionX.setTargetAtTime(pos.x, t, 0.06);
