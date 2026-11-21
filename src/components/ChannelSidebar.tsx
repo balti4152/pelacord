@@ -1,4 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
+import logo from '@/assets/logo.png';
 import {Film, ListMusic, Music, VolumeX} from 'lucide-react';
 import {ColorAvatar, Icon} from '@/components/primitives';
 import {useSpeakingIds} from '@/components/RemoteMedia';
@@ -262,6 +263,7 @@ export function ChannelSidebar({
 	return (
 		<div className="sidebar">
 			<div className="sidebar-header">
+				<img className="sidebar-logo" src={logo} alt="" />
 				<span className="sidebar-header-title">Pelacord</span>
 			</div>
 			<UpdateBanner />

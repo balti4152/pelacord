@@ -899,6 +899,8 @@ function HotkeysTab({
 	// Mientras graba, escucha el teclado de toda la ventana.
 	useEffect(() => {
 		if (!recording) return;
+		const transport = getDesktopTransport();
+		transport?.setRecordingHotkey(true);
 		const onKey = (event: KeyboardEvent) => {
 			event.preventDefault();
 			event.stopPropagation();
@@ -915,7 +917,10 @@ function HotkeysTab({
 			setHint(null);
 		};
 		window.addEventListener('keydown', onKey, true);
-		return () => window.removeEventListener('keydown', onKey, true);
+		return () => {
+			window.removeEventListener('keydown', onKey, true);
+			transport?.setRecordingHotkey(false);
+		};
 	}, [recording, onHotkey]);
 
 	return (
@@ -952,18 +957,14 @@ function HotkeysTab({
 						<p className="settings-hint">{info.description}</p>
 						{failures.some((failure) => failure.action === info.action) ? (
 							<p className="settings-hint hotkey-failed">
-								No se pudo activar «{formatAccelerator(accelerator)}»: Windows no la acepta o la está usando otro programa.{' '}
-								{accelerator.includes('Plus')
-									? 'El «+» de la fila de arriba necesita Shift y Windows no lo deja como atajo global: usá el «+» del teclado numérico.'
-									: 'Probá con otra tecla.'}
+								No se pudo activar «{formatAccelerator(accelerator)}». Revisá si está repetido o elegí otra combinación.
 							</p>
 						) : null}
 					</div>
 				);
 			})}
 			<p className="settings-hint">
-				Elegí cualquier tecla o combinación: una sola (F8, x, -, …) o con Ctrl/Alt/Shift. Si una tecla no se puede
-				usar, te lo aviso acá abajo en rojo. Ojo con el «+» de la fila de arriba: usá el del teclado numérico.
+					Si dos apps usan la misma combinación, ambas pueden responder. Asigná combinaciones distintas si querés controlarlas por separado.
 			</p>
 			{recording ? (
 				<p className="settings-hint hotkey-hint">

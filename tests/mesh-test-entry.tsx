@@ -30,7 +30,7 @@ function hacerTransportes() {
 			setTimeout(() => destino.cb?.({from: yo, payload: copia}), 0);
 			if (repetirTodo) setTimeout(() => destino.cb?.({from: yo, payload: copia}), 1);
 		},
-		selectSource() {},
+		async selectSource() { return true; },
 	});
 	let repetirTodo = false;
 	const a = crear('aaa');

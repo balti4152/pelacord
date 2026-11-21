@@ -2050,12 +2050,27 @@ ipcMain.on('pelacord:notify', (_event, payload) => {
 const HOTKEY_ACTIONS = ['mute', 'deafen', 'shareScreen', 'shareFocused'];
 /** Atajos registrados ahora, para poder darlos de baja al cambiarlos. */
 let registeredHotkeys = [];
+let windowsHotkeys;
+let recordingHotkey = false;
 
-/**
- * Registra los atajos configurados. Devuelve los que fallaron (otro programa ya los usa
- * o el formato no es válido) para poder avisar en la interfaz.
- */
+function fireHotkey(action) {
+	if (!recordingHotkey) sendToRenderer('pelacord:hotkey', {action});
+}
+
 function registerHotkeys(bindings) {
+	const entries = (Array.isArray(bindings) ? bindings : []).filter((entry) =>
+		HOTKEY_ACTIONS.includes(entry?.action) && typeof entry.accelerator === 'string' && entry.accelerator);
+	if (process.platform === 'win32') {
+		// Leer el estado de la tecla no reserva el atajo para PelaCord: Discord lo sigue recibiendo.
+		try {
+			windowsHotkeys ??= require('./windows-hotkeys.cjs').createWindowsHotkeys(fireHotkey);
+			windowsHotkeys.setPaused(recordingHotkey);
+			return windowsHotkeys.setBindings(entries);
+		} catch (error) {
+			console.warn('[pelacord] no se pudo cargar el lector de atajos:', error.message);
+			return entries;
+		}
+	}
 	for (const accelerator of registeredHotkeys) {
 		try {
 			globalShortcut.unregister(accelerator);
@@ -2065,14 +2080,11 @@ function registerHotkeys(bindings) {
 	}
 	registeredHotkeys = [];
 	const failed = [];
-	if (!Array.isArray(bindings)) return failed;
-	for (const entry of bindings) {
-		const {action, accelerator} = entry ?? {};
-		if (!HOTKEY_ACTIONS.includes(action) || typeof accelerator !== 'string' || !accelerator) continue;
+	for (const {action, accelerator} of entries) {
 		try {
 			// No se trae la ventana al frente: el atajo tiene que funcionar sin robar el foco
 			// (si no, "compartir la ventana enfocada" no tendría sentido).
-			const ok = globalShortcut.register(accelerator, () => sendToRenderer('pelacord:hotkey', {action}));
+			const ok = globalShortcut.register(accelerator, () => fireHotkey(action));
 			if (ok) registeredHotkeys.push(accelerator);
 			else failed.push({action, accelerator});
 		} catch {
@@ -2083,6 +2095,11 @@ function registerHotkeys(bindings) {
 }
 
 ipcMain.handle('pelacord:set-hotkeys', (_event, bindings) => registerHotkeys(bindings));
+ipcMain.on('pelacord:recording-hotkey', (event, recording) => {
+	if (event.sender !== mainWindow?.webContents) return;
+	recordingHotkey = recording === true;
+	windowsHotkeys?.setPaused(recordingHotkey);
+});
 
 /** Colores de la barra de título, para que siga el tema elegido. */
 ipcMain.on('pelacord:set-titlebar', (_event, payload) => {
@@ -2380,7 +2397,7 @@ ipcMain.handle('pelacord:download-file', async (_event, payload) => {
 	}
 });
 
-let selectedSourceId = null;
+let selectedCapture = null;
 
 ipcMain.handle('pelacord:desktop-sources', async () => {
 	try {
@@ -2402,8 +2419,10 @@ ipcMain.handle('pelacord:desktop-sources', async () => {
 	}
 });
 
-ipcMain.on('pelacord:select-source', (_event, id) => {
-	selectedSourceId = typeof id === 'string' ? id : null;
+ipcMain.handle('pelacord:select-source', (event, id) => {
+	if (event.sender !== mainWindow?.webContents || !event.senderFrame || typeof id !== 'string' || !/^(screen|window):/.test(id)) return false;
+	selectedCapture = {id, frame: event.senderFrame.frameTreeNodeId, expiresAt: Date.now() + 7000};
+	return true;
 });
 
 const gotLock = app.requestSingleInstanceLock();
@@ -2416,22 +2435,31 @@ if (!gotLock) {
 	});
 
 	app.whenReady().then(() => {
+		if (process.platform === 'win32') app.setAppUserModelId('app.pelacord.desktop');
 		// yt-dlp se actualiza solo (canal nightly) al arrancar y cada 6 h: YouTube cambia seguido
 		// y un binario viejo deja de funcionar. Es best-effort: nunca bloquea ni molesta.
 		if (app.isPackaged) {
 			void updateYtDlp();
 			setInterval(() => void updateYtDlp(), 6 * 60 * 60 * 1000);
 		}
-		session.defaultSession.setDisplayMediaRequestHandler(async (_request, callback) => {			try {
-				const sources = await desktopCapturer.getSources({types: ['screen', 'window']});
-				const chosen = (selectedSourceId && sources.find((source) => source.id === selectedSourceId)) || sources[0];
+		session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+			const choice = selectedCapture;
+			if (!choice || request.frame?.frameTreeNodeId !== choice.frame || choice.expiresAt < Date.now()) {
+				callback(null);
+				return;
+			}
+			selectedCapture = null;
+			try {
+				const type = choice.id.startsWith('screen:') ? 'screen' : 'window';
+				const sources = await desktopCapturer.getSources({types: [type], thumbnailSize: {width: 0, height: 0}});
+				const chosen = sources.find((source) => source.id === choice.id);
 				if (!chosen) {
-					callback({});
+					callback(null);
 					return;
 				}
-				callback({video: chosen, audio: 'loopback'});
+				callback(request.audioRequested && process.platform === 'win32' ? {video: chosen, audio: 'loopback'} : {video: chosen});
 			} catch {
-				callback({});
+				callback(null);
 			}
 		});
 		try {
@@ -2467,6 +2495,7 @@ app.on('before-quit', () => {
 
 // Los atajos globales hay que darlos de baja al salir.
 app.on('will-quit', () => {
+	windowsHotkeys?.stop();
 	try {
 		globalShortcut.unregisterAll();
 	} catch {

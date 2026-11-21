@@ -313,6 +313,7 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	// AHORA (si está online) y, si no, lo que quedó guardado en el mensaje. El cuidado con el
 	// puerto 0 está en attachmentFileUrl (si no, la imagen se mostraba como "descargar").
 	const url = attachmentFileUrl(attachment, state.members);
+	const isGif = attachment.kind === 'image' && (attachment.mime?.split(';', 1)[0].toLowerCase() === 'image/gif' || /\.gif$/i.test(attachment.name));
 	const failed = previewFailure === url;
 	const text = previewText?.url === url ? previewText.text : null;
 
@@ -386,15 +387,15 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 	if (attachment.kind === 'image' && url && !failed) {
 		preview = (
 			<>
-				<button type="button" className="attachment-image" aria-label={`Ampliar ${attachment.name}`} onClick={() => setZoom(true)}>
-					<img src={url} alt={attachment.name} loading="lazy" onError={() => setPreviewFailure(url)} />
+				<button type="button" className="attachment-image" aria-label={isGif ? 'Ampliar GIF' : `Ampliar ${attachment.name}`} onClick={() => setZoom(true)}>
+					<img src={url} alt={isGif ? 'GIF animado' : attachment.name} loading="lazy" onError={() => setPreviewFailure(url)} />
 				</button>
 				{zoom ? (
 					<div className="lightbox" onClick={() => setZoom(false)}>
 						<button type="button" autoFocus className="lightbox-close" aria-label="Cerrar imagen" onKeyDown={(event) => { if (event.key === 'Escape') setZoom(false); }}>
 							<Icon name="x" size={22} />
 						</button>
-						<img src={url} alt={attachment.name} />
+						<img src={url} alt={isGif ? 'GIF animado' : attachment.name} />
 					</div>
 				) : null}
 			</>
@@ -427,6 +428,12 @@ function AttachmentView({attachment}: {attachment: Attachment}): JSX.Element {
 				<pre className="code-card-body">{text ?? 'Cargando…'}</pre>
 			</div>
 		);
+	}
+
+	if (isGif) {
+		return <div className="chat-gif">{preview ?? (url ? (
+			<button type="button" className="button secondary" onClick={() => setPreviewFailure(null)}>Volver a cargar el GIF</button>
+		) : <span className="chat-gif-unavailable">GIF no disponible</span>)}</div>;
 	}
 
 	const percent = progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : 0;

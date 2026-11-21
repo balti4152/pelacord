@@ -16,7 +16,7 @@ import {hasChosenName} from '@/lib/identity';
 import {attachFiles} from '@/lib/attach';
 import {voiceMesh} from '@/lib/media';
 import {initUpdater} from '@/lib/updater';
-import {prepareShare} from '@/lib/screenShare';
+import {DEFAULT_SHARE_OPTIONS, findShareSource, type ShareKind, type ShareOptions} from '@/lib/screenShare';
 import {subscribeSharePicker} from '@/lib/sharePicker';
 import {playSound} from '@/lib/sounds';
 import {useStore} from '@/state/store';
@@ -74,6 +74,7 @@ export function App(): JSX.Element {
 	}, [dispatch]);
 
 	const showStage = state.voice.channelId !== null && state.voice.stageOpen;
+	const shareChannel = state.channels.find(({id}) => id === state.voice.channelId);
 	const showMembers = !showStage && !musicOpen && !moviesOpen && state.settings.showMembers;
 	useEffect(() => {
 		if (!droppedFiles || showStage || musicOpen || moviesOpen) return;
@@ -87,17 +88,11 @@ export function App(): JSX.Element {
 		voiceMesh.setRoom(state.me.id, channelId, voiceSessionId(joinedAt), channelId ? (state.voiceMembers[channelId] ?? []) : []);
 	}, [state.me.id, state.voice.channelId, state.voice.joinedAt, state.voiceMembers]);
 
-	// Compartir pantalla.
 	useEffect(() => {
-		if (!isDesktop()) return;
-		let active = true;
-		if (state.voice.sharing && state.voice.channelId) {
-			void voiceMesh.startScreen().then((started) => {
-				if (active && !started) dispatch({type: 'setSharing', sharing: false});
-			});
-		} else voiceMesh.stopScreen();
-		return () => { active = false; };
-	}, [dispatch, state.voice.channelId, state.voice.sharing]);
+		if (isDesktop() && !state.voice.sharing) voiceMesh.stopScreen();
+	}, [state.voice.sharing]);
+
+	useEffect(() => setSharePickerOpen(false), [state.voice.joinedAt]);
 
 	// Si la captura termina SOLA (el usuario aprieta "Dejar de compartir" en la barra del sistema, o
 	// cierra la ventana que estaba compartiendo), la app tiene que enterarse. Si no, queda para
@@ -169,17 +164,43 @@ export function App(): JSX.Element {
 	/** ¿Estoy compartiendo pantalla? Se guarda en un ref para que los atajos lo lean siempre al día. */
 	const sharingRef = useRef(state.voice.sharing);
 	sharingRef.current = state.voice.sharing;
+	const shareSession = useRef<string | undefined>();
+	shareSession.current = state.voice.channelId ? voiceSessionId(state.voice.joinedAt) : undefined;
+	const captureStarting = useRef(false);
+
+	async function startShare(sourceId: string, options: ShareOptions): Promise<boolean> {
+		const session = shareSession.current;
+		if (!session || sharingRef.current || captureStarting.current) return false;
+		captureStarting.current = true;
+		voiceMesh.setScreenOptions(options);
+		try {
+			const started = await voiceMesh.startScreen(sourceId);
+			if (!started || session !== shareSession.current) return false;
+			sharingRef.current = true;
+			dispatch({type: 'setSharing', sharing: true});
+			setSharePickerOpen(false);
+			return true;
+		} catch {
+			voiceMesh.stopScreen();
+			return false;
+		} finally {
+			captureStarting.current = false;
+		}
+	}
 
 	/**
 	 * Comparte (o corta la transmisión) sin selector. `kind` decide qué se transmite:
 	 * el monitor principal o la ventana que estaba adelante.
 	 */
-	async function toggleShare(kind: 'screen' | 'window'): Promise<void> {
+	async function toggleShare(kind: ShareKind): Promise<void> {
 		if (sharingRef.current) {
-			dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+			dispatch({type: 'setSharing', sharing: false});
 			return;
 		}
-		if (await prepareShare(kind)) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
+		const session = shareSession.current;
+		if (!session || captureStarting.current) return;
+		const source = await findShareSource(kind);
+		if (source && session === shareSession.current) await startShare(source.id, DEFAULT_SHARE_OPTIONS);
 	}
 
 	// Atajos globales (funcionan aunque la app esté en segundo plano).
@@ -232,15 +253,14 @@ export function App(): JSX.Element {
 			<RemoteAudio />
 			<FloatingStream />
 			{settingsOpen ? <SettingsModal onClose={() => setSettingsOpen(false)} /> : null}
-			{sharePickerOpen ? (
+			{sharePickerOpen && shareChannel ? (
 				<ScreenSharePicker
-					onCancel={() => setSharePickerOpen(false)}
-					onPick={(sourceId, options) => {
+					channelName={shareChannel.name}
+					onCancel={() => {
+						if (captureStarting.current) voiceMesh.stopScreen();
 						setSharePickerOpen(false);
-						getDesktopTransport()?.selectSource(sourceId);
-						voiceMesh.setScreenOptions(options);
-						if (!sharingRef.current) dispatch({type: 'toggleVoiceFlag', flag: 'sharing'});
 					}}
+					onPick={startShare}
 				/>
 			) : null}
 			{dragging ? (

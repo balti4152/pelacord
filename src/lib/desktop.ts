@@ -83,7 +83,8 @@ interface DesktopTransport {
 	getPeers(): Promise<string[]>;
 	getNetworkInfo(): Promise<{addresses: string[]; manual: string; connected: number}>;
 	setNetworkPeers(value: string): Promise<{ok: boolean; error?: string}>;
-	getDesktopSources(): Promise<DesktopSource[]>;	selectSource(id: string): void;
+	getDesktopSources(): Promise<DesktopSource[]>;
+	selectSource(id: string): Promise<boolean>;
 	getFileEndpoint(): Promise<{host: string; port: number}>;
 	/** Preview de un link (título, descripción, imagen). Se baja desde el proceso principal. */
 	getLinkPreview(url: string): Promise<LinkPreviewData | null>;
@@ -135,6 +136,7 @@ interface DesktopTransport {
 	setLoginItem(enabled: boolean): Promise<boolean>;
 	/** Registra los atajos globales; devuelve los que no se pudieron usar. */
 	setHotkeys(bindings: Array<{action: string; accelerator: string}>): Promise<Array<{action: string; accelerator: string}>>;
+	setRecordingHotkey(recording: boolean): void;
 	/** Avisa cuando el usuario aprieta un atajo global. */
 	onHotkey(callback: (message: {action: string}) => void): () => void;
 	/** Globito sobre el ícono de la barra de tareas (dataUrl vacío = sacarlo). */

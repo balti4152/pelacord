@@ -1,5 +1,4 @@
-import {getDesktopTransport} from '@/lib/desktop';
-import {voiceMesh} from '@/lib/media';
+import {getDesktopTransport, type DesktopSource} from '@/lib/desktop';
 
 /**
  * Calidad fija de la transmisión: 1080p a 60 fps.
@@ -7,7 +6,15 @@ import {voiceMesh} from '@/lib/media';
  * No hay selector de pantalla: se comparte directo. Si querés otra ventana, el atajo de
  * "compartir la ventana enfocada" toma la que tenías adelante.
  */
-const SCREEN_OPTIONS = {width: 1920, height: 1080, frameRate: 60, audio: false};
+export interface ShareOptions {
+	width: number;
+	height: number;
+	frameRate: number;
+	audio: boolean;
+	maxBitrate: number;
+}
+
+export const DEFAULT_SHARE_OPTIONS: ShareOptions = {width: 1920, height: 1080, frameRate: 60, audio: true, maxBitrate: 14_000_000};
 
 export type ShareKind = 'screen' | 'window';
 
@@ -20,21 +27,13 @@ export type ShareKind = 'screen' | 'window';
  * Devuelve false si no hay nada para compartir. Ojo: NO trae la ventana al frente, porque si no
  * "compartir la ventana enfocada" perdería el sentido.
  */
-export async function prepareShare(kind: ShareKind): Promise<boolean> {
+export async function findShareSource(kind: ShareKind): Promise<DesktopSource | null> {
 	const transport = getDesktopTransport();
-	if (!transport) return false;
+	if (!transport) return null;
 	try {
 		const sources = await transport.getDesktopSources();
-		const target =
-			kind === 'window'
-				? (sources.find((source) => source.kind === 'window') ?? sources[0])
-				: (sources.find((source) => source.kind === 'screen') ?? sources[0]);
-		if (!target) return false;
-		transport.selectSource(target.id);
-		voiceMesh.setScreenOptions(SCREEN_OPTIONS);
-		return true;
+		return sources.find((source) => source.kind === kind) ?? null;
 	} catch {
-		// Sin fuentes disponibles: no pasa nada.
-		return false;
+		return null;
 	}
 }

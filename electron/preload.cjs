@@ -51,7 +51,7 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	setNetworkPeers: (value) => ipcRenderer.invoke('pelacord:set-network-peers', value),
 	getPeers: () => ipcRenderer.invoke('pelacord:peers'),
 	getDesktopSources: () => ipcRenderer.invoke('pelacord:desktop-sources'),
-	selectSource: (id) => ipcRenderer.send('pelacord:select-source', id),
+	selectSource: (id) => ipcRenderer.invoke('pelacord:select-source', id),
 	getFileEndpoint: () => ipcRenderer.invoke('pelacord:file-endpoint'),
 	/** Preview de un link (título, descripción, imagen). */
 	getLinkPreview: (url) => ipcRenderer.invoke('pelacord:link-preview', url),
@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld('pelacordTransport', {
 	getLoginItem: () => ipcRenderer.invoke('pelacord:get-login-item'),
 	setLoginItem: (enabled) => ipcRenderer.invoke('pelacord:set-login-item', enabled),
 	setHotkeys: (bindings) => ipcRenderer.invoke('pelacord:set-hotkeys', bindings),
+	setRecordingHotkey: (recording) => ipcRenderer.send('pelacord:recording-hotkey', recording),
 	onHotkey: (callback) => {
 		const handler = (_event, message) => callback(message);
 		ipcRenderer.on('pelacord:hotkey', handler);

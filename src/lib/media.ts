@@ -15,7 +15,7 @@ export interface MeshRemote {
 export interface MeshTransport {
 	onSignal(callback: (message: {from: string; payload: unknown}) => void): () => void;
 	sendSignal(to: string, payload: unknown): void;
-	selectSource?(id: string): void;
+	selectSource?(id: string): Promise<boolean>;
 }
 
 type SignalPayload = {
@@ -92,11 +92,12 @@ export class VoiceMesh {
 		width: 1920,
 		height: 1080,
 		frameRate: 60,
-		audio: false,
+		audio: true,
 	};
 	private peerVolumes: Record<string, number> = {};
 	private local: MediaStream | null = null;
 	private screen: MediaStream | null = null;
+	private screenMix: {mic?: MediaStreamTrack; system: MediaStreamTrack; output: MediaStream; nodes: AudioNode[]} | null = null;
 	private audioContext: AudioContext | null = null;
 	private analysers = new Map<string, {source: MediaStreamAudioSourceNode; analyser: AnalyserNode; data: Uint8Array}>();
 	private speaking = new Set<string>();
@@ -234,6 +235,7 @@ export class VoiceMesh {
 		this.local = null;
 		this.screen?.getTracks().forEach((track) => track.stop());
 		this.screen = null;
+		this.clearScreenMix();
 		this.analysers.clear();
 		this.speaking.clear();
 		if (this.speakingTimer) {
@@ -260,10 +262,6 @@ export class VoiceMesh {
 
 	isDeafened(): boolean {
 		return this.deafened;
-	}
-
-	setScreenAudio(enabled: boolean): void {
-		this.screenOptions = {...this.screenOptions, audio: enabled};
 	}
 
 	setScreenOptions(options: {width?: number; height?: number; frameRate?: number; audio?: boolean; maxBitrate?: number}): void {
@@ -310,13 +308,6 @@ export class VoiceMesh {
 	 * midiendo, y antes se perdía en un catch vacío.
 	 */
 	private senders = new Map<string, {voice?: RTCRtpSender; screen?: RTCRtpSender}>();
-
-	/** Cambia la pista de un rol (si ese canal todavía no existe, no hace nada). */
-	private async replace(peerId: string, kind: 'voice' | 'screen', track: MediaStreamTrack | null): Promise<void> {
-		const sender = this.senders.get(peerId)?.[kind];
-		if (!sender) return;
-		await sender.replaceTrack(track).catch(() => {});
-	}
 
 	getInputDeviceId(): string {
 		return this.inputDeviceId;
@@ -370,9 +361,10 @@ export class VoiceMesh {
 
 	async startScreen(sourceId?: string): Promise<boolean> {
 		const transport = this.getTransport();
-		if (sourceId && transport) transport.selectSource?.(sourceId);
 		if (!this.screen) {
 			const generation = ++this.screenGeneration;
+			if (sourceId && !(await transport?.selectSource?.(sourceId))) return false;
+			if (generation !== this.screenGeneration) return false;
 			const {width, height, frameRate, audio} = this.screenOptions;
 			const stream = await navigator.mediaDevices
 				.getDisplayMedia({
@@ -388,7 +380,16 @@ export class VoiceMesh {
 				stream?.getTracks().forEach((track) => track.stop());
 				return false;
 			}
+			if (!stream?.getVideoTracks().some((track) => track.readyState === 'live')) {
+				stream?.getTracks().forEach((track) => track.stop());
+				return false;
+			}
 			this.screen = stream;
+			for (const track of stream.getAudioTracks()) {
+				track.addEventListener('ended', () => {
+					if (this.screen === stream) void this.ensureTracksOnAll();
+				}, {once: true});
+			}
 		}
 		const screen = this.screen;
 		if (!screen) return false;
@@ -416,11 +417,44 @@ export class VoiceMesh {
 		const stream = this.screen;
 		if (!stream) return;
 		this.screen = null;
-		// Se deja de mandar por el canal de pantalla (sin renegociar): el otro lado lo detecta por
-		// el "mute" de la pista y esconde el video.
-		for (const peerId of this.pcs.keys()) void this.replace(peerId, 'screen', null);
 		for (const track of stream.getTracks()) track.stop();
+		this.clearScreenMix();
+		void this.ensureTracksOnAll();
 		this.emit();
+	}
+
+	private clearScreenMix(): void {
+		if (!this.screenMix) return;
+		for (const node of this.screenMix.nodes) node.disconnect();
+		for (const track of this.screenMix.output.getTracks()) track.stop();
+		this.screenMix = null;
+	}
+
+	private outgoingAudio(): MediaStream | null {
+		const system = this.screen?.getAudioTracks().find((track) => track.readyState === 'live');
+		const mic = this.local?.getAudioTracks().find((track) => track.readyState === 'live');
+		if (!system) {
+			this.clearScreenMix();
+			return this.local;
+		}
+		if (this.screenMix?.mic === mic && this.screenMix?.system === system) return this.screenMix.output;
+		this.clearScreenMix();
+		const context = this.ensureAudioContext();
+		const output = context.createMediaStreamDestination();
+		output.channelCount = 1;
+		const nodes: AudioNode[] = [];
+		const add = (track: MediaStreamTrack, level: number) => {
+			const source = context.createMediaStreamSource(new MediaStream([track]));
+			const gain = context.createGain();
+			gain.gain.value = level;
+			source.connect(gain).connect(output);
+			nodes.push(source, gain);
+		};
+		// La mezcla va únicamente al sender. La salida local nunca reproduce su propio loopback.
+		if (mic) add(mic, 0.8);
+		add(system, 0.6);
+		this.screenMix = {mic, system, output: output.stream, nodes};
+		return output.stream;
 	}
 
 	private send(to: string, payload: SignalPayload): void {
@@ -569,10 +603,13 @@ export class VoiceMesh {
 	private async syncTracks(peerId: string, pc: RTCPeerConnection): Promise<void> {
 		if (this.pcs.get(peerId) !== pc) return;
 		const roles = this.senders.get(peerId) ?? {};
-		const voiceTrack = this.local?.getAudioTracks()[0] ?? null;
-		if (voiceTrack && this.local) {
-			if (roles.voice) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
-			else roles.voice = pc.addTrack(voiceTrack, this.local);
+		this.senders.set(peerId, roles);
+		const audio = this.outgoingAudio();
+		const voiceTrack = audio?.getAudioTracks()[0] ?? null;
+		if (roles.voice) {
+			if (roles.voice.track !== voiceTrack) await roles.voice.replaceTrack(voiceTrack).catch(() => {});
+		} else if (voiceTrack && audio) {
+			roles.voice = pc.addTrack(voiceTrack, audio);
 		} else if (this.micUnavailable && this.peerSessions.get(peerId) && this.myId < peerId &&
 			!pc.getTransceivers().some(({receiver}) => receiver.track.kind === 'audio')) {
 			// Aun con el micrófono denegado, quien inicia puede ofrecer recibir la voz del otro.
@@ -580,18 +617,17 @@ export class VoiceMesh {
 		}
 		if (this.pcs.get(peerId) !== pc) return;
 		const screenTrack = this.screen?.getVideoTracks()[0] ?? null;
-		if (screenTrack && this.screen) {
-			if (roles.screen) await roles.screen.replaceTrack(screenTrack).catch(() => {});
-			else {
+		if (roles.screen) {
+			if (roles.screen.track !== screenTrack) await roles.screen.replaceTrack(screenTrack).catch(() => {});
+			if (screenTrack && this.pcs.get(peerId) === pc) this.tuneVideoSender(roles.screen);
+		} else if (screenTrack && this.screen) {
 				roles.screen = pc.addTrack(screenTrack, this.screen);
 				const transceiver = pc.getTransceivers().find((candidate) => candidate.sender === roles.screen);
 				if (transceiver) this.preferH264(transceiver);
 				// El bitrate de la pantalla se aplica cuando el encoding ya existe.
 				this.tuneVideoSender(roles.screen);
 				setTimeout(() => this.tuneVideoSender(roles.screen as RTCRtpSender), 800);
-			}
 		}
-		if (this.pcs.get(peerId) === pc) this.senders.set(peerId, roles);
 	}
 
 	private preferH264(transceiver: RTCRtpTransceiver): void {

@@ -151,6 +151,110 @@ async function playing(peer, title) {
 	return eventually(() => peer.js(`lastAudio?.src.includes('track=' + encodeURIComponent(${JSON.stringify(title)})) && !lastAudio.paused && lastAudio.currentTime > 0`), `playing ${title}`);
 }
 
+async function captureScreenshot(name, peer) {
+	const dir = process.env.PELACORD_TEST_SCREENSHOTS;
+	if (!dir) return;
+	await fs.mkdir(dir, {recursive: true});
+	const {data} = await peer.call('Page.captureScreenshot', {format: 'png'});
+	await fs.writeFile(path.join(dir, `${name}.png`), Buffer.from(data, 'base64'));
+}
+
+async function verifyShareUi(a, b) {
+	await a.js(`Object.defineProperty(navigator.mediaDevices, 'getDisplayMedia', {value: async (options) => {
+		window.lastCaptureOptions = options;
+		const canvas = document.createElement('canvas'); canvas.width = 320; canvas.height = 180;
+		const paint = canvas.getContext('2d'); let tick = 0;
+		paint.fillRect(0, 0, 320, 180);
+		const video = canvas.captureStream(10).getVideoTracks()[0];
+		const context = new AudioContext(); await context.resume();
+		const sound = context.createMediaStreamDestination(); const tone = context.createOscillator();
+		tone.connect(sound); tone.start();
+		const frames = setInterval(() => {
+			if (video.readyState === 'ended') { clearInterval(frames); void context.close(); return; }
+			paint.fillStyle = tick++ % 2 ? '#7459af' : '#34305a'; paint.fillRect(0, 0, 320, 180);
+		}, 100);
+		return new MediaStream([video, ...(options.audio ? sound.stream.getAudioTracks() : [])]);
+	}}); true`);
+	await b.js(`(() => {
+		const context = new AudioContext(); const input = context.createMediaStreamSource(document.querySelector('audio').srcObject);
+		const analyser = context.createAnalyser(); const buf = new Float32Array(analyser.fftSize);
+		input.connect(analyser); void context.resume();
+		window.remoteLevel = () => { analyser.getFloatTimeDomainData(buf); return Math.sqrt(buf.reduce((total, x) => total + x * x, 0) / buf.length); };
+	})()`);
+	await click(a, '.voice-mini[title="Silenciar"]');
+	await eventually(() => b.js('remoteLevel() < 0.012'), 'muted mic baseline');
+	await click(a, '.voice-mini[title="Compartir pantalla"]');
+	await eventually(() => a.js(`document.querySelector('dialog[open] .share-source')?.textContent.includes('Notas de la reunión')`), 'window selector');
+	assert.equal(await a.js(`document.querySelector('.share-primary').disabled`), true);
+	await click(a, '.share-picker-tabs button:nth-child(2)');
+	assert.equal(await a.js(`document.querySelector('.share-source')?.textContent.trim()`), 'Pantalla principal');
+	await click(a, '.share-picker-tabs button:first-child');
+	await click(a, '.share-source');
+	await captureScreenshot('selector-ventanas', a);
+	await click(a, '.share-primary');
+	await eventually(() => a.js(`document.querySelector('.share-audio input')?.checked === true`), 'audio defaults to on');
+	assert.equal(await a.js(`document.querySelector('.share-destination')?.textContent.trim()`), 'General');
+	assert.equal(await a.js(`!document.querySelector('dialog').textContent.includes('Notificar')`), true);
+	await captureScreenshot('configurar-transmision', a);
+	await click(a, '.share-primary');
+	await eventually(() => a.js(`window.lastCaptureOptions?.audio?.restrictOwnAudio === true && !!document.querySelector('.voice-mini[title="Dejar de compartir"]')`), 'capture with audio');
+	await eventually(() => b.js('remoteLevel() > 0.06'), 'screen audio reaches receiver with mic muted');
+	await click(a, '.voice-mini[title="Dejar de compartir"]');
+	await eventually(() => b.js('remoteLevel() < 0.012'), 'audio restored after capture');
+	await click(a, '.voice-mini[title="Compartir pantalla"]');
+	await click(a, '.share-source');
+	await click(a, '.share-primary');
+	await click(a, '.share-audio');
+	await click(a, '.share-primary');
+	await eventually(() => a.js(`window.lastCaptureOptions?.audio === false && !!document.querySelector('.voice-mini[title="Dejar de compartir"]')`), 'capture without audio');
+	assert.ok(await b.js('remoteLevel() < 0.012'));
+	await click(a, '.voice-mini[title="Dejar de compartir"]');
+	await click(a, '.voice-mini[title="Activar micrófono"]');
+	console.log('OK two-step screen sharing with default audio, receiver mix and audio opt-out');
+}
+
+async function verifyHotkeyCoexistence(a, b) {
+	const shortcut = 'Control+Alt+F22';
+	await a.js(`window.hotkeyCount = 0; pelacordTransport.onHotkey(({action}) => { if (action === 'mute') window.hotkeyCount++; }); true`);
+	await b.js(`window.hotkeyCount = 0; pelacordTransport.onHotkey(({action}) => { if (action === 'probe') window.hotkeyCount++; }); true`);
+	assert.deepEqual(await b.js(`pelacordTransport.setHotkeys([{action:'probe', accelerator:'${shortcut}'}])`), []);
+	assert.deepEqual(await a.js(`pelacordTransport.setHotkeys([{action:'mute', accelerator:'${shortcut}'}])`), []);
+	const user32 = require('koffi').load('user32.dll');
+	const keyEvent = user32.func('__stdcall', 'keybd_event', 'void', ['uint8_t', 'uint8_t', 'uint32_t', 'uintptr_t']);
+	const keys = [0x11, 0x12, 0x85];
+	try {
+		for (const key of keys) { keyEvent(key, 0, 0, 0); await delay(20); }
+		await delay(150);
+	} finally {
+		for (const key of keys.reverse()) keyEvent(key, 0, 2, 0);
+	}
+	await Promise.all([a, b].map((peer) => eventually(() => peer.js('window.hotkeyCount === 1'), 'shared Windows hotkey', 3000)));
+	console.log('OK PelaCord and a second process with an exclusive Windows hotkey both receive the chord');
+}
+
+async function verifyNativeCapture(peer) {
+	const requestCapture = async (audio) => {
+		const result = await peer.call('Runtime.evaluate', {awaitPromise: true, returnByValue: true, userGesture: true, expression: `(async () => {
+			try {
+				const stream = await navigator.mediaDevices.getDisplayMedia({video:true, audio:${audio ? '{restrictOwnAudio:true}' : 'false'}});
+				const result = {video: stream.getVideoTracks().length, audio: stream.getAudioTracks().length};
+				stream.getTracks().forEach((track) => track.stop());
+				return result;
+			} catch (error) { return {error:error.name}; }
+		})()`});
+		return result.result.value;
+	};
+	assert.equal(await peer.js(`pelacordTransport.selectSource('window:2147483647:0')`), true);
+	assert.ok((await requestCapture(true)).error, 'a closed source must never fall back to a different screen');
+	const selected = await peer.js(`pelacordTransport.getDesktopSources().then((sources) => {
+		const screen = sources.find(({kind}) => kind === 'screen');
+		return screen ? pelacordTransport.selectSource(screen.id) : false;
+	})`);
+	assert.equal(selected, true);
+	assert.deepEqual(await requestCapture(true), {video:1, audio:1});
+	console.log('OK native Windows capture includes audio and denies invalid sources');
+}
+
 async function run() {
 	const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pelacord-test-'));
 	cleanup.push(() => fs.rm(root, {recursive: true, force: true, maxRetries: 4, retryDelay: 150}));
@@ -220,6 +324,15 @@ async function run() {
 	assert.equal(resumeRange, 'bytes=16384-');
 	assert.deepEqual(await fs.readFile(result.path), bytes);
 	console.log('OK attachment through the chat, Range/HEAD and byte-for-byte resume');
+	if (process.env.PELACORD_TEST_UI) {
+		await a.js(`(() => { const dataTransfer = new DataTransfer(); const bytes = Uint8Array.from(atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'), (x) => x.charCodeAt(0)); dataTransfer.items.add(new File([bytes], 'solo-gif.gif', {type: 'image/gif'})); window.dispatchEvent(new DragEvent('drop', {dataTransfer, bubbles:true,cancelable:true})); })()`);
+		await eventually(() => a.js(`document.querySelector('.composer-attachment-name')?.textContent === 'solo-gif.gif'`), 'staged GIF');
+		await click(a, '[aria-label="Enviar mensaje"]');
+		await eventually(() => b.js(`document.querySelector('.chat-gif img')?.naturalWidth === 1`), 'inline GIF rendered');
+		assert.equal(await b.js(`!document.querySelector('.chat-gif .attachment-file') && !document.querySelector('.chat-gif').textContent.includes('solo-gif')`), true);
+		assert.equal(await b.js(`document.querySelector('.sidebar-logo').naturalWidth > 0 && getComputedStyle(document.querySelector('.channel.is-active')).borderLeftWidth === '0px'`), true);
+		console.log('OK inline GIF, sidebar icon and channel selection without a side line');
+	}
 
 	await join(a, 'General');
 	await join(b, 'General');
@@ -282,6 +395,9 @@ async function run() {
 		});
 	}
 	console.log('OK eight rapid voice round trips, alternating between both peers');
+	if (process.env.PELACORD_TEST_UI) await verifyShareUi(a, b);
+	if (process.env.PELACORD_TEST_NATIVE_SHARE && process.platform === 'win32') await verifyNativeCapture(a);
+	if (process.env.PELACORD_TEST_HOTKEYS && process.platform === 'win32') await verifyHotkeyCoexistence(a, b);
 	if (process.env.PELACORD_TEST_YOUTUBE) {
 		const url = await a.js(`pelacordTransport.getAudioUrl('jNQXAC9IVRw')`);
 		assert.ok(url, 'real YouTube audio resolved');
