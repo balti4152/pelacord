@@ -407,7 +407,27 @@ function appIconPath() {
 	return fs.existsSync(png) ? png : null;
 }
 
+/**
+ * Después de una actualización, Windows a veces sigue mostrando el ícono viejo guardado en su caché
+ * (el de Electron por defecto). La primera vez que arranca cada versión nueva se le pide que refresque
+ * los íconos (una sola vez, en segundo plano).
+ */
+function refreshIconCacheOnUpdate() {
+	if (process.platform !== 'win32' || !app.isPackaged) return;
+	try {
+		const marker = path.join(app.getPath('userData'), 'icon-version.txt');
+		const seen = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf8').trim() : '';
+		if (seen === app.getVersion()) return;
+		fs.writeFileSync(marker, app.getVersion());
+		const tool = path.join(process.env.WINDIR || 'C:\Windows', 'System32', 'ie4uinit.exe');
+		if (fs.existsSync(tool)) spawn(tool, ['-show'], {windowsHide: true, detached: true, stdio: 'ignore'}).unref();
+	} catch (error) {
+		console.error('[pelacord] refresh icon cache', String(error));
+	}
+}
+
 function createWindow() {
+	refreshIconCacheOnUpdate();
 	const iconPath = appIconPath();
 	// Si arrancó con la PC (--hidden), se abre directo en la bandeja sin molestar.
 	const startHidden = process.argv.includes('--hidden');
