@@ -22,6 +22,9 @@ import {type Anim, type Catalog, type Emote, HOUSE_GLB, type Look, type PlacedFu
 import {GardenView} from '@/world/gardenView';
 import {type FarmAction, type FarmLand, inLot} from '@/world/farmData';
 import {RoomEffects} from '@/world/roomEffects';
+import {buildExitDoor, EXIT_DOORS} from '@/world/exitDoor';
+import {buildRadio} from '@/world/radio';
+import {nearestMachine, upgradeCasino} from '@/world/casinoDecor';
 import type {Spin} from '@/world/casino';
 import {iconSvg} from '@/world/icons';
 
@@ -57,9 +60,9 @@ const BOUNDS: Record<string, Bounds> = {
 	city: box(-24, 24, -11.5, 23.6, [{x: 0, z: 0, r: 2.05}]),
 	living: box(-3.6, 3.6, -3.3, 3.1, [{x: 0.1, z: 0.1, r: 0.6}]),
 	cinema: box(-4.1, 4.1, -5.2, 4.0),
-	campfire: {kind: 'circle', minX: 0, maxX: 0, minZ: 0, maxZ: 0, radius: 4.6, obstacles: [{x: 0, z: 0, r: 0.85}]},
+	campfire: {kind: 'circle', minX: 0, maxX: 0, minZ: 0, maxZ: 0, radius: 4.6, obstacles: [{x: 0, z: 0, r: 0.85}, {x: 0, z: 3.05, r: 0.45}]},
 	shop: box(-4.6, 4.6, -4.4, 2.6),
-	games: box(-4.6, 4.6, -4.2, 4.1, [{x: 0, z: 0.5, r: 1.3}]),
+	games: box(-4.6, 4.6, -4.2, 4.1, [{x: 0, z: 0.5, r: 1.3}, {x: -0.95, z: 4.2, r: 0.55}, {x: -2.05, z: 4.2, r: 0.55}]),
 	port: {
 		...box(-7.2, 7.2, -5.0, 3.6, [{x: 4.8, z: -2.35, r: 1.45}, {x: -6.2, z: -4.5, r: 0.6}, {x: -4.9, z: -4.9, r: 0.4}, {x: 6.7, z: -4.6, r: 0.4}, {x: 3.0, z: -1.7, r: 0.45}]),
 		rects: [[-7.2, 7.2, -5.0, -1.6], [-2.55, -0.45, -1.6, 3.6]],
@@ -231,6 +234,7 @@ export class WorldEngine {
 	private doors: Door[] = [];
 	private hotspots: Array<{kind: string; pos: THREE.Vector3}> = [];
 	private exitPoint: THREE.Vector3 | null = null;
+	private exitDoorSpot: THREE.Vector3 | null = null;
 	private tvPoint: THREE.Vector3 | null = null;
 	private npcs: Npcs;
 	private pets = new CityPets();
@@ -396,6 +400,53 @@ export class WorldEngine {
 				});
 			});
 		}
+		// La sala de juegos no traía tele: se pone la de la tienda, más grande, contra la pared del fondo.
+		if (room === 'games') {
+			const tvModel = await loadGLB('models/furniture/tv.glb').catch(() => null);
+			if (token !== this.loadToken || this.disposed) return;
+			if (tvModel) {
+				const tvObj = tvModel.scene.clone(true);
+				tvObj.position.set(-1.5, 0, 4.15);
+				tvObj.rotation.y = Math.PI;
+				tvObj.scale.setScalar(1.25);
+				// Girada 180°, su pantalla quedaba espejada: se dan vuelta las coordenadas de la imagen.
+				const tvScreen = tvObj.getObjectByName('Screen') as THREE.Mesh | undefined;
+				if (tvScreen?.isMesh) {
+					tvScreen.geometry = tvScreen.geometry.clone();
+					planarScreenUv(tvScreen.geometry);
+					const uv = tvScreen.geometry.attributes.uv as THREE.BufferAttribute;
+					for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+					uv.needsUpdate = true;
+				}
+				this.prepareScene(tvObj, true);
+				scene.add(tvObj);
+				scene.updateMatrixWorld(true);
+			}
+		}
+		// El casino: tres tragamonedas finitas en lugar de la gorda, y sin lámparas tapando carteles.
+		if (room === 'casino') upgradeCasino(scene);
+		// El campamento: una radio sobre un tronco (sólo música).
+		if (room === 'campfire') {
+			const radio = buildRadio();
+			radio.position.set(0, 0, 3.05);
+			radio.rotation.y = Math.PI;
+			scene.add(radio);
+			scene.updateMatrixWorld(true);
+		}
+		this.fixtures.clear();
+		this.ghostFixture = null;
+		if (isHouse) this.collectFixtures(scene);
+		// La puerta de SALIDA (pared izquierda, cerca de la entrada).
+		this.exitDoorSpot = null;
+		const exitSpot = EXIT_DOORS[isHouse ? 'house' : room];
+		if (exitSpot) {
+			const door = buildExitDoor(exitSpot.color);
+			door.position.set(exitSpot.x, 0, exitSpot.z);
+			door.rotation.y = Math.PI / 2;
+			scene.add(door);
+			scene.updateMatrixWorld(true);
+			this.exitDoorSpot = new THREE.Vector3(exitSpot.x, 0, exitSpot.z);
+		}
 		this.screenMesh = (scene.getObjectByName('Screen') as THREE.Mesh) ?? null;
 		this.screenOriginal = this.screenMesh ? (this.screenMesh.material as THREE.Material) : null;
 		if (this.screenMesh) planarScreenUv(this.screenMesh.geometry);
@@ -403,14 +454,14 @@ export class WorldEngine {
 		if (this.screenMesh) {
 			const p = new THREE.Vector3();
 			this.screenMesh.getWorldPosition(p);
-			this.tvPoint = this.clamp(new THREE.Vector3(p.x, 0, p.z - 1.4));
+			this.tvPoint = this.clamp(new THREE.Vector3(p.x, 0, p.z - (room === 'campfire' ? 0.8 : 1.4)));
 		}
 		this.screenKey = '';
 		this.applyScreen();
 		const table = scene.getObjectByName('GameTable');
 		this.tableCenter = table ? table.getWorldPosition(new THREE.Vector3()) : null;
 		this.tableRoot.position.copy(this.tableCenter ?? new THREE.Vector3(0, -50, 0));
-		this.exitPoint = room === 'city' ? null : this.clamp(new THREE.Vector3(this.spawn.x, 0, this.spawn.z - 0.7));
+		this.exitPoint = room === 'city' ? null : this.exitDoorSpot ? this.clamp(this.exitDoorSpot.clone().add(new THREE.Vector3(0.75, 0, 0))) : this.clamp(new THREE.Vector3(this.spawn.x, 0, this.spawn.z - 0.7));
 		this.npcs.setup(room, scene, (p) => this.clamp(p));
 		// Mascotas salvajes: cada lugar tiene la suya (y aparecen muy de vez en cuando).
 		this.roomGroup.add(this.pets.root);
@@ -608,7 +659,7 @@ export class WorldEngine {
 
 	async setHouse(items: PlacedFurniture[]): Promise<void> {
 		const token = this.loadToken;
-		const placed = items.filter((i) => i.x !== null && i.z !== null);
+		const placed = items.filter((i) => i.x !== null && i.z !== null && !i.id.startsWith('fixture:'));
 		const models = await Promise.all(placed.map((item) => {
 			const def = this.catalog.items.find((c) => c.id === item.id);
 			return def?.glb ? loadGLB(def.glb).catch(() => null) : Promise.resolve(null);
@@ -634,6 +685,8 @@ export class WorldEngine {
 			this.collectSeats(obj, `${item.uid}:`);
 		});
 		this.occlusion.setFurniture(this.furnitureGroup.children);
+		this.lastHouse = items;
+		this.applyFixtures(items);
 	}
 
 	private recolor(obj: THREE.Object3D, hex: string): void {
@@ -974,12 +1027,135 @@ export class WorldEngine {
 		this.musicOn = on;
 	}
 
+	private partyMode = false;
+
+	/** Modo joda de la tele de esta sala (bola de boliche y luces). */
+	setPartyMode(on: boolean): void {
+		this.partyMode = on;
+	}
+
 	setScreening(on: boolean): void {
 		this.screening = on;
 	}
 
-	playCasino(spin: Spin): void {
-		this.effects.play(spin);
+	playCasino(spin: Spin, who: string = this.meId): void {
+		const actor = who === this.meId ? this.me : this.others.get(who);
+		this.effects.play(spin, nearestMachine(actor?.pos.x ?? 4.65));
+	}
+
+	/**
+	 * Globito de pensamiento arriba de alguien que apostó: la ficha con el monto y a qué apostó.
+	 * Cuando sale el resultado: si ganó, confeti y festejo; si no, se va solo.
+	 */
+	casinoBubble(id: string, bets: Array<{label: string; stake: number; tone?: string}>, payout: number, total: number, delayMs: number): void {
+		const actor = id === this.meId ? this.me : this.others.get(id);
+		if (!actor) return;
+		const old = this.betBubbles.get(id);
+		if (old) {
+			window.clearTimeout(old.timer);
+			old.obj.removeFromParent();
+		}
+		const anchor = document.createElement('div');
+		anchor.className = 'w-pop-anchor';
+		const el = document.createElement('div');
+		el.className = 'w-bet';
+		const list = document.createElement('div');
+		list.className = 'w-bet-list';
+		for (const bet of bets.slice(0, 4)) {
+			const row = document.createElement('span');
+			row.className = 'w-bet-row';
+			const chip = document.createElement('i');
+			chip.className = 'w-bet-chip';
+			chip.textContent = String(bet.stake);
+			const label = document.createElement('b');
+			label.textContent = bet.label;
+			if (bet.tone) label.dataset.tone = bet.tone;
+			row.append(chip, label);
+			list.append(row);
+		}
+		if (bets.length > 4) {
+			const more = document.createElement('small');
+			more.textContent = `y ${bets.length - 4} más`;
+			list.append(more);
+		}
+		const dots = document.createElement('span');
+		dots.className = 'w-bet-dots';
+		dots.innerHTML = '<i></i><i></i>';
+		el.append(list, dots);
+		anchor.append(el);
+		const obj = new CSS2DObject(anchor);
+		obj.position.set(0, 2.25, 0);
+		actor.avatar.root.add(obj);
+		const finish = () => {
+			const won = payout > total;
+			const result = document.createElement('div');
+			result.className = `w-bet-result ${won ? 'is-win' : payout === total && payout > 0 ? 'is-even' : 'is-lose'}`;
+			result.textContent = won ? `¡Ganó ${payout}!` : payout === total && payout > 0 ? 'Recuperó' : 'Perdió';
+			el.append(result);
+			el.classList.add(won ? 'is-win' : 'is-done');
+			if (won) {
+				this.confetti(actor.pos);
+				this.emote(id, 'cheer');
+			}
+			const timer = window.setTimeout(() => {
+				obj.removeFromParent();
+				if (this.betBubbles.get(id)?.obj === obj) this.betBubbles.delete(id);
+			}, won ? 4200 : 2600);
+			this.betBubbles.set(id, {obj, timer});
+		};
+		const timer = window.setTimeout(finish, delayMs);
+		this.betBubbles.set(id, {obj, timer});
+	}
+
+	private betBubbles = new Map<string, {obj: CSS2DObject; timer: number}>();
+
+	/** Lluvia de papelitos de colores arriba de alguien. */
+	confetti(at: THREE.Vector3): void {
+		const count = 90;
+		const colors = [0xff4fa8, 0xffd23f, 0x38d39f, 0x4fb3ff, 0x8a5cff, 0xff7350];
+		const pieces = new THREE.InstancedMesh(new THREE.PlaneGeometry(0.07, 0.11), new THREE.MeshBasicMaterial({side: THREE.DoubleSide, toneMapped: false}), count);
+		pieces.frustumCulled = false;
+		const state = Array.from({length: count}, (_, i) => {
+			const a = Math.random() * Math.PI * 2;
+			const sp = 1.2 + Math.random() * 2.2;
+			pieces.setColorAt(i, new THREE.Color(colors[i % colors.length]));
+			return {p: new THREE.Vector3(at.x, 2.3, at.z), v: new THREE.Vector3(Math.cos(a) * sp, 3 + Math.random() * 3, Math.sin(a) * sp), r: new THREE.Euler(Math.random() * 6, Math.random() * 6, 0), w: (Math.random() - 0.5) * 14};
+		});
+		this.scene.add(pieces);
+		const pose = new THREE.Object3D();
+		const born = performance.now();
+		let last = born;
+		const tick = () => {
+			const now = performance.now();
+			const dt = Math.min(0.05, (now - last) / 1000);
+			last = now;
+			const age = (now - born) / 1000;
+			state.forEach((s, i) => {
+				s.v.y -= 6.5 * dt;
+				s.v.multiplyScalar(1 - 1.6 * dt);
+				s.p.addScaledVector(s.v, dt);
+				if (s.p.y < 0.03) {
+					s.p.y = 0.03;
+					s.v.set(0, 0, 0);
+				}
+				s.r.x += s.w * dt;
+				s.r.y += s.w * 0.7 * dt;
+				pose.position.copy(s.p);
+				pose.rotation.copy(s.r);
+				pose.scale.setScalar(Math.max(0.001, Math.min(1, (3.2 - age) / 0.6)));
+				pose.updateMatrix();
+				pieces.setMatrixAt(i, pose.matrix);
+			});
+			pieces.instanceMatrix.needsUpdate = true;
+			if (pieces.instanceColor) pieces.instanceColor.needsUpdate = true;
+			if (age < 3.2) requestAnimationFrame(tick);
+			else {
+				pieces.removeFromParent();
+				pieces.geometry.dispose();
+				pieces.material.dispose();
+			}
+		};
+		tick();
 	}
 
 	setGarden(land: FarmLand | null, action: FarmAction): void {
@@ -1123,10 +1299,23 @@ export class WorldEngine {
 
 	setDecorating(item: {id: string; color?: string | null; rot: number} | null): void {
 		this.decorating = item;
+		if (this.ghostFixture) {
+			// Se canceló (o terminó) de mover algo fijo de la casa: vuelve a donde dice la casa.
+			this.ghostFixture = null;
+			this.ghost = null;
+			this.applyFixtures(this.lastHouse);
+		}
 		this.ghost?.removeFromParent();
 		this.ghost = null;
 		const token = ++this.ghostToken;
 		if (!item) return;
+		const fixture = item.id.startsWith('fixture:') ? this.fixtures.get(item.id.slice(8)) : undefined;
+		if (fixture) {
+			// La tele, la ventana y la puerta se mueven "de verdad" (pegadas a la pared más cercana).
+			this.ghostFixture = item.id.slice(8);
+			this.ghost = fixture;
+			return;
+		}
 		const def = this.catalog.items.find((c) => c.id === item.id);
 		if (!def?.glb) return;
 		void loadGLB(def.glb).then((gltf) => {
@@ -1149,8 +1338,97 @@ export class WorldEngine {
 		});
 	}
 
+	// ---------------------------------------------- lo fijo de la casa ---
+	// La tele, la ventana y la puerta al patio vienen en el modelo de la casa: se agrupan y se pueden
+	// mover por las paredes (atrás, izquierda o derecha). Viajan en la casa como muebles 'fixture:*'.
+
+	private fixtures = new Map<string, THREE.Group>();
+	private fixtureHome = new Map<string, {x: number; z: number; half: number}>();
+	private ghostFixture: string | null = null;
+	private lastHouse: PlacedFurniture[] = [];
+	private static readonly HOUSE_WALLS = {back: 3.98, left: -4.46, right: 3.96, front: -0.4};
+
+	private collectFixtures(scene: THREE.Object3D): void {
+		this.fixtures.clear();
+		this.fixtureHome.clear();
+		const groups: Array<[string, RegExp, number, number, number]> = [
+			['tv', /^(HouseTvStand|Screen|ScreenFrame)$/, 1.3, 3.98, 1.35],
+			['window', /^(WindowFrame|WindowSky|wstar_\d+)$/, -1.6, 3.98, 1.0],
+			['door', /^(Yard[ _]door([ _](glass|latch|trim))?|Door_yard)$/, -3.13, 3.98, 0.85],
+		];
+		scene.updateMatrixWorld(true);
+		for (const [key, pattern, x, z, half] of groups) {
+			const parts: THREE.Object3D[] = [];
+			scene.traverse((o) => {
+				if (pattern.test(o.name) && !parts.some((p) => p === o.parent)) parts.push(o);
+			});
+			if (!parts.length) continue;
+			const pivot = new THREE.Group();
+			pivot.name = `Fixture_${key}`;
+			pivot.position.set(x, 0, z);
+			scene.add(pivot);
+			pivot.updateMatrixWorld(true);
+			for (const part of parts) pivot.attach(part);
+			this.fixtures.set(key, pivot);
+			this.fixtureHome.set(key, {x, z, half});
+		}
+	}
+
+	/** El punto de la pared más cercano (y hacia dónde mira lo que se cuelga ahí). */
+	private snapFixture(key: string, point: THREE.Vector3): {x: number; z: number; rot: number} {
+		const W = WorldEngine.HOUSE_WALLS;
+		const half = this.fixtureHome.get(key)?.half ?? 1;
+		const dBack = Math.abs(point.z - W.back);
+		const dLeft = Math.abs(point.x - W.left);
+		const dRight = Math.abs(point.x - W.right);
+		const clampZ = (z: number) => Math.min(W.back - half - 0.1, Math.max(W.front + half, z));
+		if (dBack <= dLeft && dBack <= dRight) return {x: Math.min(W.right - half - 0.1, Math.max(W.left + half + 0.1, point.x)), z: W.back, rot: 0};
+		if (dLeft < dRight) return {x: W.left, z: clampZ(point.z), rot: -Math.PI / 2};
+		return {x: W.right, z: clampZ(point.z), rot: Math.PI / 2};
+	}
+
+	/** Pone la tele, la ventana y la puerta donde las dejó el dueño de la casa. */
+	private applyFixtures(items: PlacedFurniture[]): void {
+		if (!this.fixtures.size) return;
+		for (const [key, pivot] of this.fixtures) {
+			if (this.ghostFixture === key) continue;
+			const saved = items.find((i) => i.id === `fixture:${key}` && i.x !== null && i.z !== null);
+			const home = this.fixtureHome.get(key)!;
+			const snap = saved ? this.snapFixture(key, new THREE.Vector3(saved.x as number, 0, saved.z as number)) : {x: home.x, z: home.z, rot: 0};
+			pivot.position.set(snap.x, 0, snap.z);
+			pivot.rotation.y = snap.rot;
+		}
+		this.afterFixturesMoved();
+	}
+
+	/** Lo que depende de dónde están: el lugar para usar la tele y la puerta al patio. */
+	private afterFixturesMoved(): void {
+		this.roomGroup.updateMatrixWorld(true);
+		if (this.screenMesh && this.fixtures.has('tv')) {
+			const p = this.screenMesh.getWorldPosition(new THREE.Vector3());
+			const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(this.fixtures.get('tv')!.quaternion);
+			this.tvPoint = this.clamp(new THREE.Vector3(p.x + dir.x * 1.4, 0, p.z + dir.z * 1.4));
+		}
+		const marker = this.fixtures.get('door')?.getObjectByName('Door_yard');
+		const yard = this.doors.find((d) => d.name === 'yard');
+		if (marker && yard) {
+			marker.getWorldPosition(yard.pos);
+			yard.pos.y = 0;
+			const dir = marker.getWorldDirection(new THREE.Vector3());
+			yard.ry = Math.atan2(dir.x, dir.z);
+		}
+	}
+
+	/** Lo fijo de la casa que tocaste (modo decorar). */
+	private pickFixture(): string | null {
+		for (const [key, pivot] of this.fixtures) {
+			if (this.raycaster.intersectObject(pivot, true).length) return key;
+		}
+		return null;
+	}
+
 	rotateGhost(): void {
-		if (!this.decorating) return;
+		if (!this.decorating || this.ghostFixture) return;
 		worldSounds.play('highlight');
 		this.decorating.rot = (this.decorating.rot + Math.PI / 4) % (Math.PI * 2);
 		if (this.ghost) this.ghost.rotation.y = this.decorating.rot;
@@ -1207,7 +1485,12 @@ export class WorldEngine {
 		}
 		if (!this.ghost) return;
 		const point = this.floorPoint(event);
-		if (point) this.ghost.position.copy(point);
+		if (point && this.ghostFixture) {
+			const snap = this.snapFixture(this.ghostFixture, point);
+			this.ghost.position.set(snap.x, 0, snap.z);
+			this.ghost.rotation.y = snap.rot;
+			this.afterFixturesMoved();
+		} else if (point) this.ghost.position.copy(point);
 	};
 
 	private onWheel = (event: WheelEvent): void => {
@@ -1318,11 +1601,22 @@ export class WorldEngine {
 		this.raycaster.setFromCamera(this.ndc(event), this.camera);
 		if (this.decorating) {
 			const point = this.floorPoint(event);
-			if (point) {
+			if (point && this.ghostFixture) {
+				const snap = this.snapFixture(this.ghostFixture, point);
+				worldSounds.play('place');
+				this.cb.onPlace(snap.x, snap.z, snap.rot);
+			} else if (point) {
 				worldSounds.play('place');
 				this.cb.onPlace(point.x, point.z, this.decorating.rot);
 			}
 			return;
+		}
+		if (this.room === `house:${this.meId}` && this.editMode) {
+			const fixture = this.pickFixture();
+			if (fixture) {
+				this.cb.onFurniturePick(`fixture:${fixture}`);
+				return;
+			}
 		}
 		if (this.room === `house:${this.meId}` && this.furnitureClickable.size && this.editMode) {
 			const hits = this.raycaster.intersectObjects(this.furnitureGroup.children, true);
@@ -1713,7 +2007,7 @@ export class WorldEngine {
 		this.pets.update(dt);
 		const night = this.ambience.update(t);
 		this.garden.tick(dt);
-		this.effects.tick(dt, t, this.musicOn, this.screening);
+		this.effects.tick(dt, t, this.musicOn, this.screening, this.partyMode);
 		this.dust.update(dt);
 		this.updateFishing(t);
 		for (const tick of this.tickers) tick(dt);
@@ -1961,8 +2255,8 @@ export class WorldEngine {
 					consider({kind: 'seat', id: seat.id, label: seat.table !== null ? 'Sentarte a jugar' : 'Sentarte'}, p.clone().setY(p.y + 0.55), SEAT_RANGE, 0.6);
 				}
 				for (const door of this.doors) consider({kind: 'door', room: door.room, label: `Entrar ${DOOR_LABELS[door.name] ?? 'a ' + door.name}`}, door.pos.clone().setY(2.4), DOOR_RANGE);
-				if (this.exitPoint) consider({kind: 'exit', label: this.loadedRoom?.startsWith('yard:') ? 'Volver a casa' : 'Salir a la ciudad'}, this.exitPoint.clone().setY(1.6), 1.3);
-				if (this.tvPoint) consider({kind: 'tv', label: 'Usar la tele'}, this.tvPoint.clone().setY(1.6), 1.8);
+				if (this.exitPoint) consider({kind: 'exit', label: this.loadedRoom?.startsWith('yard:') ? 'Volver a casa' : 'Salir a la ciudad'}, this.exitPoint.clone().setY(this.exitDoorSpot ? 2.5 : 1.6), this.exitDoorSpot ? 1.5 : 1.3);
+				if (this.tvPoint) consider({kind: 'tv', label: this.loadedRoom === 'campfire' ? 'Usar la radio' : 'Usar la tele'}, this.tvPoint.clone().setY(1.6), 1.8);
 				for (const npc of this.npcs.talkers()) consider({kind: 'npc', npc: npc.kind, label: npc.label}, npc.pos.clone().setY(2.2), 2.2);
 				const spot = this.nearestFishSpot();
 				if (spot) consider({kind: 'fish', label: 'Pescar'}, spot.pos.clone().setY(1.6), 1.5, 0.3);

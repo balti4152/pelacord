@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {
-	Film, ListPlus, Monitor, Music, Pause, Play, Plus, Power, Rewind, FastForward, ScreenShare, Search, SkipBack, SkipForward, Trash2, X, Volume2,
+	Film, ListPlus, PartyPopper, Radio, Monitor, Music, Pause, Play, Plus, Power, Rewind, FastForward, ScreenShare, Search, SkipBack, SkipForward, Trash2, X, Volume2,
 } from 'lucide-react';
 import {getDesktopTransport, type TmdbMovie, type TrackResult} from '@/lib/desktop';
 import type {MovieMedia} from '@/lib/movieRooms';
@@ -45,9 +45,17 @@ export function TvPanel(props: {
 	onStopShare: () => void;
 	onOff: () => void;
 	onClose: () => void;
+	/** Mi volumen de la música de la tele (0 a 1, sólo para mí). */
+	volume: number;
+	onVolume: (volume: number) => void;
+	/** La sala tiene bola de boliche: se puede prender el modo joda. */
+	partyAvailable?: boolean;
+	onParty?: (on: boolean) => void;
+	/** La radio del campamento: sólo música. */
+	radio?: boolean;
 }): JSX.Element {
 	const {tv} = props;
-	const [tab, setTab] = useState<'music' | 'movies' | 'screen'>(tv?.mode === 'movie' ? 'movies' : tv?.mode === 'screen' ? 'screen' : 'music');
+	const [tab, setTab] = useState<'music' | 'movies' | 'screen'>(props.radio ? 'music' : tv?.mode === 'movie' ? 'movies' : tv?.mode === 'screen' ? 'screen' : 'music');
 	const [query, setQuery] = useState('');
 	const [results, setResults] = useState<TrackResult[]>([]);
 	const [searching, setSearching] = useState(false);
@@ -94,17 +102,30 @@ export function TvPanel(props: {
 	return (
 		<section className="t-panel t-tv" onKeyDown={(e) => e.stopPropagation()}>
 			<header className="t-panel-head">
-				<span className="t-panel-icon"><Monitor size={20} strokeWidth={2.6} /></span>
-				<h2>La tele</h2>
-				{tv && tv.mode !== 'off' ? <button type="button" className="t-btn is-soft is-small" onClick={props.onOff} title="Apagar la tele"><Power size={13} strokeWidth={3} /> Apagar</button> : null}
+				<span className="t-panel-icon">{props.radio ? <Radio size={20} strokeWidth={2.6} /> : <Monitor size={20} strokeWidth={2.6} />}</span>
+				<h2>{props.radio ? 'La radio' : 'La tele'}</h2>
+				{tv && tv.mode !== 'off' ? <button type="button" className="t-btn is-soft is-small" onClick={props.onOff} title={props.radio ? 'Apagar la radio' : 'Apagar la tele'}><Power size={13} strokeWidth={3} /> Apagar</button> : null}
 				<button type="button" className="t-close" onClick={props.onClose} aria-label="Cerrar"><X size={18} strokeWidth={3} /></button>
 			</header>
-			<p className="t-hint"><Volume2 size={13} strokeWidth={2.8} /> Se escucha sólo en esta sala, más fuerte cerca de la pantalla. Todos los que están acá la pueden manejar.</p>
-			<nav className="t-tabs">
+			<p className="t-hint"><Volume2 size={13} strokeWidth={2.8} /> Se escucha sólo acá, más fuerte cerca {props.radio ? 'de la radio' : 'de la pantalla'}. Todos los que están acá la pueden manejar.</p>
+			<div className="t-tv-options">
+				<label className="t-tv-volume" title="Sólo cambia cómo la escuchás vos">
+					<Volume2 size={15} strokeWidth={2.8} />
+					<span>Mi volumen</span>
+					<input type="range" min={0} max={100} value={Math.round(props.volume * 100)} onChange={(e) => props.onVolume(Number(e.target.value) / 100)} />
+					<b>{Math.round(props.volume * 100)}%</b>
+				</label>
+				{props.partyAvailable && props.onParty ? (
+					<button type="button" className={`t-btn is-small ${tv?.party ? 'is-primary' : 'is-soft'} t-party-toggle`} onClick={() => props.onParty?.(!tv?.party)} title="Bola de boliche, luces de colores y la sala a oscuras mientras suena música">
+						<PartyPopper size={14} strokeWidth={2.8} /> Modo joda: {tv?.party ? 'prendido' : 'apagado'}
+					</button>
+				) : null}
+			</div>
+			{props.radio ? null : <nav className="t-tabs">
 				<button type="button" className={tab === 'music' ? 'is-active' : ''} onClick={() => setTab('music')}><Music size={15} strokeWidth={2.6} /> Música</button>
 				<button type="button" className={tab === 'movies' ? 'is-active' : ''} onClick={() => setTab('movies')}><Film size={15} strokeWidth={2.6} /> Pelaflix</button>
 				<button type="button" className={tab === 'screen' ? 'is-active' : ''} onClick={() => setTab('screen')}><ScreenShare size={15} strokeWidth={2.6} /> Pantalla</button>
-			</nav>
+			</nav>}
 
 			{tab === 'music' ? (
 				<div className="t-tv-body">
@@ -132,7 +153,7 @@ export function TvPanel(props: {
 								</div>
 							</div>
 						</div>
-					) : <p className="t-empty">La tele no tiene música. Buscá algo para poner.</p>}
+					) : <p className="t-empty">{props.radio ? 'La radio está callada.' : 'La tele no tiene música.'} Buscá algo para poner.</p>}
 					{upcoming.length ? (
 						<>
 							<h3 className="t-subtitle">A continuación</h3>

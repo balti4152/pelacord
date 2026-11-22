@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Music, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Sprout, Tv, User, UserPlus, Volume2, VolumeX, Keyboard, X,
+	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Music, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Sprout, Tv, User, UserPlus, Users, BellRing, Volume2, VolumeX, Keyboard, X,
 } from 'lucide-react';
 import {EMOTES, type EmoteDef, EmoteMenu} from '@/components/world/EmoteMenu';
 import {MoviePlayer} from '@/components/MoviePlayer';
@@ -8,7 +8,7 @@ import {useLocalScreen, useMeshRemotes, useSpeakingIds} from '@/components/Remot
 import {openSharePicker} from '@/lib/sharePicker';
 import {positionOf} from '@/lib/movieRooms';
 import {
-	addCoins, type Anim, type CatalogItem, type Emote, getProfile, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
+	addCoins, type Anim, type CatalogItem, type Emote, getProfile, onBell, onCasinoBet, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
 	sendWorld, updateProfile, useCatalog, useProfile, useWorldPeers,
 } from '@/world/core';
 import {type Interaction, WorldEngine} from '@/world/engine';
@@ -22,20 +22,21 @@ import {type CardColor, table, useTableSession} from '@/world/tableGames';
 import {TableView} from '@/world/tableView';
 import {currentTrack, startTv, tv, tvPosition, useTvs, volumeForDistance} from '@/world/tv';
 import {tvSpeaker} from '@/world/tvAudio';
+import {playDoorbell} from '@/world/doorbell';
 import {worldSounds} from '@/world/worldSounds';
 import {arenaMusic} from '@/world/arenaMusic';
-import {DecoratePanel, EditorPanel, InvitePanel, ShopPanel, TablePanel} from '@/components/world/WorldPanels';
+import {DecoratePanel, EditorPanel, FriendsPanel, InvitePanel, ShopPanel, TablePanel} from '@/components/world/WorldPanels';
 import {TvPanel} from '@/components/world/TvPanel';
 import {FishingGame, FishMarketPanel} from '@/components/world/FishingPanels';
 import {PetPanel} from '@/components/world/PetPanel';
 import {CasinoPanel} from '@/components/world/CasinoPanel';
 import {FarmLandPanel, FarmShop, FarmToolbar, SmithPanel} from '@/components/world/FarmPanels';
 import {RestaurantPanel} from '@/components/world/RestaurantPanel';
-import {type CasinoGame} from '@/world/casino';
+import {type CasinoGame, type Spin} from '@/world/casino';
 import {type Crop, type FarmAction, makeFarm, readLand, tend} from '@/world/farmData';
 import {useStore} from '@/state/store';
 
-type Panel = null | 'editor' | 'shop-clothes' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
+type Panel = null | 'friends' | 'editor' | 'shop-clothes' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
 const SPATIAL_KEY = 'pelacord.world.spatial';
 const HINT_KEY = 'pelacord.world.hint';
 
@@ -83,6 +84,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const [tableSeat, setTableSeat] = useState<number | null>(null);
 	const [wildCard, setWildCard] = useState<string | null>(null);
 	const [invite, setInvite] = useState<{id: string; name: string; room: RoomId} | null>(null);
+	const [bell, setBell] = useState<{id: string; name: string} | null>(null);
 	const [toast, setToast] = useState('');
 	const [seated, setSeated] = useState(false);
 	const [myAnim, setMyAnim] = useState<Anim>('idle');
@@ -236,12 +238,17 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			onPlayerClick: (id) => setSelected(id),
 			onPlace: (x, z, rot) => {
 				setPlacing((current) => {
-					if (current) updateProfile((p) => ({furniture: p.furniture.map((f) => (f.uid === current.uid ? {...f, x, z, rot} : f))}));
+					if (current) updateProfile((p) => ({
+						furniture: p.furniture.some((f) => f.uid === current.uid)
+							? p.furniture.map((f) => (f.uid === current.uid ? {...f, x, z, rot} : f))
+							// La tele, la ventana o la puerta de la casa: la primera vez que se mueven se guardan.
+							: [...p.furniture, {...current, x, z, rot}],
+					}));
 					return null;
 				});
 			},
 			onFurniturePick: (uid) => {
-				const item = getProfile().furniture.find((f) => f.uid === uid);
+				const item = getProfile().furniture.find((f) => f.uid === uid) ?? (uid.startsWith('fixture:') ? {uid, id: uid, x: null, z: null, rot: 0} : undefined);
 				if (item) setPlacing(item);
 			},
 			onFishAction: () => fishActionRef.current(),
@@ -409,6 +416,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const engine = engineRef.current;
 		if (!engine) return;
 		engine.setMusicOn(Boolean(track && !myTv?.paused));
+		engine.setPartyMode(Boolean(myTv?.party));
 		engine.setScreening(Boolean(screenStream || movieRoom));
 		if (myTv?.mode === 'screen' && screenStream) engine.setScreen({stream: screenStream});
 		else if (myTv?.mode === 'screen') engine.setScreen({title: `Esperando la pantalla de ${nameOf(sharerId ?? '')}…`});
@@ -416,15 +424,30 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		else if (myTv?.mode === 'movie') engine.setScreen({title: 'La película terminó'});
 		else if (!track) engine.setScreen({});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [myTv?.mode, myTv?.paused, track, screenStream, movieRoom?.id, movieRoom?.media.poster, room, catalog]);
+	}, [myTv?.mode, myTv?.paused, myTv?.party, track, screenStream, movieRoom?.id, movieRoom?.media.poster, room, catalog]);
 
 	// La música de la tele: suena sólo acá, con volumen según la distancia; la pantalla muestra lo que suena.
 	useEffect(() => {
 		tvSpeaker.sync(hidden ? null : myTv);
 	}, [myTv, hidden]);
+	// Volumen propio de la música de la tele (cada uno el suyo; queda guardado).
+	const [tvMusicVolume, setTvMusicVolume] = useState(() => {
+		try {
+			const saved = Number(localStorage.getItem('pelacord.tv.musicVolume'));
+			return Number.isFinite(saved) && localStorage.getItem('pelacord.tv.musicVolume') !== null ? Math.min(1, Math.max(0, saved)) : 0.8;
+		} catch {
+			return 0.8;
+		}
+	});
+	const changeTvMusicVolume = (value: number): void => {
+		setTvMusicVolume(value);
+		try {
+			localStorage.setItem('pelacord.tv.musicVolume', String(value));
+		} catch { /* sin almacenamiento */ }
+	};
 	useEffect(() => {
-		tvSpeaker.setMaster((state.settings.musicMuted ? 0 : (state.settings.musicVolume ?? 0.8)));
-	}, [state.settings.musicVolume, state.settings.musicMuted]);
+		tvSpeaker.setMaster((state.settings.musicMuted ? 0 : (state.settings.musicVolume ?? 0.8)) * tvMusicVolume);
+	}, [state.settings.musicVolume, state.settings.musicMuted, tvMusicVolume]);
 	const peersRef = useRef(peers);
 	peersRef.current = peers;
 	useEffect(() => {
@@ -562,7 +585,26 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 
 	useEffect(() => onInvite((m) => {
 		worldSounds.play('notice');
+		// Me abrieron la puerta (yo había tocado el timbre): entro directo.
+		if (m.open) {
+			setRoom(m.room);
+			flashRef.current(`¡${names[m.id] ?? m.name} te abrió la puerta!`);
+			return;
+		}
 		setInvite({id: m.id, name: names[m.id] ?? m.name, room: m.room});
+	}), [names]);
+	// Lo que apuestan los demás en el casino: globito arriba de su cabeza, y la máquina o la ruleta se mueve.
+	useEffect(() => onCasinoBet((m) => {
+		if (m.room !== roomRef.current || hiddenRef.current) return;
+		const engine = engineRef.current;
+		if (!engine) return;
+		const spin = m.spin as Spin | undefined;
+		if (spin && (spin.kind === 'roulette' || spin.kind === 'slots')) engine.playCasino(spin, m.id);
+		engine.casinoBubble(m.id, m.bets.slice(0, 8), Number(m.payout) || 0, Number(m.total) || 0, Math.min(5000, Math.max(0, Number(m.delay) || 0)));
+	}), []);
+	useEffect(() => onBell((m) => {
+		playDoorbell();
+		setBell({id: m.id, name: names[m.id] ?? m.name});
 	}), [names]);
 
 	useEffect(() => {
@@ -735,7 +777,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const selectedPeer = selected ? peers[selected] : null;
 	const onlineFriends = state.members.filter((m) => m.id !== state.me.id && m.presence !== 'offline').map((m) => ({id: m.id, name: m.name, online: true}));
 	const title = roomTitle(room, houseOwner, names, state.me.id);
-	const hasScreen = Boolean(engineRef.current?.hasScreen());
+	const hasScreen = Boolean(engineRef.current?.hasScreen()) && room !== 'campfire';
 	const tvOn = myTv && myTv.mode !== 'off';
 
 	return (
@@ -772,6 +814,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					) : (
 						<button type="button" className="t-pill is-mint" onClick={joinVoice} title="Entrar a la llamada para hablar con los que están en el mundo"><Phone size={16} strokeWidth={2.8} /> Hablar</button>
 					)}
+					<button type="button" className={`t-round${panel === 'friends' ? ' is-active' : ''}`} title="Amigos (tocar el timbre, invitar)" onClick={() => setPanel(panel === 'friends' ? null : 'friends')}><Users size={18} strokeWidth={2.6} /></button>
 					<button type="button" className="t-round" title="Mi personaje" onClick={() => { setTryOn(null); setPanel('editor'); }}><User size={18} strokeWidth={2.6} /></button>
 					{room === 'arena' ? (
 						<label className="t-chip t-music-volume" title="Volumen de la música de la Arena (queda guardado)">
@@ -805,6 +848,12 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					<button type="button" className={`t-pill${panel === 'decorate' ? ' is-active' : ''}`} onClick={() => setPanel(panel === 'decorate' ? null : 'decorate')}><Brush size={16} strokeWidth={2.8} /> Decorar</button>
 					<button type="button" className="t-pill" onClick={() => setPanel('invite')}><UserPlus size={16} strokeWidth={2.8} /> Invitar</button>
 					<button type="button" className="t-pill" onClick={() => setPanel('shop-furniture')}><Armchair size={16} strokeWidth={2.8} /> Catálogo</button>
+				</div>
+			) : null}
+			{room === 'casino' ? (
+				<div className="t-casino-hud" title="Tu saldo en el casino">
+					<span className="t-casino-hud-chip"><Coins size={18} strokeWidth={2.8} /></span>
+					<span><small>Tu saldo</small><strong>{profile.coins.toLocaleString('es-AR')}</strong></span>
 				</div>
 			) : null}
 			{room === 'shop' ? (
@@ -881,6 +930,18 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				</div>
 			) : null}
 
+			{bell ? (
+				<div className="t-banner is-bell">
+					<BellRing size={18} strokeWidth={2.8} />
+					<span><strong>{bell.name}</strong> está tocando el timbre de tu casa</span>
+					<button type="button" className="t-btn is-primary is-small" onClick={() => {
+						sendWorld({kind: 'invite', id: state.me.id, name: state.me.name, room: `house:${state.me.id}`, open: true}, bell.id);
+						flash(`Le abriste la puerta a ${bell.name}`);
+						setBell(null);
+					}}>Dejar entrar</button>
+					<button type="button" className="t-btn is-soft is-small" onClick={() => setBell(null)}>Ahora no</button>
+				</div>
+			) : null}
 			{invite ? (
 				<div className="t-banner">
 					<Home size={18} strokeWidth={2.8} />
@@ -981,11 +1042,34 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				<PartyHud party={party} meId={state.me.id} overlay={partyOverlay} onClose={() => setDismissedParty(`${party.id}:final`)} />
 			) : null}
 			{panel === 'fishmarket' ? <FishMarketPanel onClose={() => setPanel(null)} onSold={(c) => flash(`Tano te pagó ${c} pelamonedas`)} /> : null}
-			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)} /> : null}
+			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)}
+				onBet={(bet) => {
+					engineRef.current?.casinoBubble(state.me.id, bet.bets, bet.payout, bet.total, bet.delay);
+					sendWorld({kind: 'casino', id: state.me.id, room: roomRef.current, bets: bet.bets, payout: bet.payout, total: bet.total, delay: bet.delay, spin: bet.spin});
+				}} /> : null}
 			{panel === 'restaurant-menu' ? <RestaurantPanel onClose={() => setPanel(null)} /> : null}
 			{panel === 'farm-shop' ? <FarmShop onClose={() => setPanel(null)} onBack={() => setPanel('shop-clothes')} /> : null}
 			{panel === 'smith-upgrades' ? <SmithPanel onClose={() => setPanel(null)} /> : null}
 			{panel === 'garden-land' && ownsYard ? <FarmLandPanel onClose={() => setPanel(null)} /> : null}
+			{panel === 'friends' ? (
+				<FriendsPanel
+					friends={onlineFriends.map((f) => {
+						const where = peers[f.id]?.room;
+						const home = where === `house:${f.id}`;
+						return {id: f.id, name: f.name, home, where: !where ? null : home ? 'En su casa' : where.startsWith('house:') ? 'De visita en una casa' : where.startsWith('yard:') ? 'En un patio' : `En ${ROOMS.find((r) => r.id === where)?.name ?? 'el mundo'}`};
+					})}
+					onBell={(id) => {
+						sendWorld({kind: 'bell', id: state.me.id, name: state.me.name}, id);
+						worldSounds.play('select');
+						flash(`Tocaste el timbre de ${names[id] ?? 'tu amigo'}…`);
+					}}
+					onInvite={(id) => {
+						sendWorld({kind: 'invite', id: state.me.id, name: state.me.name, room: `house:${state.me.id}`}, id);
+						flash(`Invitación enviada a ${names[id] ?? 'tu amigo'}`);
+					}}
+					onClose={() => setPanel(null)}
+				/>
+			) : null}
 			{panel === 'invite' ? (
 				<InvitePanel
 					friends={onlineFriends}
@@ -1036,6 +1120,14 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 						tv.off(room);
 					}}
 					onClose={() => setPanel(null)}
+					volume={tvMusicVolume}
+					onVolume={changeTvMusicVolume}
+					partyAvailable={room.startsWith('house:')}
+					onParty={(on) => {
+						tv.party(room, on);
+						flash(on ? '¡Modo joda prendido! Poné música' : 'Modo joda apagado');
+					}}
+					radio={room === 'campfire'}
 				/>
 			) : null}
 		</div>

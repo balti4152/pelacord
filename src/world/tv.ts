@@ -39,6 +39,8 @@ export interface TvWire {
 	paused: boolean;
 	movieRoomId?: string | null;
 	sharerId?: string | null;
+	/** Modo joda: bola de boliche, luces de colores y la sala a oscuras mientras suena música. */
+	party?: boolean;
 }
 
 /** Lo que guardo yo: además, CUÁNDO (con mi reloj) estaba en `positionMs`. */
@@ -70,7 +72,7 @@ export function currentTrack(tv: TvState | null | undefined): TvTrack | null {
 function toWire(tv: TvState): TvWire {
 	return {
 		room: tv.room, t: tv.t, by: tv.by, mode: tv.mode, queue: tv.queue, index: tv.index,
-		positionMs: tvPosition(tv), paused: tv.paused, movieRoomId: tv.movieRoomId ?? null, sharerId: tv.sharerId ?? null,
+		positionMs: tvPosition(tv), paused: tv.paused, movieRoomId: tv.movieRoomId ?? null, sharerId: tv.sharerId ?? null, party: Boolean(tv.party),
 	};
 }
 
@@ -106,11 +108,11 @@ export function startTv(id: string): void {
 	getDesktopTransport()?.onWorld?.(({payload, from}) => {
 		const message = payload as {kind?: string} | null;
 		if (message?.kind !== 'tv-hello') return;
-		broadcast(Object.values(tvs).filter((t) => t.mode !== 'off').map(toWire), from);
+		broadcast(Object.values(tvs).filter((t) => t.mode !== 'off' || t.party).map(toWire), from);
 	});
 	// Cada tanto se reenvía lo que está prendido: el que entra tarde se entera solo.
 	setInterval(() => {
-		const active = Object.values(tvs).filter((tv) => tv.mode !== 'off').map(toWire);
+		const active = Object.values(tvs).filter((tv) => tv.mode !== 'off' || tv.party).map(toWire);
 		broadcast(active);
 	}, 5000);
 }
@@ -200,6 +202,10 @@ export const tv = {
 		setTv(room, (c) => (c.sharerId && c.mode !== 'screen'
 			? {mode: 'screen', movieRoomId: null, paused: true}
 			: {mode: 'off', movieRoomId: null, sharerId: null, paused: true}));
+	},
+	/** Prende o apaga el modo joda de la sala (lo ven todos los que están ahí). */
+	party(room: RoomId, on: boolean): void {
+		setTv(room, () => ({party: on}));
 	},
 	/** El que compartía dejó de hacerlo: la tele se olvida de su pantalla. */
 	stopSharing(room: RoomId): void {

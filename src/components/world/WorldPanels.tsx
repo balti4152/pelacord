@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Backpack, Bed, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
+	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
 	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
@@ -362,6 +362,13 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 
 // -------------------------------------------------------------- decorar ----
 
+const FIXTURES: Array<{id: string; name: string}> = [
+	{id: 'fixture:tv', name: 'La tele'},
+	{id: 'fixture:window', name: 'La ventana'},
+	{id: 'fixture:door', name: 'La puerta al patio'},
+];
+const FURNITURE_SWATCHES = ['#8a5cff', '#f5b326', '#ff7350', '#6bc7ff', '#38d39f', '#ff4fa8', '#e0365a', '#5c428f', '#9c6236', '#f4ead8', '#3a2a33', '#ffffff'];
+
 export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 	catalog: Catalog;
 	placing: PlacedFurniture | null;
@@ -370,36 +377,105 @@ export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 	onClose: () => void;
 }): JSX.Element {
 	const profile = useProfile();
-	const name = (id: string) => catalog.items.find((i) => i.id === id)?.name ?? id;
+	const [painting, setPainting] = useState<string | null>(null);
+	const name = (id: string) => FIXTURES.find((f) => f.id === id)?.name ?? catalog.items.find((i) => i.id === id)?.name ?? id;
+	const canPaint = (id: string) => Boolean(catalog.items.find((i) => i.id === id)?.recolor?.length);
+	const furniture = profile.furniture.filter((f) => !f.id.startsWith('fixture:'));
+	const setItem = (uid: string, change: Partial<PlacedFurniture>) => updateProfile((p) => ({furniture: p.furniture.map((f) => (f.uid === uid ? {...f, ...change} : f))}));
+	const fixture = placing?.id.startsWith('fixture:');
 	return (
 		<Panel title="Decorar mi casa" icon={Brush} onClose={onClose} className="t-decorate">
 			{placing ? (
 				<div className="t-callout">
-					<p><Move size={15} strokeWidth={2.8} /> Mové el mouse y hacé clic donde quieras poner <strong>{name(placing.id)}</strong>.</p>
+					<p><Move size={15} strokeWidth={2.8} /> {fixture
+						? <>Mové el mouse cerca de una pared y hacé clic para dejar <strong>{name(placing.id)}</strong> ahí.</>
+						: <>Mové el mouse y hacé clic donde quieras poner <strong>{name(placing.id)}</strong>.</>}</p>
 					<div className="t-row">
-						<button type="button" className="t-btn is-soft" onClick={onRotate}><RotateCw size={14} strokeWidth={2.8} /> Girar (R)</button>
+						{fixture ? null : <button type="button" className="t-btn is-soft" onClick={onRotate}><RotateCw size={14} strokeWidth={2.8} /> Girar (R)</button>}
 						<button type="button" className="t-btn is-soft" onClick={() => onPlace(null)}>Cancelar</button>
 					</div>
 				</div>
 			) : (
-				<p className="t-hint">Tocá un mueble de la casa para moverlo, o elegí uno guardado para ponerlo.</p>
+				<p className="t-hint">Tocá un mueble (o la tele, la ventana o la puerta) para moverlo, o elegí uno guardado para ponerlo.</p>
 			)}
-			{profile.furniture.length === 0 ? <p className="t-empty">Todavía no compraste muebles: andá a la Tienda de la ciudad.</p> : null}
+			{furniture.length === 0 ? <p className="t-empty">Todavía no compraste muebles: andá a la Tienda de la ciudad.</p> : null}
 			<ul className="t-list">
-				{profile.furniture.map((item) => (
-					<li key={item.uid} className={placing?.uid === item.uid ? 'is-active' : ''}>
-						<span className="t-dot" style={{background: item.color ?? '#a99bbd'}} />
-						<span className="t-list-name">{name(item.id)}</span>
-						{item.x === null ? (
-							<button type="button" className="t-btn is-primary is-small" onClick={() => onPlace(item)}><Plus size={13} strokeWidth={3} /> Poner</button>
-						) : (
-							<>
-								<button type="button" className="t-btn is-soft is-small" onClick={() => onPlace(item)}><Move size={13} strokeWidth={3} /></button>
-								<button type="button" className="t-btn is-soft is-small" title="Guardar en el inventario" onClick={() => updateProfile((p) => ({furniture: p.furniture.map((f) => (f.uid === item.uid ? {...f, x: null, z: null} : f))}))}>
-									<Package size={13} strokeWidth={3} />
-								</button>
-							</>
-						)}
+				{furniture.map((item) => (
+					<li key={item.uid} className={`${placing?.uid === item.uid ? 'is-active' : ''}${painting === item.uid ? ' is-painting' : ''}`}>
+						<div className="t-deco-row">
+							{canPaint(item.id) ? (
+								<button type="button" className="t-dot is-button" style={{background: item.color ?? '#a99bbd'}} title="Cambiar el color" onClick={() => setPainting((v) => (v === item.uid ? null : item.uid))} />
+							) : <span className="t-dot" style={{background: item.color ?? '#a99bbd'}} />}
+							<span className="t-list-name">{name(item.id)}</span>
+							{item.x === null ? (
+								<button type="button" className="t-btn is-primary is-small" onClick={() => onPlace(item)}><Plus size={13} strokeWidth={3} /> Poner</button>
+							) : (
+								<>
+									<button type="button" className="t-btn is-soft is-small" title="Girar" onClick={() => { worldSounds.play('highlight'); setItem(item.uid, {rot: ((item.rot ?? 0) + Math.PI / 4) % (Math.PI * 2)}); }}><RotateCw size={13} strokeWidth={3} /></button>
+									<button type="button" className="t-btn is-soft is-small" title="Mover" onClick={() => onPlace(item)}><Move size={13} strokeWidth={3} /></button>
+									<button type="button" className="t-btn is-soft is-small" title="Guardar en el inventario" onClick={() => setItem(item.uid, {x: null, z: null})}>
+										<Package size={13} strokeWidth={3} />
+									</button>
+								</>
+							)}
+						</div>
+						{painting === item.uid ? (
+							<div className="t-swatches">
+								{FURNITURE_SWATCHES.map((c) => (
+									<button key={c} type="button" className={`t-swatch${item.color === c ? ' is-on' : ''}`} style={{background: c}} aria-label={c} onClick={() => setItem(item.uid, {color: c})} />
+								))}
+								<label className="t-swatch is-custom" title="Otro color">
+									<input type="color" value={item.color ?? '#a99bbd'} onChange={(e) => setItem(item.uid, {color: e.target.value})} />
+								</label>
+							</div>
+						) : null}
+					</li>
+				))}
+			</ul>
+			<h3 className="t-subtitle">De la casa</h3>
+			<ul className="t-list">
+				{FIXTURES.map((f) => {
+					const saved = profile.furniture.find((i) => i.uid === f.id);
+					return (
+						<li key={f.id} className={placing?.uid === f.id ? 'is-active' : ''}>
+							<div className="t-deco-row">
+								<span className="t-list-name">{f.name}</span>
+								<button type="button" className="t-btn is-soft is-small" title="Mover por las paredes" onClick={() => onPlace(saved ?? {uid: f.id, id: f.id, x: null, z: null, rot: 0})}><Move size={13} strokeWidth={3} /></button>
+								{saved ? <button type="button" className="t-btn is-soft is-small" title="Volver a su lugar" onClick={() => updateProfile((p) => ({furniture: p.furniture.filter((i) => i.uid !== f.id)}))}>Original</button> : null}
+							</div>
+						</li>
+					);
+				})}
+			</ul>
+		</Panel>
+	);
+}
+
+// ---------------------------------------------------------------- amigos ---
+
+export function FriendsPanel({friends, onBell, onInvite, onClose}: {
+	friends: Array<{id: string; name: string; where: string | null; home: boolean}>;
+	onBell: (id: string) => void;
+	onInvite: (id: string) => void;
+	onClose: () => void;
+}): JSX.Element {
+	const [rung, setRung] = useState<string[]>([]);
+	const [sent, setSent] = useState<string[]>([]);
+	return (
+		<Panel title="Amigos" icon={Users} onClose={onClose} className="t-invite t-friends">
+			<p className="t-hint">Tocale el timbre a un amigo para que te deje entrar a su casa, o invitalo a la tuya.</p>
+			{friends.length === 0 ? <p className="t-empty">No hay nadie conectado ahora.</p> : null}
+			<ul className="t-list">
+				{friends.map((f) => (
+					<li key={f.id}>
+						<span className="t-dot is-online" />
+						<span className="t-list-name"><strong>{f.name}</strong>{f.where ? <small>{f.where}</small> : null}</span>
+						<button type="button" className="t-btn is-primary is-small" disabled={rung.includes(f.id)} title="Tocar el timbre de su casa" onClick={() => { onBell(f.id); setRung((r) => [...r, f.id]); window.setTimeout(() => setRung((r) => r.filter((x) => x !== f.id)), 8000); }}>
+							<BellRing size={13} strokeWidth={3} /> {rung.includes(f.id) ? 'Sonando…' : 'Timbre'}
+						</button>
+						<button type="button" className="t-btn is-soft is-small" disabled={sent.includes(f.id)} title="Invitarlo a mi casa" onClick={() => { onInvite(f.id); setSent((s) => [...s, f.id]); }}>
+							{sent.includes(f.id) ? <Check size={13} strokeWidth={3} /> : <Send size={13} strokeWidth={3} />}
+						</button>
 					</li>
 				))}
 			</ul>

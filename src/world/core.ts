@@ -117,7 +117,11 @@ export type WorldMessage =
 	| {kind: 'emote'; id: string; room: RoomId; emote: Emote; target?: string | null}
 	| {kind: 'leave'; id: string}
 	/** "Vení a mi casa": invitación dirigida. */
-	| {kind: 'invite'; id: string; name: string; room: RoomId}
+	| {kind: 'invite'; id: string; name: string; room: RoomId; open?: boolean}
+	/** Timbre: "estoy en tu puerta, ¿me dejás entrar?". */
+	| {kind: 'bell'; id: string; name: string}
+	/** Una apuesta en el casino (los demás ven el globito y, si gana, el festejo). */
+	| {kind: 'casino'; id: string; room: RoomId; bets: CasinoBetInfo[]; payout: number; total: number; delay: number; spin?: unknown}
 	| {kind: 'game'; g: GameMessage};
 
 // --------------------------------------------------------------- catálogo ---
@@ -283,6 +287,26 @@ const peerListeners = new Set<() => void>();
 const emoteListeners = new Set<(m: Extract<WorldMessage, {kind: 'emote'}>) => void>();
 const gameListeners = new Set<(g: GameMessage, from: string) => void>();
 const inviteListeners = new Set<(m: Extract<WorldMessage, {kind: 'invite'}>) => void>();
+const bellListeners = new Set<(m: Extract<WorldMessage, {kind: 'bell'}>) => void>();
+const casinoListeners = new Set<(m: Extract<WorldMessage, {kind: 'casino'}>) => void>();
+
+export interface CasinoBetInfo {
+	label: string;
+	stake: number;
+	tone?: string;
+}
+
+export function onCasinoBet(callback: (m: Extract<WorldMessage, {kind: 'casino'}>) => void): () => void {
+	startNet();
+	casinoListeners.add(callback);
+	return () => casinoListeners.delete(callback);
+}
+
+export function onBell(callback: (m: Extract<WorldMessage, {kind: 'bell'}>) => void): () => void {
+	startNet();
+	bellListeners.add(callback);
+	return () => bellListeners.delete(callback);
+}
 
 export function onInvite(callback: (m: Extract<WorldMessage, {kind: 'invite'}>) => void): () => void {
 	startNet();
@@ -326,6 +350,10 @@ function startNet(): void {
 			for (const listener of emoteListeners) listener(message);
 		} else if (message.kind === 'invite' && message.id === from) {
 			for (const listener of inviteListeners) listener(message);
+		} else if (message.kind === 'casino' && message.id === from && Array.isArray(message.bets)) {
+			for (const listener of casinoListeners) listener(message);
+		} else if (message.kind === 'bell' && message.id === from) {
+			for (const listener of bellListeners) listener(message);
 		} else if (message.kind === 'game' && message.g) {
 			for (const listener of gameListeners) listener(message.g, from);
 		}

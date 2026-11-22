@@ -138,8 +138,30 @@ function BlackjackStage({round, name}: {round: Blackjack | null; name: string}):
 	</div>;
 }
 
-export function CasinoPanel({initial, onClose, onSpin, playerName}: {
-	initial: CasinoGame; onClose: () => void; onSpin: (spin: Spin) => void; playerName: string;
+/** Cómo se lee una apuesta de ruleta en el globito. */
+function betLabel(bet: RouletteBet): {label: string; tone?: string} {
+	if (typeof bet === 'number') return {label: `al ${bet}`, tone: wheelColor(bet)};
+	switch (bet) {
+		case 'red': return {label: 'Rojo', tone: 'red'};
+		case 'black': return {label: 'Negro', tone: 'black'};
+		case 'even': return {label: 'Par'};
+		case 'odd': return {label: 'Impar'};
+		case 'low': return {label: '1 al 18'};
+		case 'high': return {label: '19 al 36'};
+		default: return {label: bet.startsWith('dozen') ? `${bet.at(-1)}ª docena` : `Columna ${bet.at(-1)}`};
+	}
+}
+
+export interface CasinoBet {
+	bets: Array<{label: string; stake: number; tone?: string}>;
+	payout: number;
+	total: number;
+	delay: number;
+	spin?: Spin;
+}
+
+export function CasinoPanel({initial, onClose, onSpin, onBet, playerName}: {
+	initial: CasinoGame; onClose: () => void; onSpin: (spin: Spin) => void; onBet?: (bet: CasinoBet) => void; playerName: string;
 }): JSX.Element {
 	const [game, setGame] = useState(initial);
 	const [stake, setStake] = useState<number>(BETS[0]);
@@ -209,6 +231,7 @@ export function CasinoPanel({initial, onClose, onSpin, playerName}: {
 			if (!dealBlackjack(stake)) return;
 			worldSounds.play('dealCards');
 			const next = getProfile().blackjack;
+			if (next?.result) onBet?.({bets: [{label: 'Blackjack', stake: next.stake}], payout: next.payout ?? 0, total: next.stake, delay: 500});
 			if (next?.result) schedule(() => settleSound(next.payout ?? 0, next.stake), 320);
 			return;
 		}
@@ -229,6 +252,15 @@ export function CasinoPanel({initial, onClose, onSpin, playerName}: {
 		}
 		worldSounds.play('roulette', next.kind === 'slots' ? 0.7 : 1);
 		onSpin(next);
+		const grouped = new Map<string, {label: string; stake: number; tone?: string}>();
+		if (next.kind === 'roulette') {
+			for (const chip of chips) {
+				const {label, tone} = betLabel(chip.bet);
+				const prev = grouped.get(label);
+				grouped.set(label, {label, tone, stake: (prev?.stake ?? 0) + chip.stake});
+			}
+		} else grouped.set('slots', {label: 'Tragamonedas', stake: wager});
+		onBet?.({bets: [...grouped.values()].sort((a, b) => b.stake - a.stake), payout: next.payout, total: wager, delay: SPIN_MS[next.kind], spin: next});
 		schedule(() => {
 			pending.current = false;
 			setRunning(false);
@@ -245,7 +277,10 @@ export function CasinoPanel({initial, onClose, onSpin, playerName}: {
 		if (!playBlackjack(action)) return;
 		worldSounds.play(action === 'stand' ? 'flipCard' : 'playCard', 0.82);
 		const result = getProfile().blackjack;
-		if (result?.result) schedule(() => settleSound(result.payout ?? 0, result.stake), 230);
+		if (result?.result) {
+			schedule(() => settleSound(result.payout ?? 0, result.stake), 230);
+			onBet?.({bets: [{label: action === 'double' ? 'Blackjack (doblado)' : 'Blackjack', stake: result.stake}], payout: result.payout ?? 0, total: result.stake, delay: 400});
+		}
 	}
 
 	return (

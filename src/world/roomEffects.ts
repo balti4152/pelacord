@@ -5,13 +5,19 @@ import type {RoomId} from '@/world/core';
 const PARTY_COLORS = [0xff60b6, 0x65d9ff, 0xab8aff, 0xffb85c, 0x7df8b4];
 const SLOTS_START = [0, 3, 4, 2, 5];
 const UP = new THREE.Vector3(0, 1, 0);
+const COLOR_BLOBS = 8;
+/** Azar fijo (igual para todos los que miran la misma sala). */
+const hash = (n: number): number => {
+	const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+	return x - Math.floor(x);
+};
 
 export class RoomEffects {
 	private readonly group = new THREE.Group();
 	private readonly cable = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 1, 8), new THREE.MeshBasicMaterial({color: 0xb5adbd}));
 	private readonly dots = new THREE.InstancedMesh(new THREE.CircleGeometry(1, 8), new THREE.MeshBasicMaterial({
 		transparent: true, depthWrite: false, opacity: 0, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
-	}), 42);
+	}), 50);
 	private readonly spots = [new THREE.SpotLight(PARTY_COLORS[0], 0, 9, 0.56, 0.76), new THREE.SpotLight(PARTY_COLORS[1], 0, 9, 0.49, 0.78)];
 	private readonly pose = new THREE.Object3D();
 	private readonly color = new THREE.Color();
@@ -28,6 +34,8 @@ export class RoomEffects {
 	private shades: Array<{mesh: THREE.Mesh; original: THREE.Material; material: THREE.MeshStandardMaterial; intensity: number}> = [];
 	private reelCanvases: Array<{canvas: HTMLCanvasElement; texture: THREE.CanvasTexture; mesh: THREE.Mesh; original: THREE.Material; material: THREE.MeshBasicMaterial; shown: number}> = [];
 	private rotor: THREE.Object3D | undefined;
+	private machines: THREE.Object3D[] = [];
+	private spinMachine = 1;
 	private marble: THREE.Object3D | undefined;
 	private marbleHeight = 0;
 	private readonly symbols = new Map<number, HTMLImageElement>();
@@ -73,21 +81,28 @@ export class RoomEffects {
 			this.rotor = root.getObjectByName('CasinoWheelRotor');
 			this.marble = root.getObjectByName('CasinoWheelBall');
 			this.marbleHeight = this.marble?.position.y ?? 0;
-			SLOTS_START.forEach((value, index) => {
-				const mesh = root.getObjectByName('SlotsReel_' + index) as THREE.Mesh | undefined;
+			const reels: THREE.Mesh[] = [];
+			root.traverse((o) => {
+				const match = /^SlotsReel_(\d)_(\d)$/.exec(o.name);
+				if (match && (o as THREE.Mesh).isMesh) reels[Number(match[1]) * 3 + Number(match[2])] = o as THREE.Mesh;
+			});
+			this.machines = [0, 1, 2].map((i) => root.getObjectByName('SlotMachine_' + i)).filter((m): m is THREE.Object3D => Boolean(m));
+			reels.forEach((mesh, index) => {
+				const value = SLOTS_START[index % SLOTS_START.length] + Math.floor(index / 3) * 2;
 				if (!mesh?.isMesh || Array.isArray(mesh.material)) return;
 				const canvas = document.createElement('canvas');
 				canvas.width = canvas.height = 128;
 				const texture = new THREE.CanvasTexture(canvas);
 				texture.colorSpace = THREE.SRGBColorSpace;
-				texture.flipY = false;
+				texture.flipY = Boolean(mesh.userData.flipY);
 				const material = new THREE.MeshBasicMaterial({map: texture, side: THREE.DoubleSide});
 				this.reelCanvases.push({canvas, texture, mesh, original: mesh.material, material, shown: -1});
 				mesh.material = material;
-				this.paintReel(index, value);
+				this.paintReel(index, value % SYMBOLS.length);
 			});
 		}
-		this.cable.visible = house && Boolean(this.ball);
+		this.cable.visible = false;
+		if (this.ball) this.ball.visible = false;
 		this.dots.visible = this.burst.visible = false;
 	}
 
@@ -119,73 +134,115 @@ export class RoomEffects {
 		reel.texture.needsUpdate = true;
 	}
 
-	play(spin: Spin): void {
+	play(spin: Spin, machine = 1): void {
 		if (this.room !== 'casino') return;
 		this.spin = spin;
+		this.spinMachine = machine;
 		this.spinAt = performance.now();
 		this.burstAt = -Infinity;
 		this.spinAngle = this.marble && this.rotor ? Math.atan2(this.marble.position.x - this.rotor.position.x, this.marble.position.z - this.rotor.position.z) : 0;
 	}
 
-	tick(dt: number, t: number, music: boolean, screening: boolean): void {
+	/**
+	 * Modo joda (se prende desde la tele): con música, la sala queda casi a oscuras, baja la bola de
+	 * boliche girando lento y tira puntitos BLANCOS que recorren el piso y la pared; aparte, luces de
+	 * colores se prenden y se apagan en lugares al azar. Sin música (o sin modo joda) la bola se esconde.
+	 */
+	tick(dt: number, t: number, music: boolean, screening: boolean, partyMode = false): void {
 		if (this.room === 'casino') this.updateCasino(performance.now());
 		const house = Boolean(this.room?.startsWith('house:'));
 		if (!house && this.room !== 'cinema') return;
-		const target = music || (!house && screening) ? 1 : 0;
-		const ease = 1 - Math.exp(-3.5 * dt);
+		const party = music && partyMode;
+		const target = party || (!house && screening) ? 1 : 0;
+		const ease = 1 - Math.exp(-2.6 * dt);
 		this.factor = THREE.MathUtils.lerp(this.factor, target, ease);
-		this.party = THREE.MathUtils.lerp(this.party, music ? 1 : 0, ease);
+		this.party = THREE.MathUtils.lerp(this.party, party ? 1 : 0, ease);
 		const dim = this.factor;
-		this.sun.intensity = this.baseSun * (1 - dim * (house ? 0.68 : 0.96));
-		this.fill.intensity = this.baseFill * (1 - dim * (house ? 0.46 : 0.88));
-		for (const {light, intensity} of this.localLights) light.intensity = intensity * (1 - dim * (house ? 0.47 : 0.97));
-		for (const {material, intensity} of this.shades) material.emissiveIntensity = intensity * (1 - dim * 0.93);
+		// Al mínimo: se ve algo, pero lo que manda son las luces.
+		this.sun.intensity = this.baseSun * (1 - dim * (house ? 0.9 : 0.96));
+		this.fill.intensity = this.baseFill * (1 - dim * (house ? 0.78 : 0.88));
+		for (const {light, intensity} of this.localLights) light.intensity = intensity * (1 - dim * (house ? 0.92 : 0.97));
+		for (const {material, intensity} of this.shades) material.emissiveIntensity = intensity * (1 - dim * 0.95);
 		const source = new THREE.Vector3(0, 3.75, 0.2);
+		const p = this.party;
 		if (this.ball) {
-			this.ball.position.y = this.ballY - 1.25 * dim;
-			if (!this.reducedMotion) this.ball.rotation.y += dt * 0.65 * dim;
+			// Escondida en el techo cuando no hay joda; baja girando despacito cuando arranca.
+			this.ball.visible = p > 0.02;
+			this.ball.position.y = this.ballY + 0.9 - 2.15 * p;
+			if (!this.reducedMotion) this.ball.rotation.y += dt * 0.22;
 			this.ball.getWorldPosition(source);
 			const link = this.anchor.clone().sub(source);
+			this.cable.visible = house && this.ball.visible;
 			this.cable.position.copy(source).addScaledVector(link, 0.5);
-			this.cable.scale.y = link.length();
+			this.cable.scale.y = Math.max(0.001, link.length());
 			this.cable.quaternion.setFromUnitVectors(UP, link.normalize());
 		}
-		const party = this.party * (house ? 1 : 0.68);
-		this.dots.visible = party > 0.015;
+		const level = p * (house ? 1 : 0.68);
+		this.dots.visible = level > 0.015;
 		if (!this.dots.visible) {
 			for (const spot of this.spots) spot.intensity = 0;
 			return;
 		}
 		const time = this.reducedMotion ? 0 : t;
+		const floorY = house ? 0.06 : 0.025;
+		const wallZ = house ? 3.9 : 5.2;
+		// Luces de colores: cada una se prende en un lugar al azar, dura un rato y se apaga.
 		this.spots.forEach((spot, i) => {
-			const phase = time * 0.55 + i * Math.PI;
+			const cycle = 2.6 + i * 0.7;
+			const k = Math.floor((time + i * 1.3) / cycle);
+			const phase = ((time + i * 1.3) / cycle) % 1;
+			const r1 = hash(k * 7 + i * 13);
+			const r2 = hash(k * 11 + i * 29);
 			spot.position.copy(source).setY(source.y + 0.2);
-			spot.target.position.set(Math.cos(phase) * 2.8, 0, Math.sin(phase) * 2.1);
-			spot.color.setHex(PARTY_COLORS[(Math.floor(time * 0.46) + 2 * i) % PARTY_COLORS.length]);
-			spot.intensity = party * (6 + 3 * Math.sin(phase));
+			spot.target.position.set((r1 - 0.5) * 6.4, 0, (r2 - 0.5) * 5.6);
+			spot.color.setHex(PARTY_COLORS[Math.floor(hash(k * 3 + i) * PARTY_COLORS.length)]);
+			spot.intensity = level * 16 * Math.sin(Math.PI * phase);
 		});
-		this.dots.material.opacity = party * 0.62;
+		this.dots.material.opacity = Math.min(1, level * 0.95);
 		for (let i = 0; i < this.dots.count; i++) {
-			const phase = i * 2.39996 + time * (i % 2 ? 0.32 : -0.23);
-			const pulse = 0.62 + 0.38 * Math.sin(i * 1.7 + time * 1.48);
-			const r = 0.75 + ((i * 7) % 19) * 0.155;
-			if (i < 30) {
-				this.pose.position.set(Math.cos(phase) * r, 0.022, Math.sin(phase) * r * 0.9);
-				this.pose.rotation.set(-Math.PI / 2, 0, phase);
+			if (i < COLOR_BLOBS) {
+				// Manchas de color que aparecen y desaparecen en lugares al azar.
+				const cycle = 1.8 + (i % 3) * 0.6;
+				const k = Math.floor((time + i * 0.9) / cycle);
+				const phase = ((time + i * 0.9) / cycle) % 1;
+				const life = Math.max(0, Math.sin(Math.PI * phase));
+				this.pose.position.set((hash(k * 17 + i) - 0.5) * 7.4, floorY + 0.002, (hash(k * 23 + i * 5) - 0.5) * 6.6);
+				this.pose.rotation.set(-Math.PI / 2, 0, 0);
+				this.pose.scale.setScalar(0.55 * life + 0.0001);
+				this.dots.setColorAt(i, this.color.setHex(PARTY_COLORS[Math.floor(hash(k * 5 + i * 3) * PARTY_COLORS.length)]));
 			} else {
-				this.pose.position.set(Math.cos(phase) * 3.96, 1.65 + Math.sin(phase * 1.7) * 0.95, 3.62);
-				this.pose.rotation.set(0, 0, phase);
+				// Los reflejos blancos de la bola: giran lento alrededor de ella.
+				const phase = i * 2.39996 + time * 0.16;
+				const pulse = 0.8 + 0.2 * Math.sin(i * 1.7 + time * 0.9);
+				const r = 0.7 + ((i * 7) % 19) * 0.17;
+				if (i < 34) {
+					this.pose.position.set(source.x + Math.cos(phase) * r, floorY, source.z + Math.sin(phase) * r * 0.9);
+					this.pose.rotation.set(-Math.PI / 2, 0, phase);
+				} else {
+					this.pose.position.set(source.x + Math.cos(phase) * 3.8, 1.65 + Math.sin(phase * 1.7) * 0.95, wallZ);
+					this.pose.rotation.set(0, 0, phase);
+				}
+				this.pose.scale.setScalar((0.06 + (i % 4) * 0.014) * pulse);
+				this.dots.setColorAt(i, this.color.setHex(0xffffff));
 			}
-			this.pose.scale.setScalar((0.091 + (i % 4) * 0.021) * pulse);
 			this.pose.updateMatrix();
 			this.dots.setMatrixAt(i, this.pose.matrix);
-			this.dots.setColorAt(i, this.color.setHex(PARTY_COLORS[i % PARTY_COLORS.length]));
 		}
 		this.dots.instanceMatrix.needsUpdate = true;
 		if (this.dots.instanceColor) this.dots.instanceColor.needsUpdate = true;
 	}
 
 	private updateCasino(now: number): void {
+		// Lamparitas de las máquinas: van corriendo (más rápido en la que está girando).
+		this.machines.forEach((machine, m) => {
+			const bulbs = machine.userData.bulbs as THREE.Mesh[] | undefined;
+			if (!bulbs) return;
+			const fast = this.spin?.kind === 'slots' && this.spinMachine === m;
+			const step = Math.floor(now / (fast ? 90 : 420));
+			bulbs.forEach((bulb, i) => {
+				(bulb.material as THREE.MeshStandardMaterial).emissiveIntensity = (i + step + m) % 3 === 0 ? 2.4 : 0.5;
+			});
+		});
 		if (this.spin) {
 			const spin = this.spin;
 			const raw = Math.min(1, (now - this.spinAt) / SPIN_MS[spin.kind]);
@@ -196,12 +253,15 @@ export class RoomEffects {
 				this.marble.position.z = this.rotor.position.z + Math.cos(frame.angle) * frame.radius;
 				this.marble.position.y = this.marbleHeight + frame.hop;
 			} else if (spin.kind === 'slots') {
-				spin.reels.forEach((value, i) => this.paintReel(i, now - this.spinAt >= slotStop(i) || this.reducedMotion ? value[1] : (i * 2 + Math.floor(raw * 22)) % SYMBOLS.length));
+				spin.reels.slice(0, 3).forEach((value, i) => this.paintReel(this.spinMachine * 3 + i, now - this.spinAt >= slotStop(i) || this.reducedMotion ? value[1] : (i * 2 + Math.floor(raw * 22)) % SYMBOLS.length));
+				// La palanca baja y vuelve.
+				const lever = this.machines[this.spinMachine]?.getObjectByName('SlotLever_' + this.spinMachine);
+				if (lever) lever.rotation.x = -Math.sin(Math.min(1, raw * 4) * Math.PI) * 0.9;
 			}
 			if (raw >= 1) {
 				if (spin.payout > 0 && !this.reducedMotion) {
 					this.burstAt = now;
-					this.burst.position.set(spin.kind === 'slots' ? 4.8 : 0, 1.7, 2.1);
+					this.burst.position.set(spin.kind === 'slots' ? (this.machines[this.spinMachine]?.position.x ?? 4.65) : 0, 1.7, 2.1);
 				}
 				this.spin = null;
 			}
@@ -224,6 +284,7 @@ export class RoomEffects {
 	clear(): void {
 		this.room = null;
 		this.ball = this.rotor = this.marble = undefined;
+		this.machines = [];
 		this.spin = null;
 		this.burstAt = -Infinity;
 		this.factor = 0;

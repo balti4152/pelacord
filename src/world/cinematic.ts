@@ -69,6 +69,14 @@ export class Cinematic {
 		const composer = new EffectComposer(renderer, target);
 		composer.addPass(new RenderPass(scene, camera));
 		this.bokeh = new BokehPass(scene, camera, {focus: 9, aperture: 0.0016, maxblur: 0.0075});
+		// Sólo el fondo: nada de lo que está delante del personaje ni el personaje se desenfoca, y
+		// detrás queda una franja nítida de unos metros; recién más lejos empieza el desenfoque.
+		const bokehMaterial = (this.bokeh as unknown as {materialBokeh: THREE.ShaderMaterial}).materialBokeh;
+		bokehMaterial.fragmentShader = bokehMaterial.fragmentShader.replace(
+			'float factor = ( focus + viewZ );',
+			'float factor = min( 0.0, focus + viewZ + 4.5 );',
+		);
+		bokehMaterial.needsUpdate = true;
 		composer.addPass(this.bokeh);
 		this.bloom = new UnrealBloomPass(new THREE.Vector2((size.x || 2) / 2, (size.y || 2) / 2), 0.55, 0.65, 0.78);
 		composer.addPass(this.bloom);
