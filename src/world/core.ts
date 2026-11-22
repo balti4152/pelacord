@@ -154,6 +154,7 @@ export const SLOT_LABEL: Record<string, string> = {
 	hair: 'Pelo', eyes: 'Ojos', brows: 'Cejas', mouth: 'Boca', cheeks: 'Cachetes', top: 'Arriba',
 	bottom: 'Abajo', shoes: 'Calzado', hat: 'Sombreros', facewear: 'Lentes y más', back: 'Bolsos y alas',
 	costume: 'Disfraces', furniture: 'Muebles',
+	plantas: 'Plantas', deco: 'Decoración',
 };
 export const SLOT_EMOJI: Record<string, string> = {
 	hair: '💇', eyes: '👀', brows: '🤨', mouth: '😄', cheeks: '😊', top: '👕', bottom: '👖', shoes: '👟',

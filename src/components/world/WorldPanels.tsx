@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Lock, Plus, Popcorn, Shirt,
+	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Leaf, Lock, Plus, Popcorn, Shirt,
 	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
@@ -30,7 +30,7 @@ const BottomIcon = createLucideIcon('WorldBottom', [
 export const SLOT_ICON: Record<string, LucideIcon> = {
 	hair: HairIcon, eyes: Eye, brows: BrowsIcon, mouth: MouthIcon, cheeks: CheeksIcon, top: Shirt, bottom: BottomIcon, shoes: Footprints,
 	hat: Crown, facewear: Glasses, back: Backpack, costume: Popcorn, furniture: Armchair,
-	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles,
+	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles, plantas: Leaf,
 };
 
 // ------------------------------------------------------------ vista previa --

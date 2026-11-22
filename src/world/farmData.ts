@@ -76,7 +76,7 @@ function sprinklerNear(plots: FarmLand['plots'], x: number, z: number): boolean 
 	return false;
 }
 
-export type TendResult = {farm?: Farm; notice?: string; sound?: 'till' | 'place' | 'water' | 'reward'};
+export type TendResult = {farm?: Farm; notice?: string; sound?: 'till' | 'place' | 'water' | 'plant' | 'harvest'};
 export function tend(farm: Farm, action: Exclude<FarmAction, 'walk'>, x: number, z: number, seed: Crop, now = Date.now()): TendResult {
 	if (!inLot(farm.land.level, x, z)) return {notice: 'Ampliá el terreno para cultivar ahí.'};
 	const key = plotKey(x, z);
@@ -88,7 +88,7 @@ export function tend(farm: Farm, action: Exclude<FarmAction, 'walk'>, x: number,
 		if (!farm.seeds[seed]) return {notice: 'Te quedaste sin semillas de ese cultivo.'};
 		next.seeds = {...farm.seeds, [seed]: farm.seeds[seed] - 1};
 		plots[key] = {crop: seed, wateredAt: sprinklerNear(plots, x, z) ? now : undefined};
-		return {farm: next, sound: 'place'};
+		return {farm: next, sound: 'plant'};
 	}
 	if (action === 'harvest') {
 		const crop = current?.crop;
@@ -97,7 +97,7 @@ export function tend(farm: Farm, action: Exclude<FarmAction, 'walk'>, x: number,
 		if (growth(current, now) < 1) return {notice: 'Todavía está creciendo.'};
 		next.harvest = {...farm.harvest, [crop]: farm.harvest[crop] + 1};
 		plots[key] = {};
-		return {farm: next, sound: 'reward', notice: 'Cosechaste ' + CROPS[crop].name.toLowerCase() + '.'};
+		return {farm: next, sound: 'harvest', notice: 'Cosechaste ' + CROPS[crop].name.toLowerCase() + '.'};
 	}
 	if (action === 'sprinkler') {
 		if (current?.sprinkler) {

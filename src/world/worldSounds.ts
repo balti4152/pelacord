@@ -43,7 +43,9 @@ const CUES = {
 	catch: {files: ['catch.ogg'], gain: .44, gap: 190},
 	chip: {files: ['chip.ogg'], gain: .32, gap: 115},
 	roulette: {files: ['roulette.ogg'], gain: .28, gap: 350},
-	till: {files: ['garden-till.ogg'], gain: .27, gap: 125},
+	till: {files: ['garden-till.ogg'], gain: .3, gap: 125},
+	plant: {files: ['garden-plant.ogg'], gain: .26, gap: 160},
+	harvest: {files: ['garden-harvest.ogg'], gain: .28, gap: 200},
 	water: {files: ['garden-water.ogg'], gain: .32, gap: 170},
 } satisfies Record<string, Cue>;
 
@@ -105,7 +107,10 @@ class WorldSounds {
 
 	enter(room: RoomId): void {
 		if (this.room === room) return;
-		if (this.room !== null) this.play('door');
+		// Sólo hay puerta si se entra o se sale de un lugar cerrado (el campamento, el puerto, la
+		// Arena y el patio son al aire libre: ahí no suena).
+		const outdoor = (r: RoomId) => r === 'city' || r === 'campfire' || r === 'port' || r === 'arena' || r.startsWith('yard:');
+		if (this.room !== null && !(outdoor(this.room) && outdoor(room))) this.play('door');
 		this.room = room;
 		this.syncAmbient();
 	}

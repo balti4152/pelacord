@@ -414,10 +414,15 @@ export class WorldEngine {
 				const tvScreen = tvObj.getObjectByName('Screen') as THREE.Mesh | undefined;
 				if (tvScreen?.isMesh) {
 					tvScreen.geometry = tvScreen.geometry.clone();
+					// clone() comparte `userData` con el modelo guardado: sin esto, la segunda vez que se
+					// entraba a la sala no se armaban las coordenadas de la imagen y se rompía la carga.
+					tvScreen.geometry.userData = {};
 					planarScreenUv(tvScreen.geometry);
-					const uv = tvScreen.geometry.attributes.uv as THREE.BufferAttribute;
-					for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
-					uv.needsUpdate = true;
+					const uv = tvScreen.geometry.attributes.uv as THREE.BufferAttribute | undefined;
+					if (uv) {
+						for (let i = 0; i < uv.count; i++) uv.setX(i, 1 - uv.getX(i));
+						uv.needsUpdate = true;
+					}
 				}
 				this.prepareScene(tvObj, true);
 				scene.add(tvObj);
@@ -487,9 +492,11 @@ export class WorldEngine {
 			const arrival = room === 'city' && fromRoom ? this.doors.find((d) => d.room === (fromRoom.startsWith('house:') ? 'house' : fromRoom)) : null;
 			this.me.companion?.reset();
 			const backyardDoor = isHouse && fromRoom?.startsWith('yard:') ? this.doors.find((d) => d.name === 'yard') : undefined;
-			this.me.pos.copy(arrival ? arrival.pos : backyardDoor ? backyardDoor.pos.clone().add(new THREE.Vector3(0, 0, -0.7)) : this.spawn);
+			// Se entra por la puerta de salida de la sala (no desde abajo de todo), mirando hacia adentro.
+			const byDoor = !arrival && !backyardDoor && this.exitDoorSpot && this.exitPoint ? this.exitPoint : null;
+			this.me.pos.copy(arrival ? arrival.pos : backyardDoor ? backyardDoor.pos.clone().add(new THREE.Vector3(0, 0, -0.7)) : byDoor ?? this.spawn);
 			this.me.target.copy(this.me.pos);
-			this.me.ry = arrival ? arrival.ry : 0;
+			this.me.ry = arrival ? arrival.ry : byDoor ? Math.PI / 2 : 0;
 			this.me.seat = null;
 			this.me.anim = 'idle';
 			this.me.avatar.setBase('idle');

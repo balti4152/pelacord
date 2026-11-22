@@ -809,7 +809,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const tvOn = myTv && myTv.mode !== 'off';
 
 	return (
-		<div className={`world${hidden ? ' is-hidden' : ''}${ownsYard || room === 'shop' ? ' has-farm-access' : ''}`} aria-hidden={hidden} onClickCapture={(event) => {
+		<div className={`world${hidden ? ' is-hidden' : ''}${placing ? ' is-placing' : ''}${ownsYard || room === 'shop' ? ' has-farm-access' : ''}`} aria-hidden={hidden} onClickCapture={(event) => {
 			if (!(event.target instanceof Element)) return;
 			const choice = event.target.closest<HTMLButtonElement>('.t-tabs button, .t-swatch, .t-toggle, .t-item, .tg-game, .ar-game, .ar-chip, .ar-stepper button');
 			if (choice && !choice.disabled && !choice.matches('.is-active, .is-picked')) worldSounds.play('select');
@@ -1047,7 +1047,14 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			{panel === 'pets' ? <PetPanel shop={false} onClose={() => setPanel(null)} /> : null}
 			{catalog && panel === 'shop-furniture' ? <ShopPanel catalog={catalog} kind="furniture" onClose={() => setPanel(null)} onTry={() => {}} /> : null}
 			{catalog && panel === 'decorate' ? (
-				<DecoratePanel catalog={catalog} placing={placing} onPlace={(item) => setPlacing(item)} onRotate={() => engineRef.current?.rotateGhost()} onClose={() => { setPlacing(null); setPanel(null); }} />
+				placing ? (
+					// Moviendo un mueble: se esconde todo, sólo queda esta barrita abajo.
+					<div className="t-placing-bar">
+						<span>Hacé clic donde lo quieras poner</span>
+						{placing.id.startsWith('fixture:') ? null : <button type="button" className="t-btn is-soft is-small" onClick={() => engineRef.current?.rotateGhost()}>Girar (R)</button>}
+						<button type="button" className="t-btn is-soft is-small" onClick={() => setPlacing(null)}>Cancelar</button>
+					</div>
+				) : <DecoratePanel catalog={catalog} placing={placing} onPlace={(item) => setPlacing(item)} onRotate={() => engineRef.current?.rotateGhost()} onClose={() => { setPlacing(null); setPanel(null); }} />
 			) : null}
 			{panel === 'arena' ? (
 				<ArenaAdminPanel
