@@ -8,7 +8,7 @@ import {useLocalScreen, useMeshRemotes, useSpeakingIds} from '@/components/Remot
 import {openSharePicker} from '@/lib/sharePicker';
 import {positionOf} from '@/lib/movieRooms';
 import {
-	addCoins, type Anim, type CatalogItem, type Emote, getProfile, onBell, onCasinoBet, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
+	addCoins, type Anim, type CatalogItem, type Emote, getProfile, onBell, onCasinoBet, onCasinoChips, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
 	sendWorld, updateProfile, useCatalog, useProfile, useWorldPeers,
 } from '@/world/core';
 import {type Interaction, WorldEngine} from '@/world/engine';
@@ -32,7 +32,7 @@ import {PetPanel} from '@/components/world/PetPanel';
 import {CasinoPanel} from '@/components/world/CasinoPanel';
 import {FarmLandPanel, FarmShop, FarmToolbar, SmithPanel} from '@/components/world/FarmPanels';
 import {RestaurantPanel} from '@/components/world/RestaurantPanel';
-import {type CasinoGame, type Spin} from '@/world/casino';
+import {type CasinoGame, type RouletteChip, type Spin} from '@/world/casino';
 import {type Crop, type FarmAction, makeFarm, readLand, tend} from '@/world/farmData';
 import {useStore} from '@/state/store';
 
@@ -411,6 +411,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const sharerId = myTv?.mode === 'screen' ? myTv.sharerId ?? null : null;
 	const screenStream = sharerId === state.me.id ? localScreen : sharerId ? (remotes.find((r) => r.peerId === sharerId)?.video ?? null) : null;
 	const movieRoom = myTv?.mode === 'movie' && myTv.movieRoomId ? movieRoomsList.find((m) => m.id === myTv.movieRoomId) ?? null : null;
+	// La peli capturada del reproductor: se dibuja EN la pantalla de la tele.
+	const [movieStream, setMovieStream] = useState<MediaStream | null>(null);
+	const movieStreamRef = useRef<MediaStream | null>(null);
+	movieStreamRef.current = movieStream;
 
 	useEffect(() => {
 		const engine = engineRef.current;
@@ -420,11 +424,12 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		engine.setScreening(Boolean(screenStream || movieRoom));
 		if (myTv?.mode === 'screen' && screenStream) engine.setScreen({stream: screenStream});
 		else if (myTv?.mode === 'screen') engine.setScreen({title: `Esperando la pantalla de ${nameOf(sharerId ?? '')}…`});
+		else if (movieRoom && movieStream) engine.setScreen({stream: movieStream});
 		else if (movieRoom) engine.setScreen({image: movieRoom.media.poster || null, title: movieRoom.media.title});
 		else if (myTv?.mode === 'movie') engine.setScreen({title: 'La película terminó'});
 		else if (!track) engine.setScreen({});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [myTv?.mode, myTv?.paused, myTv?.party, track, screenStream, movieRoom?.id, movieRoom?.media.poster, room, catalog]);
+	}, [myTv?.mode, myTv?.paused, myTv?.party, track, screenStream, movieRoom?.id, movieRoom?.media.poster, movieStream, room, catalog]);
 
 	// La música de la tele: suena sólo acá, con volumen según la distancia; la pantalla muestra lo que suena.
 	useEffect(() => {
@@ -506,6 +511,17 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				return;
 			}
 			el.style.display = 'block';
+			tvVolume.current = volumeForDistance(engine.distanceToScreen());
+			// Con la peli ya dibujada en la tele, el reproductor queda escondido atrás (sigue andando
+			// y sonando, pero no tapa nada).
+			el.classList.toggle('is-captured', Boolean(movieStreamRef.current));
+			if (movieStreamRef.current) {
+				el.style.left = '0px';
+				el.style.top = '0px';
+				el.style.width = '1280px';
+				el.style.height = '720px';
+				return;
+			}
 			el.style.left = `${rect.left}px`;
 			el.style.top = `${rect.top}px`;
 			el.style.width = `${rect.width}px`;
@@ -593,9 +609,21 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		}
 		setInvite({id: m.id, name: names[m.id] ?? m.name, room: m.room});
 	}), [names]);
+	// La ruleta compartida: las fichas de los demás y la bola que tiran.
+	const [rouletteChips, setRouletteChips] = useState<Record<string, RouletteChip[]>>({});
+	const [remoteSpin, setRemoteSpin] = useState<{id: string; name: string; number: number; at: number} | null>(null);
+	useEffect(() => onCasinoChips((m) => {
+		if (m.room !== roomRef.current) return;
+		setRouletteChips((all) => ({...all, [m.id]: m.chips.slice(0, 60) as RouletteChip[]}));
+	}), []);
+	useEffect(() => {
+		if (room !== 'casino') setRouletteChips({});
+	}, [room]);
 	// Lo que apuestan los demás en el casino: globito arriba de su cabeza, y la máquina o la ruleta se mueve.
 	useEffect(() => onCasinoBet((m) => {
 		if (m.room !== roomRef.current || hiddenRef.current) return;
+		const rs = m.spin as Spin | undefined;
+		if (rs?.kind === 'roulette') setRemoteSpin({id: m.id, name: nameRef.current(m.id), number: rs.number, at: Date.now()});
 		const engine = engineRef.current;
 		if (!engine) return;
 		const spin = m.spin as Spin | undefined;
@@ -788,7 +816,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		}}>
 			<div className="world-stage" ref={hostRef} />
 			<div className="w-tv-host" ref={tvHostCallback} />
-			{tvHost && movieRoom && !hidden && joinedMovieId === movieRoom.id ? <MoviePlayer tv={{host: tvHost, volume: movieVolume}} /> : null}
+			{tvHost && movieRoom && !hidden && joinedMovieId === movieRoom.id ? <MoviePlayer tv={{host: tvHost, volume: movieVolume, onStream: setMovieStream}} /> : null}
 			{!catalog ? <div className="world-loading"><span className="t-spinner" /> Armando el mundo…</div> : null}
 
 			<header className="t-hud-top">
@@ -1043,6 +1071,9 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			) : null}
 			{panel === 'fishmarket' ? <FishMarketPanel onClose={() => setPanel(null)} onSold={(c) => flash(`Tano te pagó ${c} pelamonedas`)} /> : null}
 			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)}
+				others={Object.entries(rouletteChips).filter(([id]) => peers[id]?.room === 'casino').map(([id, chips]) => ({id, name: nameRef.current(id), color: peers[id]?.color ?? '#8a5cff', chips}))}
+				remoteSpin={remoteSpin}
+				onChips={(chips) => sendWorld({kind: 'casino-chips', id: state.me.id, room: roomRef.current, chips})}
 				onBet={(bet) => {
 					engineRef.current?.casinoBubble(state.me.id, bet.bets, bet.payout, bet.total, bet.delay);
 					sendWorld({kind: 'casino', id: state.me.id, room: roomRef.current, bets: bet.bets, payout: bet.payout, total: bet.total, delay: bet.delay, spin: bet.spin});

@@ -25,6 +25,7 @@ import {RoomEffects} from '@/world/roomEffects';
 import {buildExitDoor, EXIT_DOORS} from '@/world/exitDoor';
 import {buildRadio} from '@/world/radio';
 import {nearestMachine, upgradeCasino} from '@/world/casinoDecor';
+import {fillCasino} from '@/world/casinoFill';
 import type {Spin} from '@/world/casino';
 import {iconSvg} from '@/world/icons';
 
@@ -424,7 +425,12 @@ export class WorldEngine {
 			}
 		}
 		// El casino: tres tragamonedas finitas en lugar de la gorda, y sin lámparas tapando carteles.
-		if (room === 'casino') upgradeCasino(scene);
+		if (room === 'casino') {
+			upgradeCasino(scene);
+			const filled = fillCasino(scene);
+			this.hotspots.push(...filled.hotspots);
+			this.bounds = {...this.bounds, obstacles: [...this.bounds.obstacles, ...filled.obstacles]};
+		}
 		// El campamento: una radio sobre un tronco (sólo música).
 		if (room === 'campfire') {
 			const radio = buildRadio();

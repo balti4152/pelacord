@@ -317,3 +317,53 @@
 	.pc-slot-confetti { display: none; }
 }
 
+
+/* Ruleta compartida: las fichas de los demás en mi paño. */
+.pc-square { position: relative; }
+.pc-other-chip {
+	position: absolute;
+	right: 2px;
+	top: 2px;
+	display: inline-flex;
+	align-items: center;
+	gap: 2px;
+	padding: 1px 5px 1px 1px;
+	border-radius: 999px;
+	background: rgba(20, 8, 16, 0.82);
+	color: #fff;
+	font-size: 10px;
+	font-weight: 900;
+	box-shadow: 0 0 0 2px var(--c);
+	pointer-events: none;
+	z-index: 2;
+}
+.pc-other-chip + .pc-other-chip { top: auto; bottom: 2px; }
+.pc-other-chip b, .pc-table-mates b {
+	display: grid;
+	place-items: center;
+	width: 15px;
+	height: 15px;
+	border-radius: 50%;
+	background: var(--c);
+	font-size: 9px;
+}
+.pc-table-mates {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 6px 0;
+}
+.pc-table-mates span {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 10px 4px 4px;
+	border-radius: 999px;
+	background: rgba(255, 255, 255, 0.08);
+	box-shadow: inset 0 0 0 2px var(--c);
+	color: #fff6e0;
+	font-weight: 800;
+	font-size: 12px;
+}
+.pc-table-mates b { width: 20px; height: 20px; font-size: 11px; }
+.pc-table-mates em { font-style: normal; opacity: 0.7; font-weight: 700; }

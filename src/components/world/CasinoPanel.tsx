@@ -62,8 +62,15 @@ function SlotStage({spin, running, reveal, notice}: {spin: Extract<Spin, {kind: 
 	);
 }
 
-function RouletteStage({turn, chips, onBet, running, history, notice}: {
-	turn: WheelTurn | null; chips: RouletteChip[]; onBet: (bet: RouletteBet) => void; running: boolean; history: number[]; notice: string;
+export interface RouletteNeighbor {
+	id: string;
+	name: string;
+	color: string;
+	chips: RouletteChip[];
+}
+
+function RouletteStage({turn, chips, onBet, running, history, notice, others}: {
+	turn: WheelTurn | null; chips: RouletteChip[]; onBet: (bet: RouletteBet) => void; running: boolean; history: number[]; notice: string; others: RouletteNeighbor[];
 }): JSX.Element {
 	const result = running || !turn ? null : turn.number;
 	const totals = new Map<RouletteBet, number>();
@@ -76,6 +83,10 @@ function RouletteStage({turn, chips, onBet, running, history, notice}: {
 			disabled={running} aria-label={accessibleLabel + (paid ? ', ' + fmt(paid) + ' apostadas' : '')}
 			onClick={() => onBet(bet)}>
 			{label}{paid ? <CasinoChip value={paid} color="#9c5b4f" small /> : null}
+			{others.map((o) => {
+				const theirs = o.chips.filter((c) => c.bet === bet).reduce((t, c) => t + c.stake, 0);
+				return theirs ? <span key={o.id} className="pc-other-chip" style={{'--c': o.color} as CSSProperties} title={o.name + ': ' + fmt(theirs)}><b>{o.name.slice(0, 1).toUpperCase()}</b>{fmt(theirs)}</span> : null;
+			})}
 		</button>;
 	}
 
@@ -91,6 +102,9 @@ function RouletteStage({turn, chips, onBet, running, history, notice}: {
 				</div> : null}
 			</div>
 		</div>
+		{others.length ? <div className="pc-table-mates" aria-label="Los que juegan en esta mesa">
+			{others.map((o) => <span key={o.id} style={{'--c': o.color} as CSSProperties}><b>{o.name.slice(0, 1).toUpperCase()}</b>{o.name}<em>{o.chips.length ? fmt(o.chips.reduce((t, c) => t + c.stake, 0)) + ' en el paño' : 'mirando'}</em></span>)}
+		</div> : null}
 		<div className="pc-betting-felt">
 			<div className="pc-betting-grid" aria-label="Paño de ruleta">
 				{button(0, '0', 'is-green pc-zero')}
@@ -160,8 +174,13 @@ export interface CasinoBet {
 	spin?: Spin;
 }
 
-export function CasinoPanel({initial, onClose, onSpin, onBet, playerName}: {
+export function CasinoPanel({initial, onClose, onSpin, onBet, playerName, others = [], remoteSpin = null, onChips}: {
 	initial: CasinoGame; onClose: () => void; onSpin: (spin: Spin) => void; onBet?: (bet: CasinoBet) => void; playerName: string;
+	/** Los demás en la ruleta (sus fichas se ven en mi paño). */
+	others?: RouletteNeighbor[];
+	/** Alguien de la mesa tiró la bola: mi rueda también gira. */
+	remoteSpin?: {id: string; name: string; number: number; at: number} | null;
+	onChips?: (chips: RouletteChip[]) => void;
 }): JSX.Element {
 	const [game, setGame] = useState(initial);
 	const [stake, setStake] = useState<number>(BETS[0]);
@@ -182,6 +201,26 @@ export function CasinoPanel({initial, onClose, onSpin, onBet, playerName}: {
 	const inHand = Boolean(round && !round.result);
 	const rouletteStake = chips.reduce((total, chip) => total + chip.stake, 0);
 	const wager = game === 'roulette' ? rouletteStake : stake;
+
+	// Mis fichas viajan a los de la mesa (así ven qué estoy armando).
+	useEffect(() => {
+		if (game === 'roulette') onChips?.(chips);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [chips, game]);
+	useEffect(() => () => onChips?.([]), []); // eslint-disable-line react-hooks/exhaustive-deps
+	// La bola que tiró otro de la mesa: gira mi rueda también (si no estoy girando yo).
+	useEffect(() => {
+		if (!remoteSpin || game !== 'roulette' || pending.current) return;
+		setTurn({number: remoteSpin.number, at: performance.now()});
+		setNotice(remoteSpin.name + ' tiró la bola…');
+		worldSounds.play('roulette', 0.7);
+		const id = window.setTimeout(() => {
+			setHistory((recent) => [remoteSpin.number, ...recent].slice(0, 5));
+			setNotice('Salió el ' + remoteSpin.number + ' (tiró ' + remoteSpin.name + ')');
+		}, SPIN_MS.roulette);
+		return () => window.clearTimeout(id);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [remoteSpin?.at]);
 
 	useEffect(() => {
 		close.current?.focus({preventScroll: true});
@@ -311,7 +350,7 @@ export function CasinoPanel({initial, onClose, onSpin, onBet, playerName}: {
 			</header>
 			<div className="pc-casino-stage">
 				{game === 'slots' ? <SlotStage spin={slots} running={running} reveal={reveal} notice={notice} /> :
-					game === 'roulette' ? <RouletteStage turn={turn} chips={chips} onBet={addChip} running={running} history={history} notice={notice} /> :
+					game === 'roulette' ? <RouletteStage turn={turn} chips={chips} onBet={addChip} running={running} history={history} notice={notice} others={others} /> :
 						<BlackjackStage round={round} name={playerName} />}
 			</div>
 			<footer className="pc-casino-controls">

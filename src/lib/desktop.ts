@@ -112,6 +112,8 @@ interface DesktopTransport {
 	tmdbMovie(id: number, mediaType?: 'movie' | 'tv'): Promise<{ok: boolean; movie: TmdbMovie | null}>;
 	/** Películas: destraba o traba la barra de subtítulos del reproductor (los elige cada uno). */
 	movieSubtitles(viewId: number, enable: boolean): Promise<{ok: boolean; error?: string}>;
+	/** Id para capturar el video del reproductor como stream (la peli en la tele del mundo 3D). */
+	movieMediaSource?(viewId: number): Promise<string | null>;
 	spotifyLogout(): Promise<boolean>;
 	/** Música: URL directa del audio, para streamear sin descargar. */
 	getAudioUrl(target: string): Promise<string | null>;

@@ -121,6 +121,8 @@ export type WorldMessage =
 	/** Timbre: "estoy en tu puerta, ¿me dejás entrar?". */
 	| {kind: 'bell'; id: string; name: string}
 	/** Una apuesta en el casino (los demás ven el globito y, si gana, el festejo). */
+	/** Las fichas que alguien tiene puestas en el paño de la ruleta (las ven los de la misma mesa). */
+	| {kind: 'casino-chips'; id: string; room: RoomId; chips: Array<{bet: number | string; stake: number}>}
 	| {kind: 'casino'; id: string; room: RoomId; bets: CasinoBetInfo[]; payout: number; total: number; delay: number; spin?: unknown}
 	| {kind: 'game'; g: GameMessage};
 
@@ -296,6 +298,13 @@ export interface CasinoBetInfo {
 	tone?: string;
 }
 
+const chipsListeners = new Set<(m: Extract<WorldMessage, {kind: 'casino-chips'}>) => void>();
+export function onCasinoChips(callback: (m: Extract<WorldMessage, {kind: 'casino-chips'}>) => void): () => void {
+	startNet();
+	chipsListeners.add(callback);
+	return () => chipsListeners.delete(callback);
+}
+
 export function onCasinoBet(callback: (m: Extract<WorldMessage, {kind: 'casino'}>) => void): () => void {
 	startNet();
 	casinoListeners.add(callback);
@@ -350,6 +359,8 @@ function startNet(): void {
 			for (const listener of emoteListeners) listener(message);
 		} else if (message.kind === 'invite' && message.id === from) {
 			for (const listener of inviteListeners) listener(message);
+		} else if (message.kind === 'casino-chips' && message.id === from && Array.isArray(message.chips)) {
+			for (const listener of chipsListeners) listener(message);
 		} else if (message.kind === 'casino' && message.id === from && Array.isArray(message.bets)) {
 			for (const listener of casinoListeners) listener(message);
 		} else if (message.kind === 'bell' && message.id === from) {

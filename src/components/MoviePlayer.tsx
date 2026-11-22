@@ -38,7 +38,7 @@ function formatTime(seconds: number): string {
  * pone justo encima de la pantalla), sin controles propios (se manejan desde el panel de la tele) y
  * con el volumen que da la distancia a la pantalla.
  */
-export function MoviePlayer({tv}: {tv?: {host: HTMLElement; volume: number}} = {}): JSX.Element | null {
+export function MoviePlayer({tv}: {tv?: {host: HTMLElement; volume: number; onStream?: (stream: MediaStream | null) => void}} = {}): JSX.Element | null {
 	const {state, myJoinedMovieRoom, movieCommand, movieHostSync, movieLeave, movieRoomViewers} = useStore();
 	const room = myJoinedMovieRoom;
 	const isHost = Boolean(room && room.hostId === state.me.id);
@@ -293,6 +293,37 @@ export function MoviePlayer({tv}: {tv?: {host: HTMLElement; volume: number}} = {
 			return next;
 		});
 	}, []);
+
+	// En la tele del mundo 3D: el video del reproductor se captura como stream y el mundo lo dibuja
+	// sobre la pantalla (si la captura falla, queda el recuadro de siempre).
+	const onStream = tv?.onStream;
+	useEffect(() => {
+		if (!onStream || !ready || !viewIdRef.current) return;
+		let alive = true;
+		let stream: MediaStream | null = null;
+		void (async () => {
+			try {
+				const id = await getDesktopTransport()?.movieMediaSource?.(viewIdRef.current);
+				if (!id || !alive) return;
+				stream = await navigator.mediaDevices.getUserMedia({
+					audio: false,
+					video: {mandatory: {chromeMediaSource: 'tab', chromeMediaSourceId: id, maxWidth: 1280, maxHeight: 720, maxFrameRate: 30}} as unknown as MediaTrackConstraints,
+				});
+				if (!alive) {
+					stream.getTracks().forEach((t) => t.stop());
+					return;
+				}
+				onStream(stream);
+			} catch (error) {
+				console.warn('[pelacord] no se pudo poner la peli en la tele', error);
+			}
+		})();
+		return () => {
+			alive = false;
+			stream?.getTracks().forEach((t) => t.stop());
+			onStream(null);
+		};
+	}, [onStream, ready, media?.tmdbId]);
 
 	if (!room || !media) return null;
 

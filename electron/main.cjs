@@ -1575,6 +1575,19 @@ ipcMain.handle('pelacord:tmdb-movie', async (_event, id, mediaType = 'movie') =>
  * le devuelve los clics al reproductor para que la persona elija; cuando se apaga, lo vuelve a
  * dejar cerrado y sin clics.
  */
+// La película en la tele del mundo 3D: un id para capturar el video del <webview> como stream
+// (así se dibuja EN la pantalla de la tele, en vez de un recuadro encima de todo).
+ipcMain.handle('pelacord:movie-media-source', (event, viewId) => {
+	try {
+		const contents = webContents.fromId(Number(viewId));
+		if (!contents || contents.isDestroyed()) return null;
+		return contents.getMediaSourceId(event.sender);
+	} catch (error) {
+		console.error('[pelacord] movie media source', String(error));
+		return null;
+	}
+});
+
 ipcMain.handle('pelacord:movie-subtitles', async (_event, viewId, enable) => {
 	const guest = webContents.fromId(Number(viewId) || 0);
 	if (!guest || guest.getType() !== 'webview') return {ok: false, error: 'No encontré el reproductor.'};

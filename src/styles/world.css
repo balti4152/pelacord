@@ -3731,3 +3731,10 @@
 	0%, 100% { transform: translateY(-100%) scale(1); }
 	50% { transform: translateY(-108%) scale(1.08); }
 }
+
+/* La peli ya se ve en la pantalla de la tele: el reproductor queda escondido (sigue sonando). */
+.w-tv-host.is-captured {
+	opacity: 0.01;
+	pointer-events: none;
+	z-index: -1 !important;
+}
