@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
-	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Leaf, Lock, Plus, Popcorn, Shirt,
+	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Leaf, Lock, Trees, Plus, Popcorn, Shirt,
 	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy, Bike, CarFront,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
@@ -32,7 +32,7 @@ const BottomIcon = createLucideIcon('WorldBottom', [
 export const SLOT_ICON: Record<string, LucideIcon> = {
 	hair: HairIcon, eyes: Eye, brows: BrowsIcon, mouth: MouthIcon, cheeks: CheeksIcon, top: Shirt, bottom: BottomIcon, shoes: Footprints,
 	hat: Crown, facewear: Glasses, back: Backpack, costume: Popcorn, furniture: Armchair, mount: Bike,
-	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles, plantas: Leaf,
+	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles, plantas: Leaf, exterior: Trees,
 };
 
 // ------------------------------------------------------------ vista previa --
@@ -161,10 +161,10 @@ function Swatches({colors, value, onPick}: {colors: string[]; value: string; onP
 	return (
 		<div className="t-swatches">
 			{colors.map((color) => (
-				<button key={color} type="button" className={`t-swatch${color.toLowerCase() === value.toLowerCase() ? ' is-active' : ''}`} style={{background: color}} aria-label={color} onClick={() => onPick(color)} />
+				<button key={color} type="button" className={`t-swatch${color.toLowerCase() === value.toLowerCase() ? ' is-active' : ''}`} style={{background: color}} aria-label={color} aria-pressed={color.toLowerCase() === value.toLowerCase()} onClick={() => onPick(color)} />
 			))}
 			<label className="t-swatch is-custom" title="Otro color">
-				<input type="color" value={value} onChange={(e) => onPick(e.target.value)} />
+				<input type="color" aria-label="Elegir otro color" value={value} onChange={(e) => onPick(e.target.value)} />
 			</label>
 		</div>
 	);
@@ -216,7 +216,8 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn, onMountShop}: {
 	const mountColor = mount ? mountColors[mount] ?? mountItem?.defaultColor ?? '#ad7dff' : undefined;
 	const palettes = catalog.avatar.palettes;
 	const current = EDITOR_TABS.find((t) => t.id === tab) ?? EDITOR_TABS[0];
-	const locked = useMemo(() => lockedItems(catalog, draft, profile.owned), [catalog, draft, profile.owned]);
+	const locked = useMemo(() => tab === 'mounts' && !firstTime && draft === profile.look ? []
+		: lockedItems(catalog, draft, profile.owned), [catalog, draft, profile.look, profile.owned, firstTime, tab]);
 	const cost = locked.reduce((sum, item) => sum + item.price, 0);
 	const canAfford = cost <= profile.coins;
 
@@ -429,29 +430,35 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies, initialSec
 
 // -------------------------------------------------------------- decorar ----
 
-const FIXTURES: Array<{id: string; name: string}> = [
-	{id: 'fixture:tv', name: 'La tele'},
-	{id: 'fixture:window', name: 'La ventana'},
-	{id: 'fixture:door', name: 'La puerta al patio'},
+const FIXTURES: Array<{id: string; name: string; move?: boolean; hide?: boolean; paint?: boolean}> = [
+	{id: 'fixture:tv', name: 'La tele', move: true},
+	{id: 'fixture:window', name: 'La ventana', move: true, hide: true},
+	{id: 'fixture:door', name: 'La puerta al patio', move: true, paint: true},
+	{id: 'fixture:exit', name: 'La puerta de salida', paint: true},
 ];
 const FURNITURE_SWATCHES = ['#8a5cff', '#f5b326', '#ff7350', '#6bc7ff', '#38d39f', '#ff4fa8', '#e0365a', '#5c428f', '#9c6236', '#f4ead8', '#3a2a33', '#ffffff'];
 
-export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
+export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose, tools, showFixtures = true}: {
 	catalog: Catalog;
 	placing: PlacedFurniture | null;
 	onPlace: (item: PlacedFurniture | null) => void;
 	onRotate: () => void;
 	onClose: () => void;
+	/** Botones de arriba: catálogo, paredes y piso, neón. */
+	tools?: ReactNode;
+	/** Mostrar la tele, la ventana y las puertas (sólo adentro de la casa). */
+	showFixtures?: boolean;
 }): JSX.Element {
 	const profile = useProfile();
 	const [painting, setPainting] = useState<string | null>(null);
 	const name = (id: string) => FIXTURES.find((f) => f.id === id)?.name ?? catalog.items.find((i) => i.id === id)?.name ?? id;
 	const canPaint = (id: string) => Boolean(catalog.items.find((i) => i.id === id)?.recolor?.length);
-	const furniture = profile.furniture.filter((f) => !f.id.startsWith('fixture:'));
+	const furniture = profile.furniture.filter((f) => !/^(fixture:|style:|neon$)/.test(f.id));
 	const setItem = (item: PlacedFurniture, change: Partial<PlacedFurniture>) => updateProfile((p) => ({furniture: editFurniture(p.furniture, item, change)}));
 	const fixture = placing?.id.startsWith('fixture:');
 	return (
 		<Panel title="Decorar mi casa" icon={Brush} onClose={onClose} className="t-decorate">
+			{tools ? <div className="t-decorate-tools">{tools}</div> : null}
 			{placing ? (
 				<div className="t-callout">
 					<p><Move size={15} strokeWidth={2.8} /> {fixture
@@ -499,21 +506,36 @@ export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 					</li>
 				))}
 			</ul>
+			{showFixtures ? <>
 			<h3 className="t-subtitle">De la casa</h3>
 			<ul className="t-list">
 				{FIXTURES.map((f) => {
 					const saved = profile.furniture.find((i) => i.uid === f.id);
+					const setFixture = (change: Partial<PlacedFurniture>) => updateProfile((p) => ({
+						furniture: p.furniture.some((i) => i.uid === f.id)
+							? p.furniture.map((i) => (i.uid === f.id ? {...i, ...change} : i))
+							: [...p.furniture, {uid: f.id, id: f.id, x: null, z: null, rot: 0, ...change}],
+					}));
 					return (
-						<li key={f.id} className={placing?.uid === f.id ? 'is-active' : ''}>
+						<li key={f.id} className={`${placing?.uid === f.id ? 'is-active' : ''}${painting === f.id ? ' is-painting' : ''}`}>
 							<div className="t-deco-row">
-								<span className="t-list-name">{f.name}</span>
-								<button type="button" className="t-btn is-soft is-small" title="Mover por las paredes" onClick={() => onPlace(saved ?? {uid: f.id, id: f.id, x: null, z: null, rot: 0})}><Move size={13} strokeWidth={3} /></button>
-								{saved ? <button type="button" className="t-btn is-soft is-small" title="Volver a su lugar" onClick={() => updateProfile((p) => ({furniture: p.furniture.filter((i) => i.uid !== f.id)}))}>Original</button> : null}
+								{f.paint ? <button type="button" className="t-dot is-button" style={{background: saved?.color ?? '#5fb39a'}} title="Cambiar el color" onClick={() => setPainting((v) => (v === f.id ? null : f.id))} /> : null}
+								<span className="t-list-name">{f.name}{saved?.hidden ? <small> (sacada)</small> : null}</span>
+								{f.move && !saved?.hidden ? <button type="button" className="t-btn is-soft is-small" title="Mover por las paredes" onClick={() => onPlace(saved ?? {uid: f.id, id: f.id, x: null, z: null, rot: 0})}><Move size={13} strokeWidth={3} /></button> : null}
+								{f.hide ? <button type="button" className="t-btn is-soft is-small" onClick={() => setFixture({hidden: !saved?.hidden})}>{saved?.hidden ? 'Poner' : 'Sacar'}</button> : null}
+								{saved ? <button type="button" className="t-btn is-soft is-small" title="Volver a como venía" onClick={() => updateProfile((p) => ({furniture: p.furniture.filter((i) => i.uid !== f.id)}))}>Original</button> : null}
 							</div>
+							{painting === f.id ? (
+								<div className="t-swatches">
+									{FURNITURE_SWATCHES.map((c) => <button key={c} type="button" className={`t-swatch${saved?.color === c ? ' is-on' : ''}`} style={{background: c}} aria-label={c} onClick={() => setFixture({color: c})} />)}
+									<label className="t-swatch is-custom" title="Otro color"><input type="color" value={saved?.color ?? '#5fb39a'} onChange={(e) => setFixture({color: e.target.value})} /></label>
+								</div>
+							) : null}
 						</li>
 					);
 				})}
 			</ul>
+			</> : null}
 		</Panel>
 	);
 }

@@ -23,7 +23,7 @@ export const EMOTES: EmoteDef[] = [
 	{id: 'hips', label: 'Caderazo', icon: Flame, color: '#ff7a45', key: '5', loop: true},
 	{id: 'disco', label: 'Disco', icon: Disc3, color: '#ff4fa8', key: '6', loop: true},
 	{id: 'pogo', label: 'Pogo', icon: Zap, color: '#ffc93c', key: '7', loop: true},
-	{id: 'sway', label: 'Recital', icon: Waves, color: '#4fd1c5', key: '8', loop: true},
+	{id: 'sway', label: 'Caballito', icon: Waves, color: '#4fd1c5', key: '8', loop: true},
 	{id: 'robot', label: 'Robot', icon: Bot, color: '#3fc2c9', key: '9', loop: true},
 	{id: 'clap', label: 'Aplaudir', icon: Sparkles, color: '#ff9e3c', key: '0', loop: true},
 ];

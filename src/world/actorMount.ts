@@ -3,19 +3,24 @@ import {loadGLB} from '@/world/avatars';
 import type {CatalogItem} from '@/world/core';
 import {type MountId, readMountColor} from '@/world/mountCatalog';
 import {MountTrail} from '@/world/mountTrail';
+import type {RiderTargets} from '@/world/riderPose';
 
 const RIDE = {
-	mount_bike: {anim: 'rideBike', height: .733, setback: -.23, wheel: .282},
-	mount_car: {anim: 'rideCar', height: .414, setback: -.20, wheel: .171},
-	mount_broom: {anim: 'rideBroom', height: .267, setback: -.035, wheel: 0},
+	mount_bike: {anim: 'rideBike', wheel: .282},
+	mount_car: {anim: 'rideCar', wheel: .171},
+	mount_broom: {anim: 'rideBroom', wheel: 0},
 } as const;
 const PEDAL_RADIUS = .245;
+const TAU = Math.PI * 2;
 
 export class ActorMount {
 	readonly root = new THREE.Group();
 	readonly fit;
-	hover = 0;
-	pedal = 0;
+	readonly targets: RiderTargets = {
+		grips: [new THREE.Vector3(), new THREE.Vector3()],
+		feet: [new THREE.Vector3(), new THREE.Vector3()],
+	};
+	private anchors = new Map<string, THREE.Object3D>();
 	private wheels: THREE.Object3D[] = [];
 	private crank?: THREE.Object3D;
 	private paint = new Map<THREE.Material, THREE.MeshStandardMaterial>();
@@ -42,8 +47,12 @@ export class ActorMount {
 			const model = scene.clone(true);
 			const recolor = this.item.recolor;
 			model.traverse((node) => {
-				if (/^Wheel_(?:Front|Rear|[0-3])$/.test(node.name)) this.wheels.push(node);
-				if (node.name === 'Crank') this.crank = node;
+				const anchor = node.userData.pelacord_mount_anchor;
+				if (typeof anchor === 'string') {
+					this.anchors.set(anchor, node);
+					if (anchor.startsWith('Wheel_')) this.wheels.push(node);
+					if (anchor === 'Crank') this.crank = node;
+				}
 				const mesh = node as THREE.Mesh;
 				if (!mesh.isMesh) return;
 				mesh.castShadow = true;
@@ -63,7 +72,7 @@ export class ActorMount {
 			});
 			this.root.add(model);
 			if (this.id === 'mount_broom') this.trail = new MountTrail(this.parent, this.color);
-			this.ready = true;
+			this.ready = this.anchors.has('RideSeat');
 		} catch (error) {
 			console.warn('No se pudo cargar la montura', url, error);
 		}
@@ -96,18 +105,35 @@ export class ActorMount {
 		this.root.visible = true;
 		this.root.position.copy(pos);
 		this.root.rotation.y = heading;
-		for (const wheel of this.wheels) wheel.rotation.x = (wheel.rotation.x + distance / this.fit.wheel) % (Math.PI * 2);
+		for (const wheel of this.wheels) wheel.rotation.x = (wheel.rotation.x + distance / this.fit.wheel) % TAU;
 		if (this.crank) {
-			this.crank.rotation.x = (this.crank.rotation.x + distance / PEDAL_RADIUS) % (Math.PI * 2);
-			this.pedal = this.crank.rotation.x / (Math.PI * 2);
+			const angle = (this.crank.rotation.x + distance / PEDAL_RADIUS) % TAU;
+			this.crank.rotation.x = angle;
+			for (const name of ['Pedal_L', 'Pedal_R']) {
+				const pedal = this.anchors.get(name);
+				if (pedal) pedal.rotation.x = -angle;
+			}
 		}
 		if (this.trail) {
 			this.phase += dt;
-			this.hover = .165 + Math.sin(this.phase * 3.6) * .027;
-			this.root.position.y += this.hover;
-			this.trail.update(this.root.position, heading, distance > .007, dt);
+			this.root.position.y += .165 + Math.sin(this.phase * 3.6) * .027;
+			this.trail.update(this.root.position, heading, distance > Math.max(.00001, dt * .08), dt);
 		}
 		return true;
+	}
+
+	placeRider(position: THREE.Vector3): void {
+		this.anchors.get('RideSeat')?.getWorldPosition(position);
+		for (const [i, side] of ['L', 'R'].entries()) {
+			this.anchors.get(`Grip_${side}`)?.getWorldPosition(this.targets.grips[i]);
+			const pedal = this.anchors.get(`Pedal_${side}`);
+			if (pedal) {
+				pedal.getWorldPosition(this.targets.feet[i]);
+				this.targets.feet[i].y += .029;
+			} else {
+				this.anchors.get(`Foot_${side}`)?.getWorldPosition(this.targets.feet[i]);
+			}
+		}
 	}
 
 	dispose(): void {

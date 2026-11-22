@@ -55,6 +55,7 @@ export function buildExitDoor(color = 0x8a5a3c): THREE.Group {
 	group.name = 'ExitDoor';
 	const trim = glossy(0xf4ead8, 0.5);
 	const leaf = glossy(color, 0.55);
+	leaf.name = 'ExitDoorLeaf';
 	const brass = new THREE.MeshStandardMaterial({color: 0xffc94a, roughness: 0.25, metalness: 0.7});
 	const w = 1.1;
 	const h = 2.2;

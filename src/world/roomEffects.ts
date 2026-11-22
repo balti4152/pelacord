@@ -26,6 +26,8 @@ export class RoomEffects {
 	private readonly burst = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({color: 0xffce62, size: 0.075, transparent: true, depthWrite: false}));
 	private room: RoomId | null = null;
 	private ball: THREE.Object3D | undefined;
+	/** La base del techo de donde cuelga la bola (se esconde con ella). */
+	private ballMount: THREE.Object3D | undefined;
 	private ballY = 0;
 	private anchor = new THREE.Vector3();
 	private factor = 0;
@@ -64,6 +66,7 @@ export class RoomEffects {
 		this.group.visible = house || room === 'casino' || room === 'cinema';
 		if (house || room === 'cinema') {
 			this.ball = root.getObjectByName('DiscoBall');
+			this.ballMount = root.getObjectByName('Disco_ceiling_anchor') ?? root.getObjectByName('Disco ceiling anchor');
 			this.ballY = this.ball?.position.y ?? 0;
 			root.getObjectByName('DiscoAnchor')?.getWorldPosition(this.anchor);
 			root.traverse((obj) => {
@@ -103,6 +106,7 @@ export class RoomEffects {
 		}
 		this.cable.visible = false;
 		if (this.ball) this.ball.visible = false;
+		if (this.ballMount) this.ballMount.visible = false;
 		this.dots.visible = this.burst.visible = false;
 	}
 
@@ -168,6 +172,7 @@ export class RoomEffects {
 		if (this.ball) {
 			// Escondida en el techo cuando no hay joda; baja girando despacito cuando arranca.
 			this.ball.visible = p > 0.02;
+			if (this.ballMount) this.ballMount.visible = this.ball.visible;
 			this.ball.position.y = this.ballY + 0.9 - 2.15 * p;
 			if (!this.reducedMotion) this.ball.rotation.y += dt * 0.22;
 			this.ball.getWorldPosition(source);
@@ -283,7 +288,7 @@ export class RoomEffects {
 
 	clear(): void {
 		this.room = null;
-		this.ball = this.rotor = this.marble = undefined;
+		this.ball = this.ballMount = this.rotor = this.marble = undefined;
 		this.machines = [];
 		this.spin = null;
 		this.burstAt = -Infinity;

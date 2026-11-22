@@ -4,6 +4,7 @@
  * Todo lo del mundo viaja por la malla en el canal `world` (igual que la Jam): nada de servidor.
  * El perfil vive en este equipo (localStorage) y se comparte con los demás en cada anuncio.
  */
+import {OUTDOOR_ITEMS} from '@/world/outdoorDecor';
 import {useEffect, useState, useSyncExternalStore} from 'react';
 import {getDesktopTransport} from '@/lib/desktop';
 import {isPetId, type PetId} from '@/world/petCatalog';
@@ -90,6 +91,12 @@ export interface PlacedFurniture {
 	rot: number;
 	/** Posición y giro relativos a la tapa del mueble que lo sostiene. */
 	support?: FurnitureSupport;
+	/** Neones: los puntos de la tira en la sala ([x, y, z, …]). */
+	pts?: number[];
+	/** Puesto en el patio (no adentro de la casa). */
+	yard?: boolean;
+	/** Lo fijo de la casa que se sacó (la ventana). */
+	hidden?: boolean;
 }
 
 export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap' | 'hips' | 'disco' | 'pogo' | 'sway';
@@ -148,6 +155,10 @@ export function loadCatalog(): Promise<Catalog> {
 	catalogPromise ??= fetch('catalog.json').then((r) => {
 		if (!r.ok) throw new Error(`catalog ${r.status}`);
 		return r.json() as Promise<Catalog>;
+	}).then((catalog) => {
+		// La decoración de afuera (faroles, guirnalda, plantas de la plaza) se suma con código.
+		for (const item of OUTDOOR_ITEMS) if (!catalog.items.some((i) => i.id === item.id)) catalog.items.push(item);
+		return catalog;
 	});
 	return catalogPromise;
 }
@@ -168,7 +179,7 @@ export const SLOT_LABEL: Record<string, string> = {
 	hair: 'Pelo', eyes: 'Ojos', brows: 'Cejas', mouth: 'Boca', cheeks: 'Cachetes', top: 'Arriba',
 	bottom: 'Abajo', shoes: 'Calzado', hat: 'Sombreros', facewear: 'Lentes y más', back: 'Bolsos y alas',
 	costume: 'Disfraces', furniture: 'Muebles', mount: 'Monturas',
-	plantas: 'Plantas', deco: 'Decoración',
+	plantas: 'Plantas', deco: 'Decoración', exterior: 'Exterior',
 };
 export const SLOT_EMOJI: Record<string, string> = {
 	hair: '💇', eyes: '👀', brows: '🤨', mouth: '😄', cheeks: '😊', top: '👕', bottom: '👖', shoes: '👟',

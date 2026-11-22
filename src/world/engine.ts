@@ -25,6 +25,8 @@ import {furniturePose, furnitureSurface, relativeToFurniture, surfaceContains, t
 import {GardenView} from '@/world/gardenView';
 import {type FarmAction, type FarmLand, inLot} from '@/world/farmData';
 import {RoomEffects} from '@/world/roomEffects';
+import {HouseDecor} from '@/world/houseDecor';
+import {loadFurnitureModel} from '@/world/outdoorDecor';
 import {buildExitDoor, EXIT_DOORS} from '@/world/exitDoor';
 import {buildRadio} from '@/world/radio';
 import {nearestMachine, upgradeCasino} from '@/world/casinoDecor';
@@ -496,7 +498,7 @@ export class WorldEngine {
 		this.stopFishing();
 		this.setTvView(false);
 		this.sun.position.set(-4, room === 'city' ? 16 : 10, -6);
-		if (isHouse) await this.setHouse(house ?? []);
+		if (isHouse || isYard) await this.setHouse(house ?? []);
 		if (token !== this.loadToken || this.disposed) return;
 		if (this.me) {
 			const arrival = room === 'city' && fromRoom ? this.doors.find((d) => d.room === (fromRoom.startsWith('house:') ? 'house' : fromRoom)) : null;
@@ -593,7 +595,20 @@ export class WorldEngine {
 		return solids;
 	}
 
+	/** Paredes, piso y neones de la casa. */
+	readonly houseDecor = new HouseDecor();
+	/** Cámara fija (por ejemplo, mirando una pared para dibujar un neón). */
+	cameraOverride: {pos: THREE.Vector3; look: THREE.Vector3} | null = null;
+	/** Alguien más maneja el mouse (dibujar neones): si devuelve true, el mundo no hace nada con el clic. */
+	pointerHook: ((kind: 'down' | 'move' | 'up', event: PointerEvent) => boolean) | null = null;
+
+	/** La cámara y el lienzo (para herramientas que dibujan sobre el mundo). */
+	viewContext(): {camera: THREE.Camera; canvas: HTMLCanvasElement; root: THREE.Object3D} {
+		return {camera: this.camera, canvas: this.renderer.domElement, root: this.roomGroup};
+	}
+
 	private clearRoom(): void {
+		this.houseDecor.reset();
 		this.me?.mount?.reset();
 		for (const actor of this.others.values()) actor.mount?.reset();
 		this.occlusion.clear();
@@ -686,10 +701,12 @@ export class WorldEngine {
 	async setHouse(items: PlacedFurniture[]): Promise<void> {
 		const token = this.loadToken;
 		const revision = ++this.houseRevision;
-		const placed = items.filter((i) => i.x !== null && i.z !== null && !i.id.startsWith('fixture:'));
+		// En la casa van los muebles de adentro; en el patio, los que se pusieron afuera.
+		const outside = Boolean(this.loadedRoom?.startsWith('yard:'));
+		const placed = items.filter((i) => i.x !== null && i.z !== null && !/^(fixture:|style:|neon$)/.test(i.id) && Boolean(i.yard) === outside);
 		const models = await Promise.all(placed.map((item) => {
 			const def = this.catalog.items.find((c) => c.id === item.id);
-			return def?.glb ? loadGLB(def.glb).catch(() => null) : Promise.resolve(null);
+			return def?.glb ? loadFurnitureModel(def.glb, loadGLB).catch(() => null) : Promise.resolve(null);
 		}));
 		if (token !== this.loadToken || revision !== this.houseRevision || this.disposed) return;
 		this.furnitureGroup.clear();
@@ -720,6 +737,8 @@ export class WorldEngine {
 		});
 		this.occlusion.setFurniture(this.furnitureGroup.children);
 		this.lastHouse = items;
+		// Paredes, piso y neones de la casa.
+		if (this.loadedRoom?.startsWith('house:')) this.houseDecor.apply(this.roomGroup, items);
 		this.applyFixtures(items);
 	}
 
@@ -1370,7 +1389,8 @@ export class WorldEngine {
 		}
 		const def = this.catalog.items.find((c) => c.id === item.id);
 		if (!def?.glb) return;
-		void loadGLB(def.glb).then((gltf) => {
+		void loadFurnitureModel(def.glb, loadGLB).then((gltf) => {
+			if (!gltf) return;
 			if (token !== this.ghostToken || !this.decorating) return;
 			const ghost = gltf.scene.clone(true);
 			ghost.traverse((child) => {
@@ -1401,7 +1421,7 @@ export class WorldEngine {
 	private fixtureHome = new Map<string, {x: number; z: number; half: number}>();
 	private ghostFixture: string | null = null;
 	private lastHouse: PlacedFurniture[] = [];
-	private static readonly HOUSE_WALLS = {back: 3.98, left: -4.46, right: 3.96, front: -0.4};
+	private static readonly HOUSE_WALLS = {back: 3.98, left: -4.46, right: 4.47, front: -0.4};
 
 	private collectFixtures(scene: THREE.Object3D): void {
 		this.fixtures.clear();
@@ -1452,7 +1472,15 @@ export class WorldEngine {
 			const snap = saved ? this.snapFixture(key, new THREE.Vector3(saved.x as number, 0, saved.z as number)) : {x: home.x, z: home.z, rot: 0};
 			pivot.position.set(snap.x, 0, snap.z);
 			pivot.rotation.y = snap.rot;
+			// Sacada (la ventana) o pintada (las puertas).
+			const entry = items.find((i) => i.id === `fixture:${key}`);
+			pivot.visible = !entry?.hidden;
+			if (key === 'door') paintDoor(pivot, entry?.color ?? null, /^Garden[ _]door/);
 		}
+		// La puerta de salida también se pinta.
+		const exit = items.find((i) => i.id === 'fixture:exit');
+		const exitDoor = this.roomGroup.getObjectByName('ExitDoor');
+		if (exitDoor) paintDoor(exitDoor, exit?.color ?? null, /^ExitDoorLeaf$/);
 		this.afterFixturesMoved();
 	}
 
@@ -1477,7 +1505,7 @@ export class WorldEngine {
 	/** Lo fijo de la casa que tocaste (modo decorar). */
 	private pickFixture(): string | null {
 		for (const [key, pivot] of this.fixtures) {
-			if (this.raycaster.intersectObject(pivot, true).length) return key;
+			if (pivot.visible && this.raycaster.intersectObject(pivot, true).length) return key;
 		}
 		return null;
 	}
@@ -1523,12 +1551,14 @@ export class WorldEngine {
 	private onBlur = (): void => this.keys.clear();
 
 	private onPointerDown = (event: PointerEvent): void => {
+		if (this.pointerHook?.('down', event)) return;
 		if (this.controlsBlocked) return;
 		this.pointerDown = {x: event.clientX, y: event.clientY};
 		this.renderer.domElement.focus();
 	};
 
 	private onPointerMove = (event: PointerEvent): void => {
+		if (this.pointerHook?.('move', event)) return;
 		if (this.gardenTool && this.loadedRoom?.startsWith('yard:') && this.gardenLand) {
 			const point = this.floorPoint(event);
 			if (!point) this.garden.point();
@@ -1680,6 +1710,7 @@ export class WorldEngine {
 	}
 
 	private onPointerUp = (event: PointerEvent): void => {
+		if (this.pointerHook?.('up', event)) return;
 		const down = this.pointerDown;
 		this.pointerDown = null;
 		if (!down || Math.hypot(event.clientX - down.x, event.clientY - down.y) > 6 || event.button !== 0) return;
@@ -1717,7 +1748,7 @@ export class WorldEngine {
 				return;
 			}
 		}
-		if (this.room === `house:${this.meId}` && this.furnitureClickable.size && this.editMode) {
+		if ((this.room === `house:${this.meId}` || this.room === `yard:${this.meId}`) && this.furnitureClickable.size && this.editMode) {
 			const hits = this.raycaster.intersectObjects(this.furnitureGroup.children, true);
 			const uid = hits.length ? this.furnitureClickable.get(hits[0].object) : undefined;
 			if (uid) {
@@ -2120,21 +2151,21 @@ export class WorldEngine {
 		}
 		this.updatePrompt(taken);
 		// Mirando la tele: sin carteles ni mi nombre encima de la pantalla.
-		if (this.tvView || this.tableSeat !== null) this.prompt.visible = false;
+		if (this.tvView || this.tableSeat !== null || this.cameraOverride) this.prompt.visible = false;
 		if (this.me) {
-			this.me.label.visible = !this.tvView && this.tableSeat === null;
+			this.me.label.visible = !this.tvView && this.tableSeat === null && !this.cameraOverride;
 			// En la mesa la cámara va detrás de mi silla: mi propia cabeza tapaba mis cartas.
-			this.me.avatar.root.visible = this.tableSeat === null;
+			this.me.avatar.root.visible = this.tableSeat === null && !this.cameraOverride;
 		}
 
-		const goal = this.cameraGoal();
+		const goal = this.cameraOverride?.pos ?? this.cameraGoal();
 		this.camPos.lerp(goal, 1 - Math.pow(0.0015, dt));
 		this.camera.position.copy(this.camPos);
 		const inside = this.room !== 'city' && this.room !== 'campfire' && this.room !== 'port' && this.room !== 'arena' && !this.room?.startsWith('yard:');
 		const city = this.room === 'city';
 		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + .9 : (this.me?.pos.z ?? 0) + (city ? 2.15 : .6);
 		const tvCam = this.tvView ? this.tvCamera() : null;
-		const lookGoal = tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-8, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
+		const lookGoal = this.cameraOverride ? this.cameraOverride.look : tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-8, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
 		this.camLook.lerp(lookGoal, 1 - Math.pow(0.0015, dt));
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
@@ -2295,17 +2326,13 @@ export class WorldEngine {
 			&& !(LOOP_ANIMS as readonly string[]).includes(actor.anim),
 			dt);
 		if (mount && mounted) {
-			const {height, setback, anim} = mount.fit;
-			root.position.x += Math.sin(actor.ry) * setback;
-			root.position.y += height + mount.hover;
-			root.position.z += Math.cos(actor.ry) * setback;
-			actor.avatar.setBase(anim);
-			if (anim === 'rideBike') actor.avatar.setPedalPhase(mount.pedal);
+			mount.placeRider(root.position);
+			actor.avatar.setBase(mount.fit.anim);
 		} else if (base) actor.avatar.setBase(base);
 		const talking = this.speaking.has(actor.id);
 		actor.avatar.setTalking(talking);
 		actor.labelEl.classList.toggle('is-speaking', talking);
-		actor.avatar.update(dt);
+		actor.avatar.update(dt, mounted ? mount?.targets : undefined);
 		actor.companion?.update(actor.pos, actor.ry, dt);
 		this.kickDust(actor, dt);
 	}
@@ -2452,6 +2479,20 @@ export class WorldEngine {
  * La pantalla viene de Blender sin coordenadas de textura (UV): sin esto el video o el cartel de la
  * tele se veía como un color liso (era el "no se ve nada en la tele"). Se proyecta de frente.
  */
+/** Pinta la hoja de una puerta (los materiales que coinciden con `match`); `null` = color original. */
+function paintDoor(root: THREE.Object3D, color: string | null, match: RegExp): void {
+	root.traverse((o) => {
+		const mesh = o as THREE.Mesh;
+		const material = mesh.material as THREE.MeshStandardMaterial | undefined;
+		if (!mesh.isMesh || !material || Array.isArray(material) || !match.test(material.name)) return;
+		if (!mesh.userData.doorOriginal) {
+			mesh.userData.doorOriginal = material.color.getHex();
+			mesh.material = material.clone();
+		}
+		(mesh.material as THREE.MeshStandardMaterial).color.set(color ?? mesh.userData.doorOriginal);
+	});
+}
+
 function planarScreenUv(geometry: THREE.BufferGeometry): void {
 	if (geometry.userData.planarUv) return;
 	geometry.computeBoundingBox();

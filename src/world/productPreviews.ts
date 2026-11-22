@@ -1,3 +1,4 @@
+import {loadFurnitureModel} from '@/world/outdoorDecor';
 import * as THREE from 'three';
 import {COLOR_MATERIALS, loadGLB} from '@/world/avatars';
 import type {CatalogItem, Look} from '@/world/core';
@@ -73,7 +74,9 @@ async function buildProduct(item: CatalogItem, avatarUrl: string, look: Look, fo
 	const standalone = Boolean(item.glb && item.glb !== avatarUrl);
 	const url = standalone ? item.glb : avatarUrl;
 	if (!url) throw new Error('Artículo sin modelo');
-	const {scene} = await loadGLB(url);
+	const model = await loadFurnitureModel(url, loadGLB);
+	if (!model) throw new Error('Artículo sin modelo');
+	const {scene} = model;
 	scene.updateMatrixWorld(true);
 	const product = new THREE.Group();
 	const parts: THREE.Object3D[] = [];

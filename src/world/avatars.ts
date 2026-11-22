@@ -8,7 +8,7 @@
  */
 import * as THREE from 'three';
 import {buildDanceClips, type Rest, spreadArms} from '@/world/danceClips';
-import {buildMountClips} from '@/world/mountClips';
+import {buildMountClips, RiderRig, type RideAnim, type RiderTargets} from '@/world/riderPose';
 import {GLTFLoader, type GLTF} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {clone as cloneSkinned} from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type {Catalog, ColorKey, Look} from '@/world/core';
@@ -28,7 +28,7 @@ export function loadGLB(url: string): Promise<GLTF> {
 
 const AVATAR_URL = 'models/avatar_modular.glb';
 export const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
-export type BaseAnim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap' | 'hips' | 'disco' | 'pogo' | 'sway' | 'rideBike' | 'rideCar' | 'rideBroom';
+export type BaseAnim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap' | 'hips' | 'disco' | 'pogo' | 'sway' | RideAnim;
 const CLIP: Record<BaseAnim, string> = {
 	idle: 'Idle', walk: 'Walk', run: 'Run', jump: 'Jump', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot',
 	clap: 'Clap', hips: 'Hips', disco: 'Disco', pogo: 'Pogo', sway: 'Sway', rideBike: 'RideBike', rideCar: 'RideCar', rideBroom: 'RideBroom',
@@ -44,7 +44,8 @@ function clipsOf(gltf: {scene: THREE.Object3D; animations: THREE.AnimationClip[]
 		gltf.scene.traverse((o) => {
 			if ((o as THREE.Bone).isBone && !rest[o.name]) rest[o.name] = {q: o.quaternion.clone(), p: o.position.clone(), pw: o.parent?.getWorldQuaternion(new THREE.Quaternion())};
 		});
-		clips = [...[...gltf.animations, ...buildDanceClips(rest)].map((c) => spreadArms(c, rest)), ...buildMountClips(rest)];
+		clips = [...gltf.animations, ...buildDanceClips(rest)].map((c) => spreadArms(c, rest));
+		clips.push(...buildMountClips(rest));
 		allClips.set(gltf, clips);
 	}
 	return clips;
@@ -105,6 +106,7 @@ export class Avatar {
 	private materials = new Map<string, THREE.MeshStandardMaterial>();
 	private costumes: THREE.Object3D[] = [];
 	private bones: Record<string, {bone: THREE.Bone; inverse: THREE.Matrix4}> = {};
+	private riderRig?: RiderRig;
 	private nextBlink = 2 + Math.random() * 3;
 	private talking = false;
 	private lookKey = '';
@@ -234,13 +236,6 @@ export class Avatar {
 		this.base = anim;
 	}
 
-	setPedalPhase(phase: number): void {
-		const action = this.actions.RideBike;
-		if (!action || this.base !== 'rideBike') return;
-		action.paused = true;
-		action.time = phase * action.getClip().duration;
-	}
-
 	/**
 	 * Modo "ausente": gris y medio transparente (está en la parte 2D de PelaCord, pero su personaje
 	 * se queda donde lo dejó).
@@ -291,7 +286,7 @@ export class Avatar {
 		else talk.fadeOut(0.25);
 	}
 
-	update(dt: number): void {
+	update(dt: number, ride?: RiderTargets): void {
 		if (!this.mixer) return;
 		this.nextBlink -= dt;
 		if (this.nextBlink <= 0) {
@@ -299,6 +294,10 @@ export class Avatar {
 			this.nextBlink = 2.5 + Math.random() * 3.5;
 		}
 		this.mixer.update(dt);
+		if (ride && (this.base === 'rideBike' || this.base === 'rideCar' || this.base === 'rideBroom')) {
+			this.riderRig ??= new RiderRig(this.root, this.bones);
+			this.riderRig.apply(this.base, ride);
+		}
 	}
 
 	dispose(): void {

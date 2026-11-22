@@ -1121,6 +1121,7 @@
 	width: min(100%, 228px);
 	aspect-ratio: 1;
 	flex: 0 1 auto;
+	background: transparent;
 }
 
 .t-mounted-preview strong {
@@ -3814,4 +3815,181 @@
 	font-size: 13px;
 	box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
 	white-space: nowrap;
+}
+
+/* Paredes y piso. */
+.t-walls {
+	width: min(440px, calc(100vw - 32px));
+}
+.t-walls-coins {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+	margin-right: 6px;
+	padding: 3px 10px;
+	border-radius: 999px;
+	background: #ffe7a3;
+	color: #6b4a00;
+	font-weight: 900;
+	font-size: 12px;
+}
+.t-walls-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+	gap: 8px;
+	max-height: 300px;
+	overflow-y: auto;
+	padding: 2px;
+}
+.t-walls-card {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	padding: 5px;
+	border: 2px solid transparent;
+	border-radius: 12px;
+	background: rgba(138, 92, 255, 0.08);
+	cursor: pointer;
+	text-align: left;
+	font: inherit;
+}
+.t-walls-card img {
+	width: 100%;
+	aspect-ratio: 1;
+	border-radius: 8px;
+	object-fit: cover;
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.1);
+}
+.t-walls-card strong {
+	font-size: 11px;
+	line-height: 1.15;
+}
+.t-walls-card small {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	font-size: 11px;
+	font-weight: 800;
+	opacity: 0.75;
+}
+.t-walls-card.is-picked {
+	border-color: #8a5cff;
+	background: rgba(138, 92, 255, 0.18);
+}
+.t-walls-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	margin-top: 8px;
+}
+
+/* Neón: se esconde el resto de la interfaz mientras se dibuja. */
+.t-neon-panel {
+	position: absolute;
+	right: 14px;
+	top: 14px;
+	width: min(330px, calc(100vw - 28px));
+	z-index: 9;
+}
+.t-panel-icon.is-neon,
+.t-pill.is-neon {
+	background: linear-gradient(135deg, #ff4fa8, #4fd8ff);
+	color: #fff;
+}
+.t-neon-walls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 6px 0;
+}
+.t-swatch.is-neon {
+	border-color: rgba(255, 255, 255, 0.95);
+}
+.t-neon-cost {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	margin: 8px 0;
+	padding: 8px 12px;
+	border-radius: 12px;
+	background: #1e1030;
+	color: #fff;
+	font-weight: 800;
+	font-size: 13px;
+}
+.t-neon-cost strong {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	color: #ffd23f;
+	font-size: 16px;
+	font-variant-numeric: tabular-nums;
+}
+.t-neon-cost strong.is-short {
+	color: #ff6b6b;
+}
+.t-neon-list {
+	max-height: 150px;
+	overflow-y: auto;
+}
+
+/* Neón: barra compacta abajo (la pared queda libre para dibujar). */
+.world.is-drawing > *:not(.world-stage):not(.w-tv-host):not(.world-loading):not(.t-neon-bar) {
+	display: none !important;
+}
+.t-neon-bar {
+	position: absolute;
+	left: 50%;
+	bottom: 12px;
+	transform: translateX(-50%);
+	z-index: 9;
+	width: min(760px, calc(100% - 24px));
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 8px 12px;
+	border-radius: 18px;
+	background: rgba(255, 250, 240, 0.94);
+	color: #2a1425;
+	box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
+}
+.t-neon-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+}
+.t-neon-title {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	margin-right: 4px;
+	font-weight: 900;
+}
+.t-neon-row .t-walls-coins {
+	margin-left: auto;
+}
+.t-swatches.is-inline {
+	padding: 0;
+	gap: 5px;
+}
+.t-neon-bar .t-neon-cost {
+	margin: 0;
+	padding: 5px 10px;
+	gap: 10px;
+	font-size: 12px;
+}
+.t-neon-help {
+	margin: 0;
+	font-size: 11px;
+	font-weight: 700;
+	opacity: 0.7;
+}
+.t-decorate-tools {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-bottom: 8px;
 }

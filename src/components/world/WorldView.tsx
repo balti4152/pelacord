@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
-	Armchair, Brush, Coins, Power, Fish, Headphones, Home, LogOut, MapPin, Music, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Sprout, Tv, User, UserPlus, Users, BellRing, Volume2, VolumeX, Keyboard, X,
+	Armchair, Brush, Coins, Paintbrush, Zap, Power, Fish, Headphones, Home, LogOut, MapPin, Music, Mic, MicOff, Monitor, PawPrint, Phone, Shirt, Smile, Sprout, Tv, User, UserPlus, Users, BellRing, Volume2, VolumeX, Keyboard, X,
 } from 'lucide-react';
 import {EMOTES, type EmoteDef, EmoteMenu} from '@/components/world/EmoteMenu';
 import {MoviePlayer} from '@/components/MoviePlayer';
@@ -29,6 +29,7 @@ import {worldSounds} from '@/world/worldSounds';
 import {arenaMusic} from '@/world/arenaMusic';
 import {DecoratePanel, EditorPanel, FriendsPanel, InvitePanel, ShopPanel, TablePanel} from '@/components/world/WorldPanels';
 import {TvPanel} from '@/components/world/TvPanel';
+import {NeonPanel, WallsPanel} from '@/components/world/HouseDecorPanels';
 import {FishingGame, FishMarketPanel} from '@/components/world/FishingPanels';
 import {PetPanel} from '@/components/world/PetPanel';
 import {CasinoPanel} from '@/components/world/CasinoPanel';
@@ -38,7 +39,7 @@ import {type CasinoGame, type RouletteChip, type Spin} from '@/world/casino';
 import {type Crop, type FarmAction, makeFarm, readLand, tend} from '@/world/farmData';
 import {useStore} from '@/state/store';
 
-type Panel = null | 'friends' | 'editor' | 'shop-clothes' | 'shop-mounts' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
+type Panel = null | 'walls' | 'neon' | 'friends' | 'editor' | 'shop-clothes' | 'shop-mounts' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
 const SPATIAL_KEY = 'pelacord.world.spatial';
 const HINT_KEY = 'pelacord.world.hint';
 
@@ -245,7 +246,9 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				const current = placingRef.current;
 				if (!current) return;
 				placingRef.current = null;
-				updateProfile((p) => ({furniture: editFurniture(p.furniture, current, {x, z, rot, support})}));
+				// En el patio queda afuera; en la casa, adentro.
+				const yard = roomRef.current.startsWith('yard:');
+				updateProfile((p) => ({furniture: editFurniture(p.furniture, current, {x, z, rot, support, yard})}));
 				setPlacing(null);
 			},
 			onFurniturePick: (uid) => {
@@ -326,18 +329,20 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		setPanel((p) => p === 'editor' || p === 'pets' ? p : null);
 		setFarmAction('walk');
 		cancelFishing();
-		const furniture = houseOwner === state.me.id ? getProfile().furniture : houseOwner ? (peers[houseOwner]?.house ?? []) : null;
+		const owner = houseOwner ?? yardOwner;
+		const furniture = owner === state.me.id ? getProfile().furniture : owner ? (peers[owner]?.house ?? []) : null;
 		void engine.loadRoom(room, furniture, previousRoom.current);
 		previousRoom.current = room;
 		engine.focus();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [room]);
 
-	const houseKey = houseOwner === state.me.id ? JSON.stringify(profile.furniture) : houseOwner ? JSON.stringify(peers[houseOwner]?.house ?? []) : '';
+	const placeOwner = houseOwner ?? yardOwner;
+	const houseKey = placeOwner === state.me.id ? JSON.stringify(profile.furniture) : placeOwner ? JSON.stringify(peers[placeOwner]?.house ?? []) : '';
 	useEffect(() => {
-		if (!houseOwner || !engineRef.current) return;
-		void engineRef.current.setHouse(houseOwner === state.me.id ? profile.furniture : (peers[houseOwner]?.house ?? []));
-		if (houseOwner === state.me.id) announceRef.current();
+		if (!placeOwner || !engineRef.current) return;
+		void engineRef.current.setHouse(placeOwner === state.me.id ? profile.furniture : (peers[placeOwner]?.house ?? []));
+		if (placeOwner === state.me.id) announceRef.current();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [houseKey]);
 
@@ -816,7 +821,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const tvOn = myTv && myTv.mode !== 'off';
 
 	return (
-		<div className={`world${hidden ? ' is-hidden' : ''}${placing ? ' is-placing' : ''}${ownsYard || room === 'shop' ? ' has-farm-access' : ''}`} aria-hidden={hidden} onClickCapture={(event) => {
+		<div className={`world${hidden ? ' is-hidden' : ''}${placing ? ' is-placing' : ''}${panel === 'neon' ? ' is-drawing' : ''}${ownsYard || room === 'shop' ? ' has-farm-access' : ''}`} aria-hidden={hidden} onClickCapture={(event) => {
 			if (!(event.target instanceof Element)) return;
 			const choice = event.target.closest<HTMLButtonElement>('.t-tabs button, .t-swatch, .t-toggle, .t-item, .tg-game, .ar-game, .ar-chip, .ar-stepper button');
 			if (choice && !choice.disabled && !choice.matches('.is-active, .is-picked')) worldSounds.play('select');
@@ -882,7 +887,6 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				<div className="t-house-bar">
 					<button type="button" className={`t-pill${panel === 'decorate' ? ' is-active' : ''}`} onClick={() => setPanel(panel === 'decorate' ? null : 'decorate')}><Brush size={16} strokeWidth={2.8} /> Decorar</button>
 					<button type="button" className="t-pill" onClick={() => setPanel('invite')}><UserPlus size={16} strokeWidth={2.8} /> Invitar</button>
-					<button type="button" className="t-pill" onClick={() => setPanel('shop-furniture')}><Armchair size={16} strokeWidth={2.8} /> Catálogo</button>
 				</div>
 			) : null}
 			{room === 'casino' ? (
@@ -896,7 +900,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			) : null}
 			{ownsYard ? (
 				<>
-					<div className="t-house-bar"><button type="button" className="t-pill is-mint" onClick={() => setPanel('garden-land')}><Sprout size={16} /> Ampliar terreno</button></div>
+					<div className="t-house-bar">
+						<button type="button" className={`t-pill${panel === 'decorate' ? ' is-active' : ''}`} onClick={() => setPanel(panel === 'decorate' ? null : 'decorate')}><Brush size={16} strokeWidth={2.8} /> Decorar</button>
+						<button type="button" className="t-pill is-mint" onClick={() => setPanel('garden-land')}><Sprout size={16} /> Ampliar terreno</button>
+					</div>
 					{!panel && !firstTime ? <FarmToolbar action={farmAction} seed={farmSeed} onAction={(action) => {
 						setFarmAction(action);
 						worldSounds.play('select');
@@ -1053,6 +1060,8 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			{panel === 'pet-shop' ? <PetPanel shop onClose={() => setPanel(null)} onBack={() => setPanel('shop-clothes')} /> : null}
 			{panel === 'pets' ? <PetPanel shop={false} onClose={() => setPanel(null)} /> : null}
 			{catalog && panel === 'shop-furniture' ? <ShopPanel catalog={catalog} kind="furniture" onClose={() => setPanel(null)} onTry={() => {}} /> : null}
+			{panel === 'walls' && houseOwner === state.me.id ? <WallsPanel onClose={() => setPanel('decorate')} /> : null}
+			{panel === 'neon' && houseOwner === state.me.id && engineRef.current ? <NeonPanel engine={engineRef.current} meId={state.me.id} onClose={() => setPanel('decorate')} /> : null}
 			{catalog && panel === 'decorate' ? (
 				placing ? (
 					// Moviendo un mueble: se esconde todo, sólo queda esta barrita abajo.
@@ -1061,7 +1070,15 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 						{placing.id.startsWith('fixture:') ? null : <button type="button" className="t-btn is-soft is-small" onClick={() => engineRef.current?.rotateGhost()}>Girar (R)</button>}
 						<button type="button" className="t-btn is-soft is-small" onClick={() => setPlacing(null)}>Cancelar</button>
 					</div>
-				) : <DecoratePanel catalog={catalog} placing={placing} onPlace={(item) => setPlacing(item)} onRotate={() => engineRef.current?.rotateGhost()} onClose={() => { setPlacing(null); setPanel(null); }} />
+				) : <DecoratePanel catalog={catalog} placing={placing} onPlace={(item) => setPlacing(item)} onRotate={() => engineRef.current?.rotateGhost()} onClose={() => { setPlacing(null); setPanel(null); }}
+					showFixtures={houseOwner === state.me.id}
+					tools={<>
+						<button type="button" className="t-pill" onClick={() => setPanel('shop-furniture')}><Armchair size={16} strokeWidth={2.8} /> Catálogo</button>
+						{houseOwner === state.me.id ? <>
+							<button type="button" className="t-pill" onClick={() => setPanel('walls')}><Paintbrush size={16} strokeWidth={2.8} /> Paredes y piso</button>
+							<button type="button" className="t-pill" onClick={() => setPanel('neon')}><Zap size={16} strokeWidth={2.8} /> NEÓN</button>
+						</> : null}
+					</>} />
 			) : null}
 			{panel === 'arena' ? (
 				<ArenaAdminPanel

@@ -140,21 +140,27 @@ function pogo(rest: Rest): THREE.AnimationClip {
 }
 
 function sway(rest: Rest): THREE.AnimationClip {
-	// Recital: los dos brazos arriba (abiertos, lejos de la cabeza) meciéndose de lado a lado.
-	const pose = (side: number): Pose => ({
-		hips: {loc: [0.035 * side, 0, 0], rot: [0, 0, -5 * side]},
-		spine: {rot: [-3, 0, 10 * side]},
-		head: {rot: [-8, 0, 7 * side]},
-		arm_L: {aim: [0.4 + 0.12 * side, 0.9, 0.1]},
-		arm_R: {aim: [-0.4 + 0.12 * side, 0.9, 0.1]},
-		elbow_L: {rot: [-12, 0, 0]},
-		elbow_R: {rot: [-12, 0, 0]},
-		leg_L: {rot: [side > 0 ? -8 : 0, 0, -6]},
-		leg_R: {rot: [side > 0 ? 0 : -8, 0, 6]},
-		knee_L: {rot: [side > 0 ? 14 : 2, 0, 0]},
-		knee_R: {rot: [side > 0 ? 2 : 14, 0, 0]},
+	// Caballito: las muñecas cruzadas adelante como agarrando riendas, saltitos cambiando de pie y
+	// la cadera rebotando (el ritmo va al doble que el paso).
+	const pose = (step: number, up: number): Pose => ({
+		hips: {loc: [0.02 * step, 0.05 * up - 0.025, 0], rot: [0, 6 * step, -4 * step]},
+		spine: {rot: [6 - 4 * up, -4 * step, 4 * step]},
+		head: {rot: [-6 * up, 8 * step, -3 * step]},
+		arm_L: {aim: [-0.08, -0.25, 0.95]},
+		arm_R: {aim: [0.08, -0.3, 0.95]},
+		elbow_L: {rot: [-38 - 8 * up, 0, 0]},
+		elbow_R: {rot: [-34 - 8 * up, 0, 0]},
+		// El pie que sube va adelante y doblado; el otro, apoyado.
+		leg_L: {rot: [step > 0 ? -42 : -8, 0, -5]},
+		leg_R: {rot: [step > 0 ? -8 : -42, 0, 5]},
+		knee_L: {rot: [step > 0 ? 62 : 14, 0, 0]},
+		knee_R: {rot: [step > 0 ? 14 : 62, 0, 0]},
 	});
-	return clip('Sway', rest, [[1, pose(1)], [25, pose(-1)], [49, pose(1)]]);
+	return clip('Sway', rest, [
+		[1, pose(1, 0)], [4, pose(1, 1)], [7, pose(1, 0)],
+		[10, pose(-1, 0)], [13, pose(-1, 1)], [16, pose(-1, 0)],
+		[19, pose(1, 0)],
+	]);
 }
 
 export {clip as poseClip};
