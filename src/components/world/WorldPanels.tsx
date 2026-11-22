@@ -2,7 +2,7 @@ import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import * as THREE from 'three';
 import {
 	Armchair, Backpack, Bed, BellRing, Check, Coins, Crown, createLucideIcon, Dices, Footprints, Glasses, Lamp, Leaf, Lock, Plus, Popcorn, Shirt,
-	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy,
+	Smile, Sparkles, Trash2, User, Users, X, Eye, Brush, RotateCw, Move, Package, Bot, Minus, Send, Play, Layers, Grid3x3, CircleDot, Brain, Trophy, Bike, CarFront,
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import {Avatar} from '@/world/avatars';
@@ -10,6 +10,8 @@ import {ProductPreview} from '@/components/world/ProductPreview';
 import {buy, type Catalog, type CatalogItem, type ColorKey, type Look, owns, type PlacedFurniture, SLOT_LABEL, type Slot, updateProfile, useProfile} from '@/world/core';
 import {CARD_COLOR_HEX, type CardColor, TABLE_GAMES, type TableGameKind, type TableSession} from '@/world/tableGames';
 import {worldSounds} from '@/world/worldSounds';
+import {editFurniture} from '@/world/furniturePlacement';
+import {isMountId, MOUNT_COLOR_LABEL, type MountId} from '@/world/mountCatalog';
 
 const HairIcon = createLucideIcon('WorldHair', [
 	['path', {d: 'M4 14V9a8 8 0 0 1 16 0v5M4 13c4-1 7-3 8-6 2 3 4 5 8 6M7 16a5 5 0 0 0 10 0', key: 'hair'}],
@@ -29,7 +31,7 @@ const BottomIcon = createLucideIcon('WorldBottom', [
 
 export const SLOT_ICON: Record<string, LucideIcon> = {
 	hair: HairIcon, eyes: Eye, brows: BrowsIcon, mouth: MouthIcon, cheeks: CheeksIcon, top: Shirt, bottom: BottomIcon, shoes: Footprints,
-	hat: Crown, facewear: Glasses, back: Backpack, costume: Popcorn, furniture: Armchair,
+	hat: Crown, facewear: Glasses, back: Backpack, costume: Popcorn, furniture: Armchair, mount: Bike,
 	asientos: Armchair, dormitorio: Bed, mesas: Package, luces: Lamp, deco: Sparkles, plantas: Leaf,
 };
 
@@ -172,6 +174,7 @@ function Swatches({colors, value, onPick}: {colors: string[]; value: string; onP
 
 const EDITOR_TABS: Array<{id: string; label: string; icon: LucideIcon; slots: Slot[]}> = [
 	{id: 'body', label: 'Cuerpo', icon: User, slots: []},
+	{id: 'mounts', label: 'Monturas', icon: Bike, slots: []},
 	{id: 'hair', label: 'Pelo', icon: HairIcon, slots: ['hair']},
 	{id: 'face', label: 'Cara', icon: Smile, slots: ['eyes', 'brows', 'mouth', 'cheeks']},
 	{id: 'clothes', label: 'Ropa', icon: Shirt, slots: ['top', 'bottom', 'shoes']},
@@ -196,10 +199,21 @@ function lockedItems(catalog: Catalog, look: Look, owned: string[]): CatalogItem
 	return catalog.items.filter((item) => ids.has(item.id) && item.price > 0 && !owned.includes(item.id));
 }
 
-export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Catalog; onClose: () => void; firstTime: boolean; tryOn?: CatalogItem | null}): JSX.Element {
+export function EditorPanel({catalog, onClose, firstTime, tryOn, onMountShop}: {
+	catalog: Catalog;
+	onClose: () => void;
+	firstTime: boolean;
+	tryOn?: CatalogItem | null;
+	onMountShop: () => void;
+}): JSX.Element {
 	const profile = useProfile();
-	const [draft, setDraft] = useState<Look>(() => (tryOn && tryOn.slot !== 'furniture' ? {...profile.look, [tryOn.slot]: tryOn.id} : profile.look));
-	const [tab, setTab] = useState(() => (tryOn ? (EDITOR_TABS.find((t) => t.slots.includes(tryOn.slot as Slot))?.id ?? 'body') : 'body'));
+	const [draft, setDraft] = useState<Look>(() => tryOn && tryOn.slot !== 'furniture' && tryOn.slot !== 'mount'
+		? {...profile.look, [tryOn.slot]: tryOn.id} : profile.look);
+	const [tab, setTab] = useState(() => tryOn?.slot === 'mount' ? 'mounts' : EDITOR_TABS.find((t) => tryOn && t.slots.includes(tryOn.slot as Slot))?.id ?? 'body');
+	const [mount, setMount] = useState<MountId | null>(() => tryOn?.slot === 'mount' && isMountId(tryOn.id) && owns(tryOn, profile) ? tryOn.id : profile.equippedMount);
+	const [mountColors, setMountColors] = useState(profile.mountColors);
+	const mountItem = catalog.items.find((i) => i.slot === 'mount' && i.id === mount);
+	const mountColor = mount ? mountColors[mount] ?? mountItem?.defaultColor ?? '#ad7dff' : undefined;
 	const palettes = catalog.avatar.palettes;
 	const current = EDITOR_TABS.find((t) => t.id === tab) ?? EDITOR_TABS[0];
 	const locked = useMemo(() => lockedItems(catalog, draft, profile.owned), [catalog, draft, profile.owned]);
@@ -208,7 +222,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 
 	function save(): void {
 		for (const item of locked) buy(item);
-		updateProfile({look: draft, created: true});
+		updateProfile({look: draft, created: true, equippedMount: mount, mountColors});
 		worldSounds.play(locked.length ? 'purchase' : 'confirm');
 		onClose();
 	}
@@ -217,14 +231,20 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 		<Panel title={firstTime ? 'Creá tu personaje' : 'Mi personaje'} icon={User} onClose={firstTime ? undefined : onClose} className="t-editor" coins={profile.coins}>
 			<div className="t-editor-body">
 				<div className="t-editor-left">
-					<AvatarPreview catalog={catalog} look={draft} />
-					<div className="t-body-pick">
+					{tab === 'mounts' && mountItem ? (
+						<div className="t-mounted-preview">
+							<ProductPreview item={mountItem} avatarUrl={catalog.avatar.glb} look={draft}
+								color={mountColor} fallback={<Bike size={28} />} />
+							<strong>{mountItem.name}</strong>
+						</div>
+					) : <AvatarPreview catalog={catalog} look={draft} />}
+					{tab !== 'mounts' ? <div className="t-body-pick">
 						{(['M', 'F'] as const).map((body) => (
 							<button key={body} type="button" className={`t-toggle${draft.body === body ? ' is-active' : ''}`} onClick={() => setDraft((d) => ({...d, body}))}>
 								{body === 'M' ? 'Chico' : 'Chica'}
 							</button>
 						))}
-					</div>
+					</div> : null}
 				</div>
 				<div className="t-editor-side">
 					<CategoryTabs label="Categorías de personalización">
@@ -235,6 +255,43 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 						))}
 					</CategoryTabs>
 					<div key={current.id} className="t-scroll">
+						{tab === 'mounts' ? (
+							<>
+								<section className="t-section">
+									<div className="t-mount-heading">
+										<h3>Montura equipada</h3>
+										{!firstTime ? <button type="button" className="t-btn is-soft" onClick={onMountShop}>Ir a la tienda</button> : null}
+									</div>
+									<div className="t-grid">
+										<button type="button" className={`t-item${!mount ? ' is-active' : ''}`} aria-pressed={!mount} onClick={() => setMount(null)}>
+											<span className="t-item-icon t-item-art is-none"><Footprints size={20} strokeWidth={2.5} /></span><span>A pie</span>
+										</button>
+										{catalog.items.map((item) => {
+											const id = item.id;
+											if (item.slot !== 'mount' || !isMountId(id)) return null;
+											const have = owns(item, profile);
+											const Icon = id === 'mount_car' ? CarFront : id === 'mount_broom' ? Sparkles : Bike;
+											return (
+												<button key={id} type="button" className={`t-item${mount === id ? ' is-active' : ''}${have ? '' : ' is-locked'}`}
+													aria-pressed={mount === id} disabled={!have} onClick={() => setMount(id)}>
+													<ProductPreview className="t-item-art" item={item} avatarUrl={catalog.avatar.glb} look={draft}
+														color={mountColors[id] ?? undefined} fallback={<Icon size={20} />} />
+													<span>{item.name}</span>
+													{have ? null : <span className="t-price"><Lock size={11} strokeWidth={3} /> {item.price}</span>}
+												</button>
+											);
+										})}
+									</div>
+								</section>
+								{mount && mountColor ? (
+									<section className="t-section">
+										<h3>{MOUNT_COLOR_LABEL[mount]}</h3>
+										<Swatches colors={palettes.clothes} value={mountColor} onPick={(color) => setMountColors((saved) => ({...saved, [mount]: color}))} />
+										{mount === 'mount_broom' ? <div aria-hidden="true" className="t-mount-glow" style={{color: mountColor}}><span /><Sparkles size={21} /></div> : null}
+									</section>
+								) : null}
+							</>
+						) : null}
 						{current.slots.map((slot) => {
 							const items = catalog.items.filter((i) => i.slot === slot);
 							const Icon = SLOT_ICON[slot] ?? Sparkles;
@@ -278,7 +335,7 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 								{canAfford ? '' : ` · te faltan ${cost - profile.coins}`}
 							</span>
 						) : (
-							<span className="t-hint">Probate lo que quieras: lo que tiene candado se compra al guardar.</span>
+							<span className="t-hint">{tab === 'mounts' ? 'Elegí una montura y guardá para equiparla.' : 'Probate lo que quieras: lo que tiene candado se compra al guardar.'}</span>
 						)}
 						<button type="button" className="t-btn is-primary" disabled={!canAfford} onClick={save}>
 							<Check size={16} strokeWidth={3} /> {locked.length ? 'Comprar y guardar' : firstTime ? '¡A jugar!' : 'Guardar'}
@@ -292,12 +349,19 @@ export function EditorPanel({catalog, onClose, firstTime, tryOn}: {catalog: Cata
 
 // ----------------------------------------------------------------- tienda --
 
-export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog: Catalog; kind: 'clothes' | 'furniture'; onClose: () => void; onTry: (item: CatalogItem) => void; onSupplies?: () => void}): JSX.Element {
+export function ShopPanel({catalog, kind, onClose, onTry, onSupplies, initialSection}: {
+	catalog: Catalog;
+	kind: 'clothes' | 'furniture';
+	onClose: () => void;
+	onTry: (item: CatalogItem) => void;
+	onSupplies?: () => void;
+	initialSection?: 'mount';
+}): JSX.Element {
 	const profile = useProfile();
 	const sections = kind === 'furniture'
 		? [...new Set(catalog.items.filter((i) => i.slot === 'furniture').map((i) => i.category ?? 'deco'))]
-		: ['top', 'bottom', 'shoes', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume'];
-	const [section, setSection] = useState(sections[0]);
+		: ['top', 'bottom', 'shoes', 'mount', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume'];
+	const [section, setSection] = useState(initialSection ?? sections[0]);
 	const [message, setMessage] = useState('');
 	const [colorFor, setColorFor] = useState<Record<string, string>>({});
 	const items = catalog.items.filter((i) => (kind === 'furniture' ? i.slot === 'furniture' && (i.category ?? 'deco') === section : i.slot === section));
@@ -319,11 +383,12 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 					const have = item.slot !== 'furniture' && owns(item, profile);
 					const count = item.slot === 'furniture' ? profile.furniture.filter((f) => f.id === item.id).length : 0;
 					const color = colorFor[item.id] ?? item.defaultColor ?? '#8a5cff';
+					const mountColor = item.slot === 'mount' && isMountId(item.id) ? profile.mountColors[item.id] : undefined;
 					const Icon = SLOT_ICON[item.slot === 'furniture' ? (item.category ?? 'deco') : item.slot] ?? Sparkles;
 					return (
 						<article key={item.id} className={`t-card${have ? ' is-owned' : ''}`}>
 							<ProductPreview className="t-card-art" item={item} avatarUrl={catalog.avatar.glb}
-								look={profile.look} color={item.slot === 'furniture' ? color : undefined}
+								look={profile.look} color={item.slot === 'furniture' ? color : mountColor}
 								fallback={<Icon size={30} strokeWidth={2.2} />} />
 							<strong>{item.name}</strong>
 							<span className="t-card-price">{item.price === 0 ? 'Gratis' : <><Coins size={13} strokeWidth={2.6} /> {item.price}</>}</span>
@@ -331,8 +396,10 @@ export function ShopPanel({catalog, kind, onClose, onTry, onSupplies}: {catalog:
 								<Swatches colors={catalog.avatar.palettes.clothes.slice(0, 8)} value={color} onPick={(c) => setColorFor((m) => ({...m, [item.id]: c}))} />
 							) : null}
 							<div className="t-card-actions">
-								{item.slot !== 'furniture' ? (
-									<button type="button" className="t-btn is-soft" onClick={() => onTry(item)}><Eye size={14} strokeWidth={2.8} /> Probar</button>
+								{item.slot !== 'furniture' && (item.slot !== 'mount' || have) ? (
+									<button type="button" className="t-btn is-soft" onClick={() => onTry(item)}>
+										{item.slot === 'mount' ? <><Bike size={14} strokeWidth={2.8} /> Equipar</> : <><Eye size={14} strokeWidth={2.8} /> Probar</>}
+									</button>
 								) : null}
 								{have ? (
 									<span className="t-owned"><Check size={14} strokeWidth={3} /> Tuyo</span>
@@ -381,7 +448,7 @@ export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 	const name = (id: string) => FIXTURES.find((f) => f.id === id)?.name ?? catalog.items.find((i) => i.id === id)?.name ?? id;
 	const canPaint = (id: string) => Boolean(catalog.items.find((i) => i.id === id)?.recolor?.length);
 	const furniture = profile.furniture.filter((f) => !f.id.startsWith('fixture:'));
-	const setItem = (uid: string, change: Partial<PlacedFurniture>) => updateProfile((p) => ({furniture: p.furniture.map((f) => (f.uid === uid ? {...f, ...change} : f))}));
+	const setItem = (item: PlacedFurniture, change: Partial<PlacedFurniture>) => updateProfile((p) => ({furniture: editFurniture(p.furniture, item, change)}));
 	const fixture = placing?.id.startsWith('fixture:');
 	return (
 		<Panel title="Decorar mi casa" icon={Brush} onClose={onClose} className="t-decorate">
@@ -411,9 +478,9 @@ export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 								<button type="button" className="t-btn is-primary is-small" onClick={() => onPlace(item)}><Plus size={13} strokeWidth={3} /> Poner</button>
 							) : (
 								<>
-									<button type="button" className="t-btn is-soft is-small" title="Girar" onClick={() => { worldSounds.play('highlight'); setItem(item.uid, {rot: ((item.rot ?? 0) + Math.PI / 4) % (Math.PI * 2)}); }}><RotateCw size={13} strokeWidth={3} /></button>
+									<button type="button" className="t-btn is-soft is-small" title="Girar" onClick={() => { worldSounds.play('highlight'); setItem(item, {rot: ((item.rot ?? 0) + Math.PI / 4) % (Math.PI * 2)}); }}><RotateCw size={13} strokeWidth={3} /></button>
 									<button type="button" className="t-btn is-soft is-small" title="Mover" onClick={() => onPlace(item)}><Move size={13} strokeWidth={3} /></button>
-									<button type="button" className="t-btn is-soft is-small" title="Guardar en el inventario" onClick={() => setItem(item.uid, {x: null, z: null})}>
+									<button type="button" className="t-btn is-soft is-small" title="Guardar en el inventario" onClick={() => setItem(item, {x: null, z: null})}>
 										<Package size={13} strokeWidth={3} />
 									</button>
 								</>
@@ -422,10 +489,10 @@ export function DecoratePanel({catalog, placing, onPlace, onRotate, onClose}: {
 						{painting === item.uid ? (
 							<div className="t-swatches">
 								{FURNITURE_SWATCHES.map((c) => (
-									<button key={c} type="button" className={`t-swatch${item.color === c ? ' is-on' : ''}`} style={{background: c}} aria-label={c} onClick={() => setItem(item.uid, {color: c})} />
+									<button key={c} type="button" className={`t-swatch${item.color === c ? ' is-on' : ''}`} style={{background: c}} aria-label={c} onClick={() => setItem(item, {color: c})} />
 								))}
 								<label className="t-swatch is-custom" title="Otro color">
-									<input type="color" value={item.color ?? '#a99bbd'} onChange={(e) => setItem(item.uid, {color: e.target.value})} />
+									<input type="color" value={item.color ?? '#a99bbd'} onChange={(e) => setItem(item, {color: e.target.value})} />
 								</label>
 							</div>
 						) : null}

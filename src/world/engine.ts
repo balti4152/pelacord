@@ -8,6 +8,8 @@
 import * as THREE from 'three';
 import {CSS2DObject, CSS2DRenderer} from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import {Avatar, type BaseAnim, loadGLB} from '@/world/avatars';
+import {ActorMount} from '@/world/actorMount';
+import {isMountId, type MountSelection} from '@/world/mountCatalog';
 import {Ambience} from '@/world/ambience';
 import {Dust} from '@/world/dust';
 import {worldSounds} from '@/world/worldSounds';
@@ -18,7 +20,8 @@ import {CAPTURE_RANGE, CityPets} from '@/world/cityPets';
 import {isPetId, type PetId} from '@/world/petCatalog';
 import {PetCompanion} from '@/world/petCompanion';
 import {Npcs} from '@/world/npcs';
-import {type Anim, type Catalog, type Emote, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId, YARD_GLB} from '@/world/core';
+import {type Anim, type Catalog, type Emote, type FurnitureSupport, HOUSE_GLB, type Look, type PlacedFurniture, type PlayerState, ROOMS, type RoomId, YARD_GLB} from '@/world/core';
+import {furniturePose, furnitureSurface, relativeToFurniture, surfaceContains, tabletopPosition, tabletopRadius, type FurnitureSurface} from '@/world/furniturePlacement';
 import {GardenView} from '@/world/gardenView';
 import {type FarmAction, type FarmLand, inLot} from '@/world/farmData';
 import {RoomEffects} from '@/world/roomEffects';
@@ -27,6 +30,7 @@ import {buildRadio} from '@/world/radio';
 import {nearestMachine, upgradeCasino} from '@/world/casinoDecor';
 import {fillCasino} from '@/world/casinoFill';
 import type {Spin} from '@/world/casino';
+import {LOOP_ANIMS, type LoopAnim} from '@/world/core';
 import {iconSvg} from '@/world/icons';
 
 const WALK_SPEED = 2.5;
@@ -116,7 +120,7 @@ export interface EngineCallbacks {
 	onInteract(action: Interaction): void;
 	onTable(seatIndex: number | null): void;
 	onPlayerClick(id: string): void;
-	onPlace(x: number, z: number, rot: number): void;
+	onPlace(x: number, z: number, rot: number, support?: FurnitureSupport): void;
 	onFurniturePick(uid: string): void;
 	/** Mientras pesca: E / clic para recoger (lo maneja WorldView con el minijuego). */
 	onFishAction?(): void;
@@ -126,6 +130,8 @@ export interface EngineCallbacks {
 	onTvView?(on: boolean): void;
 	onGroundAction?(x: number, z: number): boolean;
 }
+
+type FurnitureTarget = {point: THREE.Vector3; support?: FurnitureSupport};
 
 interface Actor {
 	id: string;
@@ -139,6 +145,7 @@ interface Actor {
 	look: Look;
 	anim: Anim;
 	companion?: PetCompanion;
+	mount?: ActorMount;
 }
 
 interface Seat {
@@ -279,11 +286,14 @@ export class WorldEngine {
 	private screenKey = '';
 	private screenVideo: HTMLVideoElement | null = null;
 	private speaking = new Set<string>();
-	private decorating: {id: string; color?: string | null; rot: number} | null = null;
+	private decorating: PlacedFurniture | null = null;
+	private furniturePreview: {x: number; y: number; target: FurnitureTarget | null} | null = null;
 	private ghost: THREE.Object3D | null = null;
 	private ghostToken = 0;
 	private loadToken = 0;
+	private houseRevision = 0;
 	private furnitureClickable = new Map<THREE.Object3D, string>();
+	private furnitureSupports = new Map<string, {item: PlacedFurniture; surface: FurnitureSurface}>();
 	private tableCenter: THREE.Vector3 | null = null;
 	private tableSeat: number | null = null;
 	private resizeObserver: ResizeObserver;
@@ -584,12 +594,15 @@ export class WorldEngine {
 	}
 
 	private clearRoom(): void {
+		this.me?.mount?.reset();
+		for (const actor of this.others.values()) actor.mount?.reset();
 		this.occlusion.clear();
 		this.effects.clear();
 		this.garden.set(null);
 		this.pets.clear();
 		this.roomGroup.clear();
 		this.furnitureGroup.clear();
+		this.furnitureSupports.clear();
 		for (const seat of this.seats) seat.ring.removeFromParent();
 		this.seats = [];
 		this.doors = [];
@@ -672,12 +685,13 @@ export class WorldEngine {
 
 	async setHouse(items: PlacedFurniture[]): Promise<void> {
 		const token = this.loadToken;
+		const revision = ++this.houseRevision;
 		const placed = items.filter((i) => i.x !== null && i.z !== null && !i.id.startsWith('fixture:'));
 		const models = await Promise.all(placed.map((item) => {
 			const def = this.catalog.items.find((c) => c.id === item.id);
 			return def?.glb ? loadGLB(def.glb).catch(() => null) : Promise.resolve(null);
 		}));
-		if (token !== this.loadToken || this.disposed) return;
+		if (token !== this.loadToken || revision !== this.houseRevision || this.disposed) return;
 		this.furnitureGroup.clear();
 		this.seats = this.seats.filter((seat) => {
 			if (!seat.id.includes(':')) return true;
@@ -685,12 +699,19 @@ export class WorldEngine {
 			return false;
 		});
 		this.furnitureClickable.clear();
+		this.furnitureSupports.clear();
+		for (const [index, item] of placed.entries()) {
+			const surface = furnitureSurface(item.id);
+			if (models[index] && surface) this.furnitureSupports.set(item.uid, {item, surface});
+		}
 		placed.forEach((item, index) => {
 			const gltf = models[index];
 			if (!gltf) return;
 			const obj = gltf.scene.clone(true);
-			obj.position.set(item.x as number, 0, item.z as number);
-			obj.rotation.y = item.rot;
+			const table = item.support ? this.furnitureSupports.get(item.support.uid)?.item : undefined;
+			const {x, y, z, rot} = furniturePose(item, table);
+			obj.position.set(x, y, z);
+			obj.rotation.y = rot;
 			if (item.color) this.recolor(obj, item.color);
 			this.prepareScene(obj, true);
 			this.furnitureGroup.add(obj);
@@ -746,6 +767,21 @@ export class WorldEngine {
 		if (this.me) this.setCompanion(this.me, pet);
 	}
 
+	setEquippedMount(selection: MountSelection | null): void {
+		if (this.me) this.setMount(this.me, selection);
+	}
+
+	private setMount(actor: Actor, selection?: MountSelection | null): void {
+		const id = isMountId(selection?.id) ? selection.id : undefined;
+		if (actor.mount?.id === id) {
+			actor.mount?.setColor(selection?.color);
+			return;
+		}
+		actor.mount?.dispose();
+		const item = id && this.catalog.items.find((item) => item.id === id && item.slot === 'mount');
+		actor.mount = item && id ? new ActorMount(id, item, this.actorsGroup, selection?.color) : undefined;
+	}
+
 	private setCompanion(actor: Actor, species: unknown): void {
 		const pet = isPetId(species) ? species : undefined;
 		if (actor.companion?.species === pet) return;
@@ -760,6 +796,7 @@ export class WorldEngine {
 			if (keep.has(id)) continue;
 			actor.avatar.dispose();
 			actor.companion?.dispose();
+			actor.mount?.dispose();
 			this.others.delete(id);
 		}
 		for (let s of here) {
@@ -777,6 +814,7 @@ export class WorldEngine {
 			actor.seat = s.seat;
 			actor.anim = s.anim;
 			this.setCompanion(actor, s.equippedPet);
+			this.setMount(actor, s.mount);
 			actor.labelEl.querySelector('.w-name-text')!.textContent = name;
 			setLabelFace(actor.labelEl, name, info[s.id]?.avatarUrl);
 			const reported = new THREE.Vector3(s.x, s.y ?? 0, s.z);
@@ -832,7 +870,7 @@ export class WorldEngine {
 	 * Bailes y aplausos: quedan puestos hasta que te movés (y los demás los ven, porque viajan como
 	 * estado del personaje). Llamarlo con el mismo baile otra vez lo corta.
 	 */
-	setLoopEmote(anim: 'dance' | 'robot' | 'clap'): void {
+	setLoopEmote(anim: LoopAnim): void {
 		const me = this.me;
 		if (!me) return;
 		if (me.seat) this.standUp();
@@ -1310,8 +1348,9 @@ export class WorldEngine {
 
 	// ----------------------------------------------------------- decorar ---
 
-	setDecorating(item: {id: string; color?: string | null; rot: number} | null): void {
-		this.decorating = item;
+	setDecorating(item: PlacedFurniture | null): void {
+		this.decorating = item ? {...item} : null;
+		this.furniturePreview = null;
 		if (this.ghostFixture) {
 			// Se canceló (o terminó) de mover algo fijo de la casa: vuelve a donde dice la casa.
 			this.ghostFixture = null;
@@ -1344,8 +1383,11 @@ export class WorldEngine {
 				if (item.color && (mat.name === 'Base' || mat.name === 'BaseLight')) mat.color.set(item.color);
 				mesh.material = mat;
 			});
-			ghost.rotation.y = item.rot;
-			if (this.me) ghost.position.set(this.me.pos.x, 0, this.me.pos.z + 1.2);
+			const table = item.support ? this.furnitureSupports.get(item.support.uid)?.item : undefined;
+			const {x, y, z} = furniturePose(item, table);
+			ghost.rotation.y = this.decorating.rot;
+			if (item.x !== null && item.z !== null) ghost.position.set(x, y, z);
+			else if (this.me) ghost.position.set(this.me.pos.x, 0, this.me.pos.z + 1.2);
 			this.ghost = ghost;
 			this.scene.add(ghost);
 		});
@@ -1496,14 +1538,20 @@ export class WorldEngine {
 				this.garden.point(x, z, inLot(this.gardenLand.level, x, z) && Boolean(this.me && Math.hypot(x - this.me.pos.x, z - this.me.pos.z) <= 2.8));
 			}
 		}
-		if (!this.ghost) return;
-		const point = this.floorPoint(event);
-		if (point && this.ghostFixture) {
+		if (!this.ghost || !this.decorating) return;
+		if (this.ghostFixture) {
+			const point = this.floorPoint(event);
+			if (!point) return;
 			const snap = this.snapFixture(this.ghostFixture, point);
 			this.ghost.position.set(snap.x, 0, snap.z);
 			this.ghost.rotation.y = snap.rot;
 			this.afterFixturesMoved();
-		} else if (point) this.ghost.position.copy(point);
+		} else {
+			const target = this.furnitureTarget(event, this.decorating);
+			this.furniturePreview = {x: event.clientX, y: event.clientY, target};
+			this.ghost.visible = Boolean(target);
+			if (target) this.ghost.position.copy(target.point);
+		}
 	};
 
 	private onWheel = (event: WheelEvent): void => {
@@ -1520,6 +1568,35 @@ export class WorldEngine {
 		const point = new THREE.Vector3();
 		if (!this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), point)) return null;
 		return this.clamp(point);
+	}
+
+	private furnitureTarget(event: PointerEvent, item: PlacedFurniture): FurnitureTarget | null {
+		const floor = this.floorPoint(event);
+		if (!floor) return null;
+		const radius = tabletopRadius(item.id);
+		if (radius === undefined) return {point: floor};
+		const ray = this.raycaster.ray;
+		const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0));
+		const hit = new THREE.Vector3();
+		let target: {item: PlacedFurniture; surface: FurnitureSurface; x: number; z: number; distance: number} | undefined;
+		for (const table of this.furnitureSupports.values()) {
+			plane.constant = -table.surface.height;
+			if (!ray.intersectPlane(plane, hit)) continue;
+			const distance = hit.distanceToSquared(ray.origin);
+			if (target && distance >= target.distance) continue;
+			const {x, z} = relativeToFurniture(hit.x, hit.z, table.item);
+			if (surfaceContains(table.surface, x, z)) target = {...table, x, z, distance};
+		}
+		if (!target) return {point: floor};
+		const at = tabletopPosition(target.surface, radius, target.x, target.z);
+		if (!at) return null;
+		const table = target.item;
+		const occupied = this.lastHouse.some((other) => other.uid !== item.uid && other.support?.uid === table.uid
+			&& Math.hypot(other.support.x - at.x, other.support.z - at.z) < radius + (tabletopRadius(other.id) ?? 0));
+		if (occupied) return null;
+		const support = {uid: table.uid, ...at, rot: item.rot - table.rot};
+		const {x, y, z} = furniturePose({...item, support}, table);
+		return {point: new THREE.Vector3(x, y, z), support};
 	}
 
 	/** Objetos de la mesa que se pueden tocar (cartas, casilleros) con su userData.pick. */
@@ -1613,14 +1690,23 @@ export class WorldEngine {
 		}
 		this.raycaster.setFromCamera(this.ndc(event), this.camera);
 		if (this.decorating) {
-			const point = this.floorPoint(event);
-			if (point && this.ghostFixture) {
+			if (this.ghostFixture) {
+				const point = this.floorPoint(event);
+				if (!point) return;
 				const snap = this.snapFixture(this.ghostFixture, point);
 				worldSounds.play('place');
 				this.cb.onPlace(snap.x, snap.z, snap.rot);
-			} else if (point) {
+			} else {
+				const preview = this.furniturePreview;
+				const target = preview && Math.hypot(event.clientX - preview.x, event.clientY - preview.y) < 2
+					? preview.target
+					: this.furnitureTarget(event, this.decorating);
+				if (!target) return;
+				const table = target.support && this.furnitureSupports.get(target.support.uid)?.item;
+				if (target.support && !table) return;
+				const support = target.support && table ? {...target.support, rot: this.decorating.rot - table.rot} : undefined;
 				worldSounds.play('place');
-				this.cb.onPlace(point.x, point.z, this.decorating.rot);
+				this.cb.onPlace(target.point.x, target.point.z, this.decorating.rot, support);
 			}
 			return;
 		}
@@ -2166,8 +2252,7 @@ export class WorldEngine {
 			if (actor.anim === 'jump') actor.anim = 'idle';
 			this.announce(true);
 		}
-		actor.avatar.setBase(this.falling ? 'jump' : this.visualAnim(actor.anim));
-		this.place(actor, dt);
+		this.place(actor, dt, this.falling ? 'jump' : this.visualAnim(actor.anim));
 	}
 
 	/** Lo que se ve de un jugador. Con música en la tele bailan sólo los NPC: los jugadores bailan
@@ -2177,6 +2262,7 @@ export class WorldEngine {
 	}
 
 	private stepOther(actor: Actor, dt: number): void {
+		let base: BaseAnim;
 		if (isMoving(actor.anim)) {
 			const toTarget = actor.target.clone().sub(actor.pos).setY(0);
 			const distance = toTarget.length();
@@ -2184,13 +2270,13 @@ export class WorldEngine {
 				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, (actor.anim === 'run' ? RUN_SPEED * 1.15 : WALK_SPEED * 1.3) * dt)));
 				this.turn(actor, Math.atan2(toTarget.x, toTarget.z), dt);
 			}
-			actor.avatar.setBase(distance > 0.05 ? (actor.anim as BaseAnim) : this.visualAnim('idle'));
+			base = distance > 0.05 ? this.visualAnim(actor.anim) : 'idle';
 		} else {
 			// Quieto: se acomoda suave adonde dice que está (antes podía quedar hasta 2 m corrido).
 			if (!actor.seat && actor.pos.distanceTo(actor.target) > 0.02) actor.pos.lerp(actor.target, Math.min(1, dt * 6));
-			actor.avatar.setBase(actor.avatar.isGhost() ? 'idle' : this.visualAnim(actor.anim));
+			base = actor.avatar.isGhost() ? 'idle' : this.visualAnim(actor.anim);
 		}
-		this.place(actor, dt);
+		this.place(actor, dt, base);
 	}
 
 	private turn(actor: {ry: number}, wanted: number, dt: number): void {
@@ -2199,9 +2285,23 @@ export class WorldEngine {
 		actor.ry += delta * Math.min(1, dt * 14);
 	}
 
-	private place(actor: Actor, dt: number): void {
-		actor.avatar.root.position.copy(actor.pos);
-		actor.avatar.root.rotation.y = actor.ry;
+	private place(actor: Actor, dt: number, base?: BaseAnim): void {
+		const root = actor.avatar.root;
+		root.position.copy(actor.pos);
+		root.rotation.y = actor.ry;
+		const mount = actor.mount;
+		const mounted = mount?.update(actor.pos, actor.ry,
+			this.room !== 'arena' && !actor.seat && actor.anim !== 'fish' && !actor.avatar.isGhost()
+			&& !(LOOP_ANIMS as readonly string[]).includes(actor.anim),
+			dt);
+		if (mount && mounted) {
+			const {height, setback, anim} = mount.fit;
+			root.position.x += Math.sin(actor.ry) * setback;
+			root.position.y += height + mount.hover;
+			root.position.z += Math.cos(actor.ry) * setback;
+			actor.avatar.setBase(anim);
+			if (anim === 'rideBike') actor.avatar.setPedalPhase(mount.pedal);
+		} else if (base) actor.avatar.setBase(base);
 		const talking = this.speaking.has(actor.id);
 		actor.avatar.setTalking(talking);
 		actor.labelEl.classList.toggle('is-speaking', talking);
@@ -2326,6 +2426,7 @@ export class WorldEngine {
 		window.removeEventListener('blur', this.onBlur);
 		this.me?.avatar.dispose();
 		this.me?.companion?.dispose();
+		this.me?.mount?.dispose();
 		this.npcs.dispose();
 		this.pets.dispose();
 		this.ambience.dispose();
@@ -2337,6 +2438,7 @@ export class WorldEngine {
 		for (const actor of this.others.values()) {
 			actor.avatar.dispose();
 			actor.companion?.dispose();
+			actor.mount?.dispose();
 		}
 		this.screenVideo?.pause();
 		this.fx?.dispose();

@@ -9,6 +9,7 @@ import {getDesktopTransport} from '@/lib/desktop';
 import {isPetId, type PetId} from '@/world/petCatalog';
 import {makeFarm, readFarm, type Farm, type FarmLand} from '@/world/farmData';
 import {readBlackjack, type Blackjack} from '@/world/blackjackSave';
+import {isMountId, readMountColors, type MountColors, type MountId, type MountSelection} from '@/world/mountCatalog';
 
 // ------------------------------------------------------------------ tipos ---
 
@@ -36,7 +37,7 @@ export interface Look {
 export interface CatalogItem {
 	id: string;
 	name: string;
-	slot: Slot | 'furniture';
+	slot: Slot | 'furniture' | 'mount';
 	price: number;
 	glb?: string;
 	meshes?: string[];
@@ -72,6 +73,13 @@ export const ROOMS: Array<{id: Exclude<RoomId, `house:${string}` | `yard:${strin
 export const HOUSE_GLB = 'models/room_house.glb';
 export const YARD_GLB = 'models/room_yard.glb';
 
+export interface FurnitureSupport {
+	uid: string;
+	x: number;
+	z: number;
+	rot: number;
+}
+
 export interface PlacedFurniture {
 	uid: string;
 	id: string;
@@ -80,9 +88,14 @@ export interface PlacedFurniture {
 	x: number | null;
 	z: number | null;
 	rot: number;
+	/** Posición y giro relativos a la tapa del mueble que lo sostiene. */
+	support?: FurnitureSupport;
 }
 
-export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
+export type Anim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap' | 'hips' | 'disco' | 'pogo' | 'sway';
+/** Los estados que son bailes (duran hasta moverse). */
+export const LOOP_ANIMS = ['dance', 'robot', 'clap', 'hips', 'disco', 'pogo', 'sway'] as const;
+export type LoopAnim = typeof LOOP_ANIMS[number];
 
 /** Lo que cada uno anuncia del mundo. */
 export interface PlayerState {
@@ -102,6 +115,7 @@ export interface PlayerState {
 	house: PlacedFurniture[];
 	garden?: FarmLand;
 	equippedPet?: PetId | null;
+	mount?: MountSelection | null;
 	t: number;
 	/** Altura (para ver caerse a los demás en los juegos de la Arena). */
 	y?: number;
@@ -153,7 +167,7 @@ export function useCatalog(): Catalog | null {
 export const SLOT_LABEL: Record<string, string> = {
 	hair: 'Pelo', eyes: 'Ojos', brows: 'Cejas', mouth: 'Boca', cheeks: 'Cachetes', top: 'Arriba',
 	bottom: 'Abajo', shoes: 'Calzado', hat: 'Sombreros', facewear: 'Lentes y más', back: 'Bolsos y alas',
-	costume: 'Disfraces', furniture: 'Muebles',
+	costume: 'Disfraces', furniture: 'Muebles', mount: 'Monturas',
 	plantas: 'Plantas', deco: 'Decoración',
 };
 export const SLOT_EMOJI: Record<string, string> = {
@@ -185,6 +199,8 @@ export interface WorldProfile {
 	captureSpheres: number;
 	pets: Record<string, number>;
 	equippedPet: PetId | null;
+	equippedMount: MountId | null;
+	mountColors: MountColors;
 	farm: Farm;
 	blackjack?: Blackjack | null;
 }
@@ -204,9 +220,10 @@ function readProfile(): WorldProfile {
 		if (raw) {
 			const parsed = JSON.parse(raw) as Partial<WorldProfile>;
 			const pets = Object.fromEntries(Object.entries(parsed.pets ?? {}).filter(([, count]) => Number.isSafeInteger(count) && count > 0));
+			const owned = Array.isArray(parsed.owned) ? parsed.owned : [];
 			return {
 				look: {...DEFAULT_LOOK, ...(parsed.look ?? {}), colors: {...DEFAULT_LOOK.colors, ...(parsed.look?.colors ?? {})}},
-				owned: Array.isArray(parsed.owned) ? parsed.owned : [],
+				owned,
 				coins: typeof parsed.coins === 'number' ? parsed.coins : START_COINS,
 				furniture: Array.isArray(parsed.furniture) ? parsed.furniture : [],
 				created: Boolean(parsed.created),
@@ -219,6 +236,8 @@ function readProfile(): WorldProfile {
 				captureSpheres: Number.isSafeInteger(parsed.captureSpheres) ? Math.max(0, parsed.captureSpheres!) : 0,
 				pets,
 				equippedPet: isPetId(parsed.equippedPet) && pets[parsed.equippedPet] ? parsed.equippedPet : null,
+				equippedMount: isMountId(parsed.equippedMount) && owned.includes(parsed.equippedMount) ? parsed.equippedMount : null,
+				mountColors: readMountColors(parsed.mountColors),
 				farm: readFarm(parsed.farm),
 				blackjack: readBlackjack(parsed.blackjack),
 			};
@@ -226,7 +245,7 @@ function readProfile(): WorldProfile {
 	} catch {
 		// perfil roto: se arranca de cero
 	}
-	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false, fish: {}, fishBest: {}, rods: ['bambu'], rod: 'bambu', bait: {}, activeBait: null, captureSpheres: 0, pets: {}, equippedPet: null, farm: makeFarm()};
+	return {look: DEFAULT_LOOK, owned: [], coins: START_COINS, furniture: [], created: false, fish: {}, fishBest: {}, rods: ['bambu'], rod: 'bambu', bait: {}, activeBait: null, captureSpheres: 0, pets: {}, equippedPet: null, equippedMount: null, mountColors: {}, farm: makeFarm()};
 }
 
 let profile: WorldProfile = typeof localStorage === 'undefined' ? readProfile() : readProfile();

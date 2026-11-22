@@ -7,6 +7,8 @@
  * Blink, Wave, Slap).
  */
 import * as THREE from 'three';
+import {buildDanceClips, type Rest, spreadArms} from '@/world/danceClips';
+import {buildMountClips} from '@/world/mountClips';
 import {GLTFLoader, type GLTF} from 'three/examples/jsm/loaders/GLTFLoader.js';
 import {clone as cloneSkinned} from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type {Catalog, ColorKey, Look} from '@/world/core';
@@ -26,8 +28,27 @@ export function loadGLB(url: string): Promise<GLTF> {
 
 const AVATAR_URL = 'models/avatar_modular.glb';
 export const COLOR_MATERIALS: Record<string, ColorKey> = {Skin: 'skin', Hair: 'hair', Top: 'top', Bottom: 'bottom', Shoes: 'shoes', Sole: 'sole'};
-export type BaseAnim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap';
-const CLIP: Record<BaseAnim, string> = {idle: 'Idle', walk: 'Walk', run: 'Run', jump: 'Jump', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot', clap: 'Clap'};
+export type BaseAnim = 'idle' | 'walk' | 'run' | 'jump' | 'sit' | 'dance' | 'fish' | 'robot' | 'clap' | 'hips' | 'disco' | 'pogo' | 'sway' | 'rideBike' | 'rideCar' | 'rideBroom';
+const CLIP: Record<BaseAnim, string> = {
+	idle: 'Idle', walk: 'Walk', run: 'Run', jump: 'Jump', sit: 'Sit', dance: 'Dance', fish: 'Fish', robot: 'Robot',
+	clap: 'Clap', hips: 'Hips', disco: 'Disco', pogo: 'Pogo', sway: 'Sway', rideBike: 'RideBike', rideCar: 'RideCar', rideBroom: 'RideBroom',
+};
+
+/** Las animaciones del modelo (con los brazos un poco más separados) y los bailes hechos con código. */
+const allClips = new WeakMap<object, THREE.AnimationClip[]>();
+function clipsOf(gltf: {scene: THREE.Object3D; animations: THREE.AnimationClip[]}): THREE.AnimationClip[] {
+	let clips = allClips.get(gltf);
+	if (!clips) {
+		const rest: Rest = {};
+		gltf.scene.updateMatrixWorld(true);
+		gltf.scene.traverse((o) => {
+			if ((o as THREE.Bone).isBone && !rest[o.name]) rest[o.name] = {q: o.quaternion.clone(), p: o.position.clone(), pw: o.parent?.getWorldQuaternion(new THREE.Quaternion())};
+		});
+		clips = [...[...gltf.animations, ...buildDanceClips(rest)].map((c) => spreadArms(c, rest)), ...buildMountClips(rest)];
+		allClips.set(gltf, clips);
+	}
+	return clips;
+}
 /** Gestos de una sola vez (se mezclan encima de lo que esté haciendo). */
 export type OneShot = 'Wave' | 'Slap' | 'Cheer' | 'Bow' | 'Shrug';
 const ONE_SHOTS = new Set(['Wave', 'Slap', 'Cheer', 'Bow', 'Shrug']);
@@ -126,7 +147,7 @@ export class Avatar {
 		});
 		this.root.add(this.model);
 		this.mixer = new THREE.AnimationMixer(this.model);
-		for (const source of gltf.animations) {
+		for (const source of clipsOf(gltf)) {
 			const clip = onlyBones(source);
 			const action = this.mixer.clipAction(clip);
 			if (ONE_SHOTS.has(clip.name) || clip.name === 'Blink') {
@@ -211,6 +232,13 @@ export class Avatar {
 		to.reset().fadeIn(0.25).play();
 		from?.fadeOut(0.25);
 		this.base = anim;
+	}
+
+	setPedalPhase(phase: number): void {
+		const action = this.actions.RideBike;
+		if (!action || this.base !== 'rideBike') return;
+		action.paused = true;
+		action.time = phase * action.getClip().duration;
 	}
 
 	/**

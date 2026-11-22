@@ -1102,6 +1102,60 @@
 	height: 100%;
 }
 
+.t-mounted-preview {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: .25rem;
+	padding: .7rem;
+	border: 4px solid var(--t-line);
+	border-radius: 24px;
+	background: radial-gradient(ellipse at 50% 42%, #fff4e6, #e6d6fb 76%);
+	color: var(--t-line);
+}
+
+.t-mounted-preview .t-product-preview {
+	width: min(100%, 228px);
+	aspect-ratio: 1;
+	flex: 0 1 auto;
+}
+
+.t-mounted-preview strong {
+	font-size: .92rem;
+	text-align: center;
+}
+
+.t-mount-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: .55rem;
+	margin-bottom: .5rem;
+}
+
+.t-mount-heading h3 {
+	margin-bottom: 0;
+}
+
+.t-mount-glow {
+	display: flex;
+	align-items: center;
+	gap: .3rem;
+	width: min(8rem, 100%);
+	height: 2rem;
+	filter: drop-shadow(0 0 5px currentColor);
+}
+
+.t-mount-glow span {
+	flex: 1;
+	height: 3px;
+	border-radius: 100%;
+	background: linear-gradient(90deg, transparent, currentColor);
+}
+
 .t-body-pick {
 	display: grid;
 	grid-template-columns: 1fr 1fr;

@@ -1,0 +1,7 @@
+{
+ "items": [
+  {"id": "mount_bike", "name": "Bicicleta Paseo", "slot": "mount", "price": 240, "glb": "models/mounts/mount_bike.glb", "defaultColor": "#58b8a0", "recolor": ["Atelier · BikeFramePaint"]},
+  {"id": "mount_car", "name": "Autito Bombón", "slot": "mount", "price": 365, "glb": "models/mounts/mount_car.glb", "defaultColor": "#eb6578", "recolor": ["Atelier · CarBodyPaint"]},
+  {"id": "mount_broom", "name": "Escoba Luciérnaga", "slot": "mount", "price": 310, "glb": "models/mounts/mount_broom.glb", "defaultColor": "#ad7dff"}
+ ]
+}

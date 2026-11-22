@@ -8,12 +8,14 @@ import {useLocalScreen, useMeshRemotes, useSpeakingIds} from '@/components/Remot
 import {openSharePicker} from '@/lib/sharePicker';
 import {positionOf} from '@/lib/movieRooms';
 import {
-	addCoins, type Anim, type CatalogItem, type Emote, getProfile, onBell, onCasinoBet, onCasinoChips, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
+	addCoins, type Anim, type CatalogItem, type Emote, getProfile, LOOP_ANIMS, type LoopAnim, onBell, onCasinoBet, onCasinoChips, onEmote, onInvite, type PlacedFurniture, type PlayerState, ROOMS, type RoomId,
 	sendWorld, updateProfile, useCatalog, useProfile, useWorldPeers,
 } from '@/world/core';
 import {type Interaction, WorldEngine} from '@/world/engine';
+import {editFurniture, tabletopRadius} from '@/world/furniturePlacement';
 import {BAITS, biteWaitMs, currentBait, type FishKind, keepFish, rodById, rollFish, useBait} from '@/world/fish';
 import {PETS} from '@/world/petCatalog';
+import {selectedMount} from '@/world/mountCatalog';
 import {recordPetCapture} from '@/world/pets';
 import {spatialVoices, type VoicePlace} from '@/world/spatialAudio';
 import {claimPayout, hostSkip, hostStart, hostStop, PartyRuntime, sendPush, startParty, useParty} from '@/world/party';
@@ -36,7 +38,7 @@ import {type CasinoGame, type RouletteChip, type Spin} from '@/world/casino';
 import {type Crop, type FarmAction, makeFarm, readLand, tend} from '@/world/farmData';
 import {useStore} from '@/state/store';
 
-type Panel = null | 'friends' | 'editor' | 'shop-clothes' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
+type Panel = null | 'friends' | 'editor' | 'shop-clothes' | 'shop-mounts' | 'shop-furniture' | 'decorate' | 'invite' | 'tv' | 'fishmarket' | 'pet-shop' | 'pets' | 'arena' | 'restaurant-menu' | 'smith-upgrades' | 'garden-land' | 'farm-shop' | `casino-${CasinoGame}`;
 const SPATIAL_KEY = 'pelacord.world.spatial';
 const HINT_KEY = 'pelacord.world.hint';
 
@@ -80,6 +82,8 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const groundAction = useRef<(x: number, z: number) => boolean>(() => false);
 	const [tryOn, setTryOn] = useState<CatalogItem | null>(null);
 	const [placing, setPlacing] = useState<PlacedFurniture | null>(null);
+	const placingRef = useRef(placing);
+	placingRef.current = placing;
 	const [selected, setSelected] = useState<string | null>(null);
 	const [tableSeat, setTableSeat] = useState<number | null>(null);
 	const [wildCard, setWildCard] = useState<string | null>(null);
@@ -180,6 +184,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const s: PlayerState = {
 			id: state.me.id, name: state.me.name, color: state.me.avatarColor, room: roomRef.current, ...local.current,
 			look: p.look, house: p.furniture.filter((f) => f.x !== null), equippedPet: p.equippedPet,
+			mount: selectedMount(p.equippedMount, p.mountColors),
 			garden: p.farm.land,
 			t: Date.now(), away: hiddenRef.current,
 		};
@@ -236,16 +241,12 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			},
 			onTable: (seat) => setTableSeat(seat),
 			onPlayerClick: (id) => setSelected(id),
-			onPlace: (x, z, rot) => {
-				setPlacing((current) => {
-					if (current) updateProfile((p) => ({
-						furniture: p.furniture.some((f) => f.uid === current.uid)
-							? p.furniture.map((f) => (f.uid === current.uid ? {...f, x, z, rot} : f))
-							// La tele, la ventana o la puerta de la casa: la primera vez que se mueven se guardan.
-							: [...p.furniture, {...current, x, z, rot}],
-					}));
-					return null;
-				});
+			onPlace: (x, z, rot, support) => {
+				const current = placingRef.current;
+				if (!current) return;
+				placingRef.current = null;
+				updateProfile((p) => ({furniture: editFurniture(p.furniture, current, {x, z, rot, support})}));
+				setPlacing(null);
 			},
 			onFurniturePick: (uid) => {
 				const item = getProfile().furniture.find((f) => f.uid === uid) ?? (uid.startsWith('fixture:') ? {uid, id: uid, x: null, z: null, rot: 0} : undefined);
@@ -268,6 +269,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		const p = getProfile();
 		void engine.setMe(state.me.id, state.me.name, state.me.avatarColor, p.look, state.me.avatarUrl);
 		engine.setEquippedPet(p.equippedPet);
+		engine.setEquippedMount(selectedMount(p.equippedMount, p.mountColors));
 		void engine.loadRoom(roomRef.current, null);
 		engine.focus();
 		return () => {
@@ -348,6 +350,11 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		engineRef.current?.setEquippedPet(profile.equippedPet);
 		announceRef.current();
 	}, [profile.equippedPet]);
+
+	useEffect(() => {
+		engineRef.current?.setEquippedMount(selectedMount(profile.equippedMount, profile.mountColors));
+		announceRef.current();
+	}, [profile.equippedMount, profile.mountColors]);
 
 	useEffect(() => {
 		engineRef.current?.syncPeers(Object.values(peers), info);
@@ -683,7 +690,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	useEffect(() => {
 		const engine = engineRef.current;
 		if (!engine) return;
-		engine.setDecorating(placing ? {id: placing.id, color: placing.color, rot: placing.rot} : null);
+		engine.setDecorating(placing);
 		engine.editMode = panel === 'decorate';
 	}, [placing, panel]);
 
@@ -763,7 +770,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 
 	function pickEmote(def: EmoteDef): void {
 		worldSounds.play(def.id === 'slap' ? 'place' : def.id === 'heart' ? 'notice' : 'dialogue', .72);
-		if (def.loop) engineRef.current?.setLoopEmote(def.id as 'dance' | 'robot' | 'clap');
+		if (def.loop) engineRef.current?.setLoopEmote(def.id as LoopAnim);
 		else emote(def.id as Emote);
 	}
 	const shoveRef = useRef<() => void>(() => {});
@@ -922,7 +929,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					onClose={() => setEmoteOpen(false)}
 				/>
 			) : null}
-			{(myAnim === 'dance' || myAnim === 'robot' || myAnim === 'clap') && tableSeat === null ? (
+			{(LOOP_ANIMS as readonly string[]).includes(myAnim) && tableSeat === null ? (
 				<div className="t-loop-chip">
 					{EMOTES.find((e) => e.id === myAnim)?.label}… <small>movete para parar</small>
 				</div>
@@ -1041,8 +1048,8 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				/>
 			) : null}
 
-			{catalog && (panel === 'editor' || firstTime) && !hidden ? <EditorPanel key={tryOn?.id ?? 'editor'} catalog={catalog} firstTime={firstTime} tryOn={tryOn} onClose={() => { setTryOn(null); setPanel(null); }} /> : null}
-			{catalog && panel === 'shop-clothes' ? <ShopPanel catalog={catalog} kind="clothes" onClose={() => setPanel(null)} onTry={(item) => { setTryOn(item); setPanel('editor'); }} onSupplies={room === 'shop' ? () => setPanel('pet-shop') : undefined} /> : null}
+			{catalog && (panel === 'editor' || firstTime) && !hidden ? <EditorPanel key={tryOn?.id ?? 'editor'} catalog={catalog} firstTime={firstTime} tryOn={tryOn} onClose={() => { setTryOn(null); setPanel(null); }} onMountShop={() => { setTryOn(null); setPanel('shop-mounts'); }} /> : null}
+			{catalog && (panel === 'shop-clothes' || panel === 'shop-mounts') ? <ShopPanel key={panel} catalog={catalog} kind="clothes" initialSection={panel === 'shop-mounts' ? 'mount' : undefined} onClose={() => setPanel(null)} onTry={(item) => { setTryOn(item); setPanel('editor'); }} onSupplies={room === 'shop' ? () => setPanel('pet-shop') : undefined} /> : null}
 			{panel === 'pet-shop' ? <PetPanel shop onClose={() => setPanel(null)} onBack={() => setPanel('shop-clothes')} /> : null}
 			{panel === 'pets' ? <PetPanel shop={false} onClose={() => setPanel(null)} /> : null}
 			{catalog && panel === 'shop-furniture' ? <ShopPanel catalog={catalog} kind="furniture" onClose={() => setPanel(null)} onTry={() => {}} /> : null}
@@ -1050,7 +1057,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				placing ? (
 					// Moviendo un mueble: se esconde todo, sólo queda esta barrita abajo.
 					<div className="t-placing-bar">
-						<span>Hacé clic donde lo quieras poner</span>
+						<span>{tabletopRadius(placing.id) ? 'Hacé clic sobre una tapa libre o en el piso' : 'Hacé clic donde lo quieras poner'}</span>
 						{placing.id.startsWith('fixture:') ? null : <button type="button" className="t-btn is-soft is-small" onClick={() => engineRef.current?.rotateGhost()}>Girar (R)</button>}
 						<button type="button" className="t-btn is-soft is-small" onClick={() => setPlacing(null)}>Cancelar</button>
 					</div>

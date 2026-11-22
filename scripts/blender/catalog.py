@@ -26,17 +26,18 @@ def load(name):
 
 def main():
 	wardrobe = load('catalog_wardrobe.json')
-	furniture = load('catalog_furniture.json')
+	furniture = load('catalog_furniture.json')['items'] + load('catalog_decor.json')['items']
+	mounts = load('catalog_mounts.json')['items']
 	clothes = [{**item, 'glb': 'models/avatar_modular.glb'} for item in wardrobe['items']]
 	catalog = {
 		'version': 1,
 		'currency': {'name': 'Pelamonedas', 'startCoins': START_COINS},
 		'avatar': {'glb': 'models/avatar_modular.glb', 'bodies': ['M', 'F'], 'palettes': wardrobe['palettes'], 'looks': wardrobe['looks']},
 		'shops': {
-			'clothes': {'title': 'Ropa y estilo', 'sections': ['top', 'bottom', 'shoes', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume']},
-			'furniture': {'title': 'Muebles', 'sections': sorted({item['category'] for item in furniture['items']})},
+			'clothes': {'title': 'Ropa y estilo', 'sections': ['top', 'bottom', 'shoes', 'mount', 'hat', 'facewear', 'back', 'hair', 'eyes', 'brows', 'mouth', 'cheeks', 'costume']},
+			'furniture': {'title': 'Muebles', 'sections': sorted({item['category'] for item in furniture})},
 		},
-		'items': clothes + COSTUMES + [{**item, 'slot': 'furniture'} for item in furniture['items']],
+		'items': clothes + COSTUMES + [{**item, 'slot': 'furniture'} for item in furniture] + mounts,
 	}
 	path = os.path.join(PUBLIC, 'catalog.json')
 	with open(path, 'w', encoding='utf-8') as fh:

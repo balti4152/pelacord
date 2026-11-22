@@ -128,6 +128,7 @@
     "top",
     "bottom",
     "shoes",
+    "mount",
     "hat",
     "facewear",
     "back",
@@ -146,7 +147,8 @@
     "deco",
     "dormitorio",
     "luces",
-    "mesas"
+    "mesas",
+    "plantas"
    ]
   }
  },
@@ -1164,6 +1166,388 @@
    "recolor": [],
    "defaultColor": null,
    "slot": "furniture"
+  },
+  {
+   "id": "atelier_gramophone",
+   "name": "Gramófono de latón",
+   "price": 165,
+   "category": "deco",
+   "glb": "models/furniture/atelier_gramophone.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_radio",
+   "name": "Radio Capilla",
+   "price": 100,
+   "category": "deco",
+   "glb": "models/furniture/atelier_radio.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_clock",
+   "name": "Reloj de péndulo",
+   "price": 170,
+   "category": "deco",
+   "glb": "models/furniture/atelier_clock.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_ceramic_cat",
+   "name": "Gato de porcelana",
+   "price": 65,
+   "category": "deco",
+   "glb": "models/furniture/atelier_ceramic_cat.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_coral",
+   "name": "Jardín de coral",
+   "price": 80,
+   "category": "deco",
+   "glb": "models/furniture/atelier_coral.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_sailboat",
+   "name": "Velero a escala",
+   "price": 85,
+   "category": "deco",
+   "glb": "models/furniture/atelier_sailboat.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_hourglass",
+   "name": "Reloj de arena",
+   "price": 75,
+   "category": "deco",
+   "glb": "models/furniture/atelier_hourglass.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_globe",
+   "name": "Globo de gabinete",
+   "price": 110,
+   "category": "deco",
+   "glb": "models/furniture/atelier_globe.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_bird",
+   "name": "Golondrina colgante",
+   "price": 90,
+   "category": "deco",
+   "glb": "models/furniture/atelier_bird.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_monstera",
+   "name": "Monstera en terracota",
+   "price": 70,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_monstera.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_bonsai",
+   "name": "Bonsái florecido",
+   "price": 115,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_bonsai.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_hydrangea",
+   "name": "Hortensias de jardín",
+   "price": 95,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_hydrangea.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_olive",
+   "name": "Olivito en maceta",
+   "price": 80,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_olive.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_orchid",
+   "name": "Orquídea de marfil",
+   "price": 100,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_orchid.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_succulents",
+   "name": "Bandeja de suculentas",
+   "price": 55,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_succulents.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_ivy",
+   "name": "Hiedra colgante",
+   "price": 110,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_ivy.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_cactus",
+   "name": "Cactus en flor",
+   "price": 70,
+   "category": "plantas",
+   "glb": "models/furniture/atelier_cactus.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_lily_lamp",
+   "name": "Lámpara de lirios",
+   "price": 155,
+   "category": "luces",
+   "glb": "models/furniture/atelier_lily_lamp.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_harbor_lamp",
+   "name": "Farol de puerto",
+   "price": 85,
+   "category": "luces",
+   "glb": "models/furniture/atelier_harbor_lamp.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_paper_lamp",
+   "name": "Farol de papel",
+   "price": 105,
+   "category": "luces",
+   "glb": "models/furniture/atelier_paper_lamp.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_scallop_lamp",
+   "name": "Lámpara plisada",
+   "price": 90,
+   "category": "luces",
+   "glb": "models/furniture/atelier_scallop_lamp.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_shell_chair",
+   "name": "Butaca concha",
+   "price": 190,
+   "category": "asientos",
+   "glb": "models/furniture/atelier_shell_chair.glb",
+   "seats": 1,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_reading_chair",
+   "name": "Sillón de lectura",
+   "price": 195,
+   "category": "asientos",
+   "glb": "models/furniture/atelier_reading_chair.glb",
+   "seats": 1,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_window_bench",
+   "name": "Banco de galería",
+   "price": 180,
+   "category": "asientos",
+   "glb": "models/furniture/atelier_window_bench.glb",
+   "seats": 2,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_wicker",
+   "name": "Sillón colgante de mimbre",
+   "price": 225,
+   "category": "asientos",
+   "glb": "models/furniture/atelier_wicker.glb",
+   "seats": 1,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_daybed",
+   "name": "Diván de lino",
+   "price": 245,
+   "category": "dormitorio",
+   "glb": "models/furniture/atelier_daybed.glb",
+   "seats": 2,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_cabinet",
+   "name": "Aparador acanalado",
+   "price": 150,
+   "category": "mesas",
+   "glb": "models/furniture/atelier_cabinet.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_arch_shelf",
+   "name": "Biblioteca con arco",
+   "price": 210,
+   "category": "deco",
+   "glb": "models/furniture/atelier_arch_shelf.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_mosaic",
+   "name": "Mesa redonda de madera",
+   "price": 140,
+   "category": "mesas",
+   "glb": "models/furniture/atelier_mosaic.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_tea_cart",
+   "name": "Carrito de té",
+   "price": 160,
+   "category": "mesas",
+   "glb": "models/furniture/atelier_tea_cart.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_piano",
+   "name": "Piano vertical",
+   "price": 260,
+   "category": "deco",
+   "glb": "models/furniture/atelier_piano.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "atelier_mirror",
+   "name": "Espejo de pie",
+   "price": 120,
+   "category": "dormitorio",
+   "glb": "models/furniture/atelier_mirror.glb",
+   "seats": 0,
+   "recolor": [],
+   "defaultColor": null,
+   "slot": "furniture"
+  },
+  {
+   "id": "mount_bike",
+   "name": "Bicicleta Paseo",
+   "slot": "mount",
+   "price": 240,
+   "glb": "models/mounts/mount_bike.glb",
+   "defaultColor": "#58b8a0",
+   "recolor": [
+    "Atelier · BikeFramePaint"
+   ]
+  },
+  {
+   "id": "mount_car",
+   "name": "Autito Bombón",
+   "slot": "mount",
+   "price": 365,
+   "glb": "models/mounts/mount_car.glb",
+   "defaultColor": "#eb6578",
+   "recolor": [
+    "Atelier · CarBodyPaint"
+   ]
+  },
+  {
+   "id": "mount_broom",
+   "name": "Escoba Luciérnaga",
+   "slot": "mount",
+   "price": 310,
+   "glb": "models/mounts/mount_broom.glb",
+   "defaultColor": "#ad7dff"
   }
  ]
 }
