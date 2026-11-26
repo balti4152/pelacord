@@ -47,6 +47,8 @@ const CUES = {
 	plant: {files: ['garden-plant.ogg'], gain: .26, gap: 160},
 	harvest: {files: ['garden-harvest.ogg'], gain: .28, gap: 200},
 	water: {files: ['garden-water.ogg'], gain: .32, gap: 170},
+	slapHit: {files: ['slap-hit.ogg'], gain: .42, gap: 120},
+	tileBreak: {files: ['tile-break.ogg'], gain: .3, gap: 70, pitch: .08},
 } satisfies Record<string, Cue>;
 
 type CueName = keyof typeof CUES;

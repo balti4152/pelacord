@@ -279,7 +279,9 @@ function hostTick(): void {
 		}
 		game.hostTick?.(ctx, 0.05, t);
 		const enough = game.kind === 'elim' && state.alive.length <= (state.players.length > 1 ? 1 : 0);
-		if (now >= state.phaseEnds || enough || ctx.finished) endRound();
+		// Carrera: termina cuando llegaron todos (antes sólo se enteraba si el último era un bot).
+		const allArrived = game.kind === 'race' && state.order.length >= state.players.length;
+		if (now >= state.phaseEnds || enough || allArrived || ctx.finished) endRound();
 	} else if (state.phase === 'results' && now >= state.phaseEnds) {
 		if (state.round + 1 < state.games.length) {
 			state.round += 1;
@@ -546,8 +548,12 @@ export class PartyRuntime {
 			if (active && s && game) {
 				this.scene = game.build(this.ctx());
 				this.root.add(this.scene.group);
-				this.decor = buildDecor(game.color);
-				this.root.add(this.decor);
+				// Los mapas grandes tienen su propio cielo y paisaje: el estadio no se ve (ni los globos).
+				this.setStadium(!game.bigMap);
+				if (!game.bigMap) {
+					this.decor = buildDecor(game.color);
+					this.root.add(this.decor);
+				}
 				setHostScene(this.scene);
 				// Me paro en mi lugar de salida.
 				const index = s.players.indexOf(meId);
@@ -558,6 +564,7 @@ export class PartyRuntime {
 				this.hideField(true);
 			} else {
 				this.hideField(false);
+				this.setStadium(true);
 				this.engine.clearBots();
 				this.engine.setMode(null);
 				this.modeKey = '';
@@ -576,7 +583,7 @@ export class PartyRuntime {
 		// seguís "cayéndote" (eso repetía el sonido de caída re fuerte, como trabado).
 		const playing = () => !self.outLocal && live().players.includes(meId) && live().alive.includes(meId);
 		const mode: WorldMode = {
-			clamp: (p) => (playing() && scene.clamp ? scene.clamp(p) : self.lobbyClamp(p)),
+			clamp: (p) => (playing() && scene.clamp ? scene.clamp(p) : scene.spectatorClamp ? scene.spectatorClamp(p) : self.lobbyClamp(p)),
 			support: scene.support ? (x, z) => (playing() ? scene.support!(x, z, self.time(live())) : true) : undefined,
 			ground: scene.ground ? (x, z, y) => (playing() ? scene.ground!(x, z, y, self.time(live())) : 0) : undefined,
 			frozen: () => playing() && live().phase !== 'play',
@@ -596,7 +603,14 @@ export class PartyRuntime {
 
 	private backToLobby(): void {
 		const me = this.engine.myState();
-		if (Math.hypot(me.x, me.z) < 10) this.engine.teleport(LOBBY[0] + (Math.random() - 0.5) * 4, LOBBY[1], 0);
+		// Fuera del lobby (en la cancha o en un mapa grande): vuelve al lobby.
+		const inLobby = me.z <= -10.4 && me.z >= -16 && Math.abs(me.x) <= 10.5;
+		if (!inLobby) this.engine.teleport(LOBBY[0] + (Math.random() - 0.5) * 4, LOBBY[1], 0);
+	}
+
+	/** Muestra u oculta el estadio de la Arena (los mapas grandes tienen su propio paisaje). */
+	private setStadium(visible: boolean): void {
+		this.engine.viewContext().root.visible = visible;
 	}
 
 	private hideField(hidden: boolean): void {
@@ -666,7 +680,8 @@ export class PartyRuntime {
 		const aliveNow = s.alive.includes(meId);
 		if (this.wasAlive && !aliveNow && !this.outLocal && s.phase === 'play') {
 			this.outLocal = true;
-			window.setTimeout(() => this.engine.teleport(LOBBY[0] + (Math.random() - 0.5) * 6, LOBBY[1], 0), 1100);
+			const spot = this.scene.spectatorSpot ?? LOBBY;
+			window.setTimeout(() => this.engine.teleport(spot[0] + (Math.random() - 0.5) * 6, spot[1], 0), 1100);
 		}
 		this.wasAlive = aliveNow;
 		// Me caí al pozo: quedo afuera (aviso una sola vez) y vuelvo al lobby a mirar.
@@ -680,7 +695,8 @@ export class PartyRuntime {
 			} else {
 				this.outLocal = true;
 				sendInput({out: true});
-				this.engine.teleport(LOBBY[0] + (Math.random() - 0.5) * 6, LOBBY[1], 0);
+				const spot = this.scene.spectatorSpot ?? LOBBY;
+				this.engine.teleport(spot[0] + (Math.random() - 0.5) * 6, spot[1], 0);
 			}
 		}
 	}

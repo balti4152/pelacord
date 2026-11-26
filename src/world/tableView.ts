@@ -208,6 +208,9 @@ export class TableView {
 	private dealtSession = '';
 	private layout = '';
 	private time = 0;
+	/** Flechas de la Mano Loca: giran para el lado que va la ronda. */
+	private spinner: THREE.Group | null = null;
+	private spinSign = 1;
 
 	constructor(root: THREE.Object3D) {
 		this.group.scale.setScalar(SCALE);
@@ -226,6 +229,7 @@ export class TableView {
 		this.tweens = [];
 		this.pulses = [];
 		this.floaters = [];
+		this.spinner = null;
 	}
 
 	/** Anima un objeto recién dibujado: desde donde estaba antes, o desde `from` si es nuevo. */
@@ -286,6 +290,7 @@ export class TableView {
 			this.dealAt = null;
 			worldSounds.play('dealCards');
 		}
+		if (this.spinner) this.spinner.rotation.y += this.spinSign * dt * 0.55;
 		for (const p of this.pulses) {
 			const s = 1 + Math.sin(this.time * 5) * 0.12;
 			p.scale.set(s, s, s);
@@ -346,6 +351,11 @@ export class TableView {
 			return;
 		}
 		if (session === previous) return;
+		// Me toca: aviso con un sonido (en los juegos por turnos).
+		const turnGame = session.game !== 'stop' && session.game !== 'wiki';
+		if (turnGame && !session.winner && !session.draw && !session.flipping && session.players[session.turn] === me && (previous.players[previous.turn] !== me || previous.flipping)) {
+			worldSounds.play('notice', 0.9);
+		}
 		if (session.game === 'cards') {
 			if (session.discard?.at(-1)?.id !== previous.discard?.at(-1)?.id) worldSounds.play('playCard');
 			else if (session.deck?.length !== previous.deck?.length) worldSounds.play('drawCard');
@@ -392,11 +402,13 @@ export class TableView {
 		// Nombres alrededor de la mesa y el aro del turno.
 		session.players.forEach((player) => {
 			const a = local(player);
-			const count = session.game === 'cards' ? ` · ${session.hands?.[player]?.length ?? 0}` : session.game === 'memo' ? ` · ${session.score?.[player] ?? 0}` : '';
-			const tag = label(`${player === me ? 'Vos' : names(player)}${count}`, player === turnPlayer && !session.winner);
+			const simultaneous = session.game === 'stop' || session.game === 'wiki';
+			const count = session.game === 'cards' ? ` · ${session.hands?.[player]?.length ?? 0}` : session.game === 'memo' ? ` · ${session.score?.[player] ?? 0}`
+				: session.game === 'stop' ? ` · ${session.totals?.[player] ?? 0} pts` : session.game === 'wiki' ? ` · ${session.wikiAt?.[player]?.clicks ?? 0} clics` : '';
+			const tag = label(`${player === me ? 'Vos' : names(player)}${count}`, !simultaneous && player === turnPlayer && !session.winner);
 			tag.position.set(Math.sin(a) * 0.86, 0.3, Math.cos(a) * 0.86);
 			this.group.add(tag);
-			if (player === turnPlayer && !session.winner && !session.draw) {
+			if (!simultaneous && player === turnPlayer && !session.winner && !session.draw) {
 				const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.014, 8, 32), new THREE.MeshBasicMaterial({color: 0x66e6b3, toneMapped: false}));
 				ring.rotation.x = -Math.PI / 2;
 				ring.position.set(Math.sin(a) * 0.62, 0.012, Math.cos(a) * 0.62);
@@ -408,7 +420,7 @@ export class TableView {
 		if (session.game === 'cards') this.renderCards(session, me, local, myTurn, this.dealAt !== null);
 		else if (session.game === 'tateti') this.renderTateti(session, myTurn);
 		else if (session.game === 'cuatro') this.renderCuatro(session, myTurn);
-		else this.renderMemo(session, myTurn);
+		else if (session.game === 'memo') this.renderMemo(session, myTurn && !session.flipping);
 	}
 
 	private renderCards(s: TableSession, me: string, local: (p: string) => number, myTurn: boolean, dealing: boolean): void {
@@ -442,6 +454,7 @@ export class TableView {
 		colorRing.rotation.x = -Math.PI / 2;
 		colorRing.position.set(0.12, 0.004, 0);
 		this.group.add(colorRing);
+		this.addDirectionArrows(s, local);
 
 		for (const player of s.players) {
 			const hand = s.hands?.[player] ?? [];
@@ -484,6 +497,45 @@ export class TableView {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Tres flechas curvas alrededor del centro de la mesa, del color que se juega, girando hacia el
+	 * próximo jugador (cambian de sentido cuando alguien tira un "invertir").
+	 */
+	private addDirectionArrows(s: TableSession, local: (p: string) => number): void {
+		const n = s.players.length;
+		if (n < 2 || s.winner) return;
+		const current = local(s.players[s.turn]);
+		const next = local(s.players[(((s.turn + (s.direction ?? 1)) % n) + n) % n]);
+		let delta = Math.atan2(Math.sin(next - current), Math.cos(next - current));
+		if (Math.abs(Math.abs(delta) - Math.PI) < 0.05) delta = (s.direction ?? 1) * 1;
+		const sign = delta >= 0 ? 1 : -1;
+		const color = new THREE.Color(CARD_COLOR_HEX[s.color ?? 'r']);
+		const material = new THREE.MeshBasicMaterial({color, transparent: true, opacity: 0.85, toneMapped: false});
+		const spinner = new THREE.Group();
+		const r = 0.4;
+		const span = 1.25;
+		for (let k = 0; k < 3; k++) {
+			const start = (k * Math.PI * 2) / 3;
+			const pts: THREE.Vector3[] = [];
+			for (let i = 0; i <= 16; i++) {
+				const t = start + sign * span * (i / 16);
+				pts.push(new THREE.Vector3(Math.sin(t) * r, 0, Math.cos(t) * r));
+			}
+			spinner.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), 24, 0.011, 6), material));
+			const end = start + sign * span;
+			const tip = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 12), material);
+			tip.position.set(Math.sin(end) * r, 0, Math.cos(end) * r);
+			// La punta mira para donde sigue el arco.
+			const tangent = new THREE.Vector3(Math.cos(end), 0, -Math.sin(end)).multiplyScalar(sign);
+			tip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tangent);
+			spinner.add(tip);
+		}
+		spinner.position.y = 0.006;
+		this.group.add(spinner);
+		this.spinner = spinner;
+		this.spinSign = sign;
 	}
 
 	private renderTateti(s: TableSession, myTurn: boolean): void {

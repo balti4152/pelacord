@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import type {LucideIcon} from 'lucide-react';
 import {Avatar} from '@/world/avatars';
+import {GameArt, StopGame, WikiRace} from '@/components/world/TableGamesUI';
 import {ProductPreview} from '@/components/world/ProductPreview';
 import {buy, type Catalog, type CatalogItem, type ColorKey, type Look, owns, type PlacedFurniture, SLOT_LABEL, type Slot, updateProfile, useProfile} from '@/world/core';
 import {CARD_COLOR_HEX, type CardColor, TABLE_GAMES, type TableGameKind, type TableSession} from '@/world/tableGames';
@@ -601,6 +602,8 @@ const GAME_ART: Record<TableGameKind, {icon: LucideIcon; from: string; to: strin
 	tateti: {icon: Grid3x3, from: '#4fb3ff', to: '#8a5cff'},
 	cuatro: {icon: CircleDot, from: '#ffc93c', to: '#ff6b5b'},
 	memo: {icon: Brain, from: '#38d39f', to: '#4fb3ff'},
+	stop: {icon: Sparkles, from: '#ff7a59', to: '#ffc93c'},
+	wiki: {icon: Sparkles, from: '#4f8dff', to: '#8a5cff'},
 };
 const SEAT_COLORS = ['#ff6b5b', '#4fb3ff', '#ffc93c', '#38d39f', '#8a5cff', '#e0365a'];
 
@@ -609,7 +612,7 @@ export function TablePanel({session, me, seated, names, onStart, onLeave, colorP
 	me: string;
 	seated: string[];
 	names: (id: string) => string;
-	onStart: (game: TableGameKind, bots: number) => void;
+	onStart: (game: TableGameKind, bots: number, rounds: number) => void;
 	onLeave: () => void;
 	colorPick: boolean;
 	onColor: (color: CardColor) => void;
@@ -617,9 +620,10 @@ export function TablePanel({session, me, seated, names, onStart, onLeave, colorP
 }): JSX.Element {
 	const [bots, setBots] = useState(Math.max(0, 2 - seated.length));
 	const [pick, setPick] = useState<TableGameKind>('cards');
+	const [rounds, setRounds] = useState(3);
 	if (!session) {
 		const game = TABLE_GAMES.find((g) => g.id === pick)!;
-		const total = seated.length + bots;
+		const total = seated.length + (game.bots ? bots : 0);
 		const ok = total >= game.min;
 		return (
 			<div className="tg-lobby">
@@ -633,14 +637,9 @@ export function TablePanel({session, me, seated, names, onStart, onLeave, colorP
 				</header>
 				<div className="tg-games">
 					{TABLE_GAMES.map((g) => {
-						const art = GAME_ART[g.id];
-						const Icon = art.icon;
 						return (
 							<button key={g.id} type="button" className={`tg-game${pick === g.id ? ' is-picked' : ''}`} onClick={() => setPick(g.id)}>
-								<span className="tg-game-art" style={{background: `linear-gradient(135deg, ${art.from}, ${art.to})`}}>
-									<Icon size={38} strokeWidth={2.4} />
-									<i /><i /><i />
-								</span>
+								<span className="tg-game-art is-drawn"><GameArt game={g.id} /></span>
 								<strong>{g.name}</strong>
 								<small>{g.desc}</small>
 								<span className="tg-game-count"><Users size={12} strokeWidth={3} /> {g.min === g.max ? g.min : `${g.min}-${g.max}`}</span>
@@ -655,23 +654,33 @@ export function TablePanel({session, me, seated, names, onStart, onLeave, colorP
 								<span className="tg-dot">{names(id).slice(0, 1).toUpperCase()}</span>{id === me ? 'Vos' : names(id)}
 							</span>
 						))}
-						{Array.from({length: bots}, (_, i) => (
+						{Array.from({length: game.bots ? bots : 0}, (_, i) => (
 							<span key={`b${i}`} className="tg-chip is-bot"><span className="tg-dot"><Bot size={12} strokeWidth={3} /></span>Compu {i + 1}</span>
 						))}
 					</div>
-					<div className="tg-bots">
-						<span><Bot size={15} strokeWidth={2.8} /> Compus</span>
-						<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.max(0, b - 1))} aria-label="Menos compus"><Minus size={14} strokeWidth={3} /></button>
-						<strong>{bots}</strong>
-						<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.min(5, b + 1))} aria-label="Más compus"><Plus size={14} strokeWidth={3} /></button>
-					</div>
-					<button type="button" className="t-btn is-primary tg-play" disabled={!ok} onClick={() => onStart(pick, bots)}>
+					{game.bots ? (
+						<div className="tg-bots">
+							<span><Bot size={15} strokeWidth={2.8} /> Compus</span>
+							<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.max(0, b - 1))} aria-label="Menos compus"><Minus size={14} strokeWidth={3} /></button>
+							<strong>{bots}</strong>
+							<button type="button" className="t-round is-small" onClick={() => setBots((b) => Math.min(5, b + 1))} aria-label="Más compus"><Plus size={14} strokeWidth={3} /></button>
+						</div>
+					) : pick === 'stop' ? (
+						<div className="tg-bots">
+							<span>Rondas</span>
+							{[1, 3, 5, 7].map((n) => <button key={n} type="button" className={`t-round is-small${rounds === n ? ' is-on' : ''}`} onClick={() => setRounds(n)}>{n}</button>)}
+						</div>
+					) : <span className="tg-bots is-note">Sólo personas: se juega navegando</span>}
+					<button type="button" className="t-btn is-primary tg-play" disabled={!ok} onClick={() => onStart(pick, bots, rounds)}>
 						<Play size={16} strokeWidth={3} /> {ok ? `¡A jugar ${game.name}!` : `Faltan ${game.min - total} jugadores`}
 					</button>
 				</footer>
 			</div>
 		);
 	}
+	// STOP y Carrera Wiki tienen su propia pantalla (se juega escribiendo o navegando, todos a la vez).
+	if (session.game === 'stop') return <StopGame session={session} me={me} names={names} onLeave={onLeave} />;
+	if (session.game === 'wiki') return <WikiRace session={session} me={me} names={names} onLeave={onLeave} />;
 	const turn = session.players[session.turn];
 	const game = TABLE_GAMES.find((g) => g.id === session.game);
 	const art = GAME_ART[session.game];

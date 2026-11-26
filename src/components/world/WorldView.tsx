@@ -779,9 +779,13 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 		else emote(def.id as Emote);
 	}
 	const shoveRef = useRef<() => void>(() => {});
+	const lastShove = useRef(0);
 	shoveRef.current = () => {
 		const engine = engineRef.current;
 		if (!engine || tableSeat !== null) return;
+		// Una cachetada por segundo.
+		if (performance.now() - lastShove.current < 1000) return;
+		lastShove.current = performance.now();
 		const target = engine.shoveTarget();
 		engine.emote(state.me.id, 'slap', target?.id ?? null);
 		sendWorld({kind: 'emote', id: state.me.id, room, emote: 'slap', target: target?.id ?? null});
@@ -1044,7 +1048,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					me={state.me.id}
 					seated={seatedAtTable.map((s) => s.id)}
 					names={nameOf}
-					onStart={(game, bots) => table.start(game, seatedAtTable.map((s) => s.id), bots)}
+					onStart={(game, bots, rounds) => table.start(game, seatedAtTable.map((s) => s.id), bots, rounds)}
 					onLeave={() => engineRef.current?.standUp()}
 					colorPick={wildCard !== null}
 					onColor={(color: CardColor) => {

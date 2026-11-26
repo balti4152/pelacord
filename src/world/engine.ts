@@ -865,7 +865,11 @@ export class WorldEngine {
 		} else if (emote === 'slap') {
 			actor.avatar.play('Slap');
 			const victim = target ? (target === this.meId ? this.me : this.others.get(target)) : null;
-			setTimeout(() => this.pop(victim ?? actor, null, 'sprites/slap.svg'), 380);
+			setTimeout(() => {
+				this.pop(victim ?? actor, null, 'sprites/slap.svg');
+				// Pegó: un "plaf" (más fuerte si fui yo o me pegaron a mí).
+				if (victim) worldSounds.play('slapHit', id === this.meId || victim === this.me ? 1 : 0.55);
+			}, 380);
 		} else if (emote === 'laugh') {
 			actor.avatar.setTalking(true);
 			setTimeout(() => actor.avatar.setTalking(this.speaking.has(actor.id)), 1400);
@@ -1975,6 +1979,14 @@ export class WorldEngine {
 
 	private lastPushSound = 0;
 
+	/** Corre al personaje un poquito (cintas y rodillos de los juegos), respetando los límites. */
+	nudge(dx: number, dz: number): void {
+		const me = this.me;
+		if (!me) return;
+		me.pos.copy(this.clampMove(me.pos.clone().add(new THREE.Vector3(dx, 0, dz))));
+		this.announce();
+	}
+
 	teleport(x: number, z: number, ry = 0): void {
 		if (!this.me) return;
 		this.resetFall();
@@ -2105,7 +2117,7 @@ export class WorldEngine {
 			// Arena: más lejos y alta (el campo es grande); en una partida, todavía más (se ve todo).
 			// Si caés a un piso de abajo, la cámara baja con vos.
 			const far = this.partyCamera ? 1.75 : 1.4;
-			const down = Math.max(-8, Math.min(0, focus.y));
+			const down = Math.max(-16, Math.min(0, focus.y));
 			return new THREE.Vector3(focus.x * 0.85, 5.6 * this.zoom * far + down, focus.z - 7.0 * this.zoom * far);
 		}
 		if (this.room === 'campfire' || this.room === 'port' || this.room?.startsWith('yard:')) {
@@ -2165,7 +2177,7 @@ export class WorldEngine {
 		const city = this.room === 'city';
 		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + .9 : (this.me?.pos.z ?? 0) + (city ? 2.15 : .6);
 		const tvCam = this.tvView ? this.tvCamera() : null;
-		const lookGoal = this.cameraOverride ? this.cameraOverride.look : tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-8, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
+		const lookGoal = this.cameraOverride ? this.cameraOverride.look : tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-16, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
 		this.camLook.lerp(lookGoal, 1 - Math.pow(0.0015, dt));
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
@@ -2197,7 +2209,9 @@ export class WorldEngine {
 		const typing = this.decorating !== null;
 		// En un juego: congelado en la cuenta regresiva o si te caíste.
 		// Quieto en la cuenta regresiva o cayendo al pozo; en un salto sí se puede dirigir en el aire.
-		if (this.mode?.frozen?.() || (this.falling && !this.jumping) || actor.pos.y < -0.6) {
+		// Con varios pisos (Piso que se Cae) se puede mover cayendo y en los pisos de abajo (antes quedabas trabado).
+		const layered = Boolean(this.mode?.ground);
+		if (this.mode?.frozen?.() || (this.falling && !this.jumping && !layered) || (!layered && actor.pos.y < -0.6)) {
 			ix = 0;
 			iz = 0;
 		}
@@ -2247,14 +2261,17 @@ export class WorldEngine {
 			this.announce();
 		}
 		if (this.mode?.ground) {
-			// Con varios pisos: caés hasta el de abajo (y si no hay ninguno, seguís cayendo).
+			// Con varios pisos: el salto sube de verdad, y al caer aterrizás en el piso de abajo
+			// (y si no hay ninguno, seguís cayendo hasta quedar afuera).
 			const floorY = this.mode.ground(actor.pos.x, actor.pos.z, actor.pos.y);
-			if (floorY === null || actor.pos.y > floorY + 0.02) {
+			const airborne = this.jumping || this.falling || floorY === null || actor.pos.y > floorY + 0.02;
+			if (airborne) {
 				this.falling = true;
 				this.fallV -= 22 * dt;
 				actor.pos.y += this.fallV * dt;
-				if (floorY !== null && actor.pos.y <= floorY) {
-					actor.pos.y = floorY;
+				const below = this.mode.ground(actor.pos.x, actor.pos.z, actor.pos.y - this.fallV * dt);
+				if (this.fallV <= 0 && below !== null && actor.pos.y <= below) {
+					actor.pos.y = below;
 					this.fallV = 0;
 					this.falling = false;
 				}

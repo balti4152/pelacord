@@ -3993,3 +3993,634 @@
 	gap: 6px;
 	margin-bottom: 8px;
 }
+
+/* ---------------------------------------------- mesa de juegos: elegir --- */
+.tg-games {
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.tg-lobby {
+	width: min(760px, calc(100% - 2rem));
+}
+.tg-game-art.is-drawn {
+	display: block;
+	height: 96px;
+	padding: 0;
+	background: #fff;
+	filter: none;
+}
+.tg-game-art.is-drawn svg {
+	width: 100%;
+	height: 100%;
+	display: block;
+	filter: none;
+	transition: transform 220ms ease;
+}
+.tg-game:hover .tg-game-art.is-drawn svg {
+	transform: scale(1.05);
+}
+.tg-game.is-picked .tg-game-art.is-drawn svg {
+	animation: none;
+	transform: scale(1.07);
+}
+.tg-bots.is-note {
+	font-size: 0.78rem;
+	font-weight: 800;
+	opacity: 0.7;
+}
+
+/* --------------------------------------------------------------- STOP! --- */
+.stop-screen,
+.wiki-screen {
+	position: absolute;
+	inset: 4.6rem 1rem 1rem;
+	z-index: 7;
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+	padding: 1rem 1.2rem;
+	border: 4px solid var(--t-line);
+	border-radius: 28px;
+	background: var(--t-cream);
+	box-shadow: 0 8px 0 var(--t-line), 0 24px 50px rgba(10, 4, 24, 0.45);
+	animation: t-in 200ms ease-out;
+	overflow: hidden;
+}
+.stop-head,
+.wiki-head {
+	display: flex;
+	align-items: center;
+	gap: 0.7rem;
+	flex-wrap: wrap;
+}
+.stop-head .t-btn,
+.wiki-head .t-btn:last-child {
+	margin-left: auto;
+}
+.stop-logo {
+	padding: 0.15rem 0.8rem;
+	border: 3px solid var(--t-line);
+	border-radius: 12px;
+	background: #e2394b;
+	color: #fff;
+	font-size: 1.3rem;
+	font-weight: 900;
+	letter-spacing: 0.04em;
+	transform: rotate(-3deg);
+	box-shadow: 0 4px 0 var(--t-line);
+}
+.stop-round {
+	font-weight: 900;
+	opacity: 0.7;
+}
+.stop-note {
+	font-weight: 800;
+}
+.stop-letter-badge {
+	display: grid;
+	place-items: center;
+	width: 2.6rem;
+	height: 2.6rem;
+	border: 3px solid var(--t-line);
+	border-radius: 12px;
+	background: #fff;
+	color: #e2394b;
+	font-size: 1.6rem;
+	font-weight: 900;
+	box-shadow: 0 4px 0 #d8c9a4;
+}
+
+/* Las teclas blancas (como las de un teclado). */
+.stop-key {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 0.45rem 0.9rem;
+	border: 2px solid #d8c9a4;
+	border-radius: 10px;
+	background: linear-gradient(#fff, #f7f1e3);
+	box-shadow: 0 4px 0 #d8c9a4, 0 6px 10px rgba(74, 58, 42, 0.12);
+	color: #3a2c1e;
+	font-weight: 900;
+	font-size: 0.95rem;
+	white-space: nowrap;
+	transition: transform 200ms ease, background 200ms ease, box-shadow 200ms ease;
+}
+.stop-key.is-chosen {
+	background: linear-gradient(#fff2b3, #ffd23f);
+	border-color: #e0a800;
+	box-shadow: 0 4px 0 #c48e00, 0 0 0 4px rgba(255, 210, 63, 0.35);
+	transform: translateY(-2px) scale(1.06);
+}
+
+.stop-roll {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.8rem;
+	min-height: 0;
+}
+.stop-letter-drum {
+	display: grid;
+	place-items: center;
+	width: 6rem;
+	height: 6rem;
+	border: 4px solid var(--t-line);
+	border-radius: 22px;
+	background: #fff;
+	box-shadow: 0 6px 0 #d8c9a4;
+}
+.stop-letter-drum span {
+	font-size: 3.6rem;
+	font-weight: 900;
+	line-height: 1;
+	color: #a7987c;
+}
+.stop-letter-drum.is-settled span {
+	color: #e2394b;
+	animation: stop-pop 380ms cubic-bezier(.2, 1.6, .4, 1);
+}
+.stop-letter-drum small {
+	margin-top: -0.6rem;
+	font-size: 0.7rem;
+	font-weight: 900;
+	text-transform: uppercase;
+	opacity: 0.55;
+}
+.stop-rows {
+	width: 100%;
+	display: flex;
+	flex-direction: column;
+	gap: 0.55rem;
+	overflow: hidden;
+	mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.stop-row {
+	overflow: hidden;
+	padding: 0.2rem 0 0.5rem;
+}
+.stop-track {
+	display: flex;
+	gap: 0.6rem;
+	width: max-content;
+	animation: stop-scroll linear infinite;
+}
+.stop-track.is-reverse {
+	animation-direction: reverse;
+}
+@keyframes stop-scroll {
+	from { transform: translateX(0); }
+	to { transform: translateX(-50%); }
+}
+.stop-slots {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: center;
+	gap: 0.6rem;
+	padding: 0.7rem;
+	border: 3px dashed #d8c9a4;
+	border-radius: 18px;
+}
+.stop-key.is-slot {
+	min-width: 7rem;
+	color: #c9b892;
+}
+.stop-key.is-slot.is-in {
+	color: #3a2c1e;
+	background: linear-gradient(#fff2b3, #ffd23f);
+	border-color: #e0a800;
+	box-shadow: 0 4px 0 #c48e00;
+	animation: stop-pop 420ms cubic-bezier(.2, 1.6, .4, 1);
+}
+@keyframes stop-pop {
+	from { transform: scale(0.4) translateY(-30px); opacity: 0; }
+	to { transform: none; opacity: 1; }
+}
+
+.stop-write {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.9rem;
+	overflow-y: auto;
+}
+.stop-fields {
+	display: grid;
+	gap: 0.7rem;
+	width: min(620px, 100%);
+}
+.stop-field {
+	display: grid;
+	grid-template-columns: 11rem 1fr;
+	align-items: center;
+	gap: 0.7rem;
+}
+.stop-field input {
+	padding: 0.7rem 0.9rem;
+	border: 3px solid var(--t-line);
+	border-radius: 14px;
+	background: #fff;
+	font: inherit;
+	font-size: 1.05rem;
+	font-weight: 800;
+	outline: none;
+}
+.stop-field input:focus {
+	box-shadow: 0 0 0 4px rgba(255, 210, 63, 0.6);
+}
+.stop-field.is-bad input {
+	border-color: #e2394b;
+}
+.stop-field small {
+	grid-column: 2;
+	margin-top: -0.4rem;
+	color: #e2394b;
+	font-size: 0.75rem;
+	font-weight: 800;
+}
+.stop-basta-btn {
+	padding: 0.7rem 2.6rem;
+	border: 4px solid var(--t-line);
+	border-radius: 999px;
+	background: #e2394b;
+	color: #fff;
+	font: inherit;
+	font-size: 1.6rem;
+	font-weight: 900;
+	letter-spacing: 0.04em;
+	box-shadow: 0 6px 0 var(--t-line);
+	cursor: pointer;
+	transition: transform 120ms ease;
+}
+.stop-basta-btn:hover:not(:disabled) {
+	transform: translateY(-2px) scale(1.03);
+}
+.stop-basta-btn:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+.stop-basta {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.5rem 1.2rem;
+	border-radius: 16px;
+	background: #e2394b;
+	color: #fff;
+	font-size: 1.3rem;
+	font-weight: 900;
+	animation: stop-pop 380ms cubic-bezier(.2, 1.6, .4, 1);
+}
+
+.stop-review {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 0.6rem;
+	min-height: 0;
+}
+.stop-table {
+	display: grid;
+	gap: 0.35rem;
+	overflow: auto;
+	padding-bottom: 0.3rem;
+}
+.stop-cell {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.45rem 0.6rem;
+	border-radius: 12px;
+	background: #fff;
+	font-weight: 800;
+	min-height: 2.6rem;
+}
+.stop-cell.is-head {
+	justify-content: center;
+	background: transparent;
+	font-weight: 900;
+}
+.stop-cell.is-cat {
+	background: transparent;
+	padding: 0;
+}
+.stop-cell.is-cat .stop-key {
+	width: 100%;
+	font-size: 0.85rem;
+}
+.stop-cell.is-answer b {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.stop-cell.is-answer em {
+	font-style: normal;
+	font-size: 0.72rem;
+	font-weight: 900;
+	opacity: 0.6;
+}
+.stop-cell.pts-10 { background: #dff7e9; }
+.stop-cell.pts-5 { background: #fff4cc; }
+.stop-cell.pts-0 { background: #fbe3e5; }
+.stop-vote {
+	display: inline-flex;
+	gap: 0.2rem;
+}
+.stop-vote button {
+	display: grid;
+	place-items: center;
+	width: 1.6rem;
+	height: 1.6rem;
+	border: 2px solid var(--t-line);
+	border-radius: 8px;
+	background: #fff;
+	cursor: pointer;
+}
+.stop-vote button.is-on {
+	background: #38d39f;
+	color: #fff;
+}
+.stop-vote button.is-on.is-no {
+	background: #e2394b;
+}
+.stop-cell.is-total {
+	justify-content: center;
+	background: #f2e9d6;
+	font-weight: 900;
+}
+.stop-cell.is-grand {
+	background: #ffd23f;
+	font-size: 1.1rem;
+}
+.stop-actions {
+	justify-content: center;
+}
+
+/* -------------------------------------------------------- Carrera Wiki --- */
+.wiki-goal,
+.wiki-clicks {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	padding: 0.35rem 0.8rem;
+	border: 3px solid var(--t-line);
+	border-radius: 999px;
+	background: #fff;
+	font-weight: 800;
+}
+.wiki-goal {
+	background: #ffd23f;
+}
+.wiki-goal b {
+	font-weight: 900;
+}
+.wiki-main {
+	flex: 1;
+	display: grid;
+	grid-template-columns: 1fr 230px;
+	gap: 0.8rem;
+	min-height: 0;
+}
+.wiki-article {
+	overflow-y: auto;
+	padding: 1rem 1.4rem;
+	border: 3px solid var(--t-line);
+	border-radius: 18px;
+	background: #fff;
+	color: #202122;
+	font-family: Georgia, 'Times New Roman', serif;
+	font-size: 0.98rem;
+	line-height: 1.55;
+}
+.wiki-article h1 {
+	margin: 0 0 0.6rem;
+	padding-bottom: 0.3rem;
+	border-bottom: 1px solid #a2a9b1;
+	font-size: 1.8rem;
+	font-weight: 400;
+}
+.wiki-body [data-wiki] {
+	color: #3366cc;
+	cursor: pointer;
+	border-radius: 3px;
+}
+.wiki-body [data-wiki]:hover {
+	background: #eaf0ff;
+	text-decoration: underline;
+}
+.wiki-body img {
+	max-width: 100%;
+	height: auto;
+}
+.wiki-body table {
+	max-width: 100%;
+	font-size: 0.85rem;
+	border-collapse: collapse;
+}
+.wiki-body .infobox {
+	float: right;
+	width: 260px;
+	margin: 0 0 1rem 1rem;
+	border: 1px solid #a2a9b1;
+	background: #f8f9fa;
+}
+.wiki-body .infobox td,
+.wiki-body .infobox th {
+	padding: 0.2rem 0.4rem;
+	vertical-align: top;
+}
+.wiki-body h2,
+.wiki-body h3 {
+	font-weight: 400;
+	border-bottom: 1px solid #a2a9b1;
+}
+.wiki-loading {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	font-family: Nunito, sans-serif;
+	font-weight: 800;
+}
+.wiki-side {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	overflow-y: auto;
+}
+.wiki-side h3 {
+	margin: 0.2rem 0 0;
+	font-size: 0.85rem;
+	text-transform: uppercase;
+	opacity: 0.65;
+}
+.wiki-side ul,
+.wiki-path {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 0.35rem;
+}
+.wiki-side li {
+	display: grid;
+	gap: 0.05rem;
+	padding: 0.45rem 0.6rem;
+	border-radius: 12px;
+	background: #fff;
+}
+.wiki-side li small {
+	font-size: 0.75rem;
+	opacity: 0.7;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.wiki-side li em {
+	font-style: normal;
+	font-size: 0.75rem;
+	font-weight: 900;
+}
+.wiki-side li.is-winner {
+	background: #ffd23f;
+}
+.wiki-path li {
+	padding: 0.3rem 0.55rem;
+	font-size: 0.8rem;
+	font-weight: 800;
+}
+.wiki-path li.is-goal {
+	background: #38d39f;
+	color: #fff;
+}
+.wiki-win {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.6rem;
+	background: rgba(255, 248, 232, 0.92);
+	font-weight: 800;
+	animation: t-in 240ms ease-out;
+}
+.wiki-win strong {
+	font-size: 2rem;
+	font-weight: 900;
+}
+.wiki-win svg {
+	color: #e0a800;
+}
+@media (max-width: 760px) {
+	.wiki-main {
+		grid-template-columns: 1fr;
+	}
+	.wiki-side {
+		max-height: 140px;
+	}
+	.stop-field {
+		grid-template-columns: 1fr;
+	}
+}
+/* Las fotos de Wikipedia, chiquitas (como en la página real). */
+.wiki-body figure,
+.wiki-body .thumb,
+.wiki-body .mw-default-size {
+	float: right;
+	clear: right;
+	max-width: 240px;
+	margin: 0.3rem 0 0.8rem 1rem;
+	font-size: 0.8rem;
+}
+.wiki-body img {
+	max-width: 240px;
+	max-height: 240px;
+	width: auto;
+	object-fit: contain;
+}
+.wiki-body figcaption {
+	font-size: 0.78rem;
+	color: #54595d;
+}
+.wiki-body .gallery,
+.wiki-body .mw-gallery-traditional {
+	display: none;
+}
+.wiki-body .infobox,
+.wiki-body table.infobox {
+	width: 270px !important;
+	max-width: 42% !important;
+	font-size: 0.78rem;
+}
+.wiki-body .infobox img {
+	max-width: 100%;
+}
+/* Carrera Wiki: "frío/caliente" según si la palabra buscada aparece en la página. */
+.wiki-article {
+	transition: background 600ms ease;
+}
+.wiki-heat {
+	padding: 0.3rem 0.8rem;
+	border: 3px solid var(--t-line);
+	border-radius: 999px;
+	font-weight: 900;
+	background: #fff;
+}
+.wiki-heat.is-1 { background: #ffe3ec; }
+.wiki-heat.is-2 { background: #ffb8c9; }
+.wiki-heat.is-3 { background: #ff4d5e; color: #fff; animation: stop-pop 380ms cubic-bezier(.2, 1.6, .4, 1); }
+.wiki-head .t-btn:last-child {
+	margin-left: 0;
+}
+.wiki-head .wiki-heat {
+	margin-left: auto;
+}
+.tg-bots .t-round.is-on {
+	background: var(--t-sun);
+	box-shadow: 0 0 0 3px var(--t-line) inset;
+}
+.stop-final {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 0.8rem;
+	animation: t-in 240ms ease-out;
+}
+.stop-final > svg {
+	color: #e0a800;
+}
+.stop-final > strong {
+	font-size: 2rem;
+	font-weight: 900;
+}
+.stop-podium {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	width: min(420px, 100%);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.stop-podium li {
+	display: grid;
+	grid-template-columns: 2.4rem 1fr auto;
+	align-items: center;
+	padding: 0.55rem 0.9rem;
+	border: 3px solid var(--t-line);
+	border-radius: 16px;
+	background: #fff;
+	font-weight: 800;
+}
+.stop-podium li.is-1 { background: #ffd23f; font-size: 1.15rem; }
+.stop-podium li.is-2 { background: #e6e9f2; }
+.stop-podium li.is-3 { background: #f3d2b3; }
+.stop-podium em {
+	font-style: normal;
+	font-weight: 900;
+}

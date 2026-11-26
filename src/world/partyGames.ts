@@ -10,6 +10,7 @@
 import * as THREE from 'three';
 import type {WorldEngine} from '@/world/engine';
 import {bombBoom, bombPass, bombTick} from '@/world/partySounds';
+import {worldSounds} from '@/world/worldSounds';
 import {getParty, type HostBot, type HostCtx, hostNow, mulberry, type PartyState, pushBot, sendPush} from '@/world/party';
 
 export type GameId = 'race' | 'floor' | 'king' | 'bomb' | 'fruit' | 'colors' | 'soccer' | 'paint' | 'boat';
@@ -38,6 +39,10 @@ export interface GameScene {
 	ground?(x: number, z: number, y: number, t: number): number | null;
 	/** Por debajo de esta altura quedás afuera (por defecto -3.5). */
 	outY?: number;
+	/** Mapas grandes: dónde quedan los que ya no juegan (mirando), en vez del lobby de la Arena. */
+	spectatorClamp?(p: THREE.Vector3): THREE.Vector3;
+	/** Dónde aparecen los que miran. */
+	spectatorSpot?: [number, number];
 	speed?: number;
 	dispose(): void;
 }
@@ -52,6 +57,8 @@ export interface GameDef {
 	kind: 'elim' | 'race' | 'score' | 'team';
 	/** Al caerse, el bot vuelve (no queda afuera). */
 	respawns?: boolean;
+	/** Mapa propio y grande: mientras se juega no se ve el estadio de la Arena. */
+	bigMap?: boolean;
 	spawn(index: number, count: number, g: Record<string, unknown>): [number, number];
 	build(ctx: PartyCtx): GameScene;
 	hostSetup?(players: string[], seed: number): Record<string, unknown>;
@@ -112,6 +119,31 @@ function teamRank(s: PartyState, teams: Record<string, string>, scoreOf: (team: 
 	const ids = (team: string) => s.players.filter((p) => teams[p] === team);
 	if (a === b) return [s.players];
 	return a > b ? [ids('a'), ids('b')] : [ids('b'), ids('a')];
+}
+
+/** Colores de los equipos (a, b, c…): rosa, azul y después los demás. */
+export const TEAM_COLORS: Record<string, number> = {a: 0xff4fa8, b: 0x3fa4ff, c: 0xffd23f, d: 0x45e07a, e: 0xa066ff, f: 0xff8a2a, g: 0x2ee6d6, h: 0xff5e5e, i: 0x8d6b4a, j: 0xffffff};
+
+/** Con jugadores impares (3, 5…) cada uno juega solo con su color (si no, quedaba un equipo de más). */
+function teamsOrSolo(players: string[]): Record<string, string> {
+	if (players.length % 2 === 0) return teamsFor(players);
+	const letters = 'abcdefghij';
+	return Object.fromEntries(players.map((p, i) => [p, letters[i % letters.length]]));
+}
+
+/** Ranking con cualquier cantidad de equipos: el que más tiene primero. */
+function multiTeamRank(s: PartyState, teams: Record<string, string>, scoreOf: (team: string) => number): string[][] {
+	const names = [...new Set(s.players.map((p) => teams[p]).filter(Boolean))];
+	const sorted = names.sort((x, y) => scoreOf(y) - scoreOf(x));
+	const groups: string[][] = [];
+	let i = 0;
+	while (i < sorted.length) {
+		const score = scoreOf(sorted[i]);
+		const tied = sorted.filter((t) => scoreOf(t) === score);
+		groups.push(s.players.filter((p) => tied.includes(teams[p])));
+		i += tied.length;
+	}
+	return groups;
 }
 
 function teamsFor(players: string[]): Record<string, string> {
@@ -263,29 +295,119 @@ let pushCooldown = 0;
 /** Empujar al que tengo enfrente (cachetada). */
 function shove(ctx: PartyCtx, power = 9): boolean {
 	if (performance.now() < pushCooldown) return true;
-	pushCooldown = performance.now() + 700;
+	pushCooldown = performance.now() + 1000;
 	const target = nearestOther(ctx, 1.7);
 	ctx.engine.emote(ctx.meId, 'slap', target?.id ?? null);
 	if (target) ctx.push(target.id, target.dx, target.dz, power);
 	return true;
 }
 
-// ================================================================= 1 =====
-// Carrera de Gomitas: cruzar el carril esquivando barras que giran y hongos que rebotan.
+// ---------------------------------------------------------------- paisaje ---
+// Los mapas grandes (carrera y piso que se cae) tienen su propio cielo, montañas y nubes, estilo
+// "programa de juegos" pastel.
 
-const LANE_X = 3.3;
-const RACE_START = -8.2;
-const RACE_FINISH = 8.0;
-const BARS = [-4.4, 0, 4.4];
+function skyDome(top: number, bottom: number): THREE.Mesh {
+	const geometry = new THREE.SphereGeometry(140, 32, 16);
+	const colors: number[] = [];
+	const a = new THREE.Color(top);
+	const b = new THREE.Color(bottom);
+	const pos = geometry.attributes.position as THREE.BufferAttribute;
+	for (let i = 0; i < pos.count; i++) {
+		const k = THREE.MathUtils.clamp((pos.getY(i) / 140 + 0.15) / 0.8, 0, 1);
+		const c = b.clone().lerp(a, k);
+		colors.push(c.r, c.g, c.b);
+	}
+	geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+	const mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({vertexColors: true, side: THREE.BackSide, fog: false, depthWrite: false}));
+	mesh.renderOrder = -10;
+	return mesh;
+}
+
+/** Cielo, montañas lavanda de fondo, nubes redonditas y un mar de gelatina abajo. */
+function landscape(center: THREE.Vector3, opts: {goo?: number; mountains?: number} = {}): THREE.Group {
+	const g = new THREE.Group();
+	const sky = skyDome(0x5fb8ff, 0xd7f0ff);
+	sky.position.copy(center);
+	g.add(sky);
+	const r = mulberry(77);
+	const mountain = [0x9b8cff, 0xb8a8ff, 0x8ec5ff, 0xc9b6ff];
+	for (let i = 0; i < (opts.mountains ?? 18); i++) {
+		const a = (i / (opts.mountains ?? 18)) * Math.PI * 2 + r() * 0.3;
+		const d = 85 + r() * 20;
+		const h = 18 + r() * 26;
+		const m = new THREE.Mesh(new THREE.ConeGeometry(10 + r() * 10, h, 5 + Math.floor(r() * 3)), new THREE.MeshStandardMaterial({color: mountain[i % mountain.length], roughness: 0.9, flatShading: true}));
+		m.position.set(center.x + Math.cos(a) * d, -14 + h / 2, center.z + Math.sin(a) * d);
+		m.rotation.y = r() * 3;
+		g.add(m);
+		// Nieve en la punta.
+		const cap = new THREE.Mesh(new THREE.ConeGeometry((10 + 5) * 0.35, h * 0.25, 5), new THREE.MeshStandardMaterial({color: 0xffffff, roughness: 0.8, flatShading: true}));
+		cap.position.set(m.position.x, -14 + h - h * 0.12, m.position.z);
+		g.add(cap);
+	}
+	const cloudMat = new THREE.MeshStandardMaterial({color: 0xffffff, roughness: 1, emissive: 0xffffff, emissiveIntensity: 0.25});
+	for (let i = 0; i < 14; i++) {
+		const cloud = new THREE.Group();
+		for (let k = 0; k < 4; k++) {
+			const puff = new THREE.Mesh(new THREE.SphereGeometry(2.4 + r() * 1.6, 14, 10), cloudMat);
+			puff.position.set(k * 2.6 - 4, r() * 1.2, r() * 1.5);
+			cloud.add(puff);
+		}
+		const a = r() * Math.PI * 2;
+		const d = 45 + r() * 40;
+		cloud.position.set(center.x + Math.cos(a) * d, 14 + r() * 16, center.z + Math.sin(a) * d);
+		cloud.scale.setScalar(0.8 + r() * 0.8);
+		g.add(cloud);
+	}
+	if (opts.goo !== undefined) {
+		const goo = new THREE.Mesh(new THREE.CircleGeometry(180, 48), new THREE.MeshStandardMaterial({color: 0xff7ac8, roughness: 0.25, metalness: 0.05, emissive: 0xff4fa8, emissiveIntensity: 0.15}));
+		goo.rotation.x = -Math.PI / 2;
+		goo.position.set(center.x, opts.goo, center.z);
+		g.add(goo);
+	}
+	return g;
+}
+
+/** Bloque inflable (cajas redonditas). */
+function puffyBox(w: number, h: number, d: number, color: number): THREE.Mesh {
+	const geometry = new THREE.BoxGeometry(w, h, d, 2, 2, 2);
+	const mesh = new THREE.Mesh(geometry, glossy(color, 0.05));
+	mesh.castShadow = true;
+	mesh.receiveShadow = true;
+	return mesh;
+}
+
+// ================================================================= 1 =====
+// Carrera de Gomitas: una pista larga con barras que giran, rodillos (hay que correr en contra para
+// no caerse), puertas falsas y pelotas que bajan rodando. Llegar primero a la corona.
+
+const COURSE_X = 6;
+const RACE_START = -10;
+const RACE_FINISH = 112;
+/** Secciones (z donde empiezan). */
+const SEC_SLIDE = -3;
+const SEC_BARS = 18;
+const SEC_DRUMS = 44;
+const SEC_DOORS = 70;
+const SEC_BALLS = 92;
+const CHECKPOINTS = [RACE_START + 2, SEC_BARS, SEC_DRUMS, SEC_DOORS, SEC_BALLS];
+const BARS = [24, 32, 40];
+const BAR_REACH = 5.9;
+/** Rodillos: z del centro y para dónde empuja la parte de arriba (-1 = para atrás). */
+const DRUMS: Array<{z: number; dir: number}> = [
+	{z: 47, dir: -1}, {z: 51, dir: -1}, {z: 55, dir: 1}, {z: 59, dir: -1}, {z: 63, dir: -1}, {z: 67, dir: -1},
+];
+const DRUM_R = 1.98;
+/** Los rodillos van pegados (no hay huecos): el desafío es correr contra el giro. */
+const DRUM_HALF = 2.02;
+const DRUM_SPEED = 2.6;
+const DOOR_ROWS = [76, 85];
+const DOOR_W = (COURSE_X * 2) / 5;
+const SLIDERS = [2, 7, 12];
+const BALL_LANES = [-4.2, -1.4, 1.4, 4.2];
 
 function barAngle(i: number, t: number, seed: number): number {
 	const dir = i % 2 ? -1 : 1;
-	return dir * (t * (1.5 + i * 0.25)) + (seed % 100) / 16 + i;
-}
-
-function bumpers(seed: number): Array<[number, number]> {
-	const r = mulberry(seed + 5);
-	return [[-2.2, -6.4], [2.2, -2.2], [-2, 2.2], [2.1, 6.3]].map(([x, z]) => [x + (r() - 0.5) * 0.8, z]);
+	return dir * (t * (1.2 + i * 0.22)) + (seed % 100) / 16 + i;
 }
 
 /** Empujón de una barra que gira (si te toca). */
@@ -297,9 +419,9 @@ function barHit(x: number, z: number, t: number, seed: number): {dx: number; dz:
 		const rx = x;
 		const rz = z - BARS[i];
 		const along = rx * ux + rz * uz;
-		if (Math.abs(along) > 3.2) continue;
+		if (Math.abs(along) > BAR_REACH) continue;
 		const perp = -rx * uz + rz * ux;
-		if (Math.abs(perp) < 0.42) {
+		if (Math.abs(perp) < 0.5) {
 			const dir = i % 2 ? -1 : 1;
 			return {dx: -uz * Math.sign(along) * dir, dz: ux * Math.sign(along) * dir};
 		}
@@ -307,96 +429,248 @@ function barHit(x: number, z: number, t: number, seed: number): {dx: number; dz:
 	return null;
 }
 
+/** Puertas abiertas de cada fila (las demás son de mentira: no se pasan). */
+function openDoors(seed: number): number[][] {
+	const r = mulberry(seed + 9);
+	return DOOR_ROWS.map(() => {
+		const a = Math.floor(r() * 5);
+		let b = Math.floor(r() * 5);
+		if (b === a) b = (a + 2) % 5;
+		return [a, b];
+	});
+}
+
+const doorIndex = (x: number) => THREE.MathUtils.clamp(Math.floor((x + COURSE_X) / DOOR_W), 0, 4);
+
+/** Los bloques que van y vienen al principio. */
+function sliderX(i: number, t: number): number {
+	return Math.sin(t * (0.9 + i * 0.25) + i * 2) * 3.8;
+}
+
+/** Pelotas que bajan rodando al final (una por carril). */
+function ballZ(lane: number, t: number, seed: number): number {
+	const period = 3.4 + lane * 0.45;
+	const k = ((t + lane * 1.1 + (seed % 7)) % period) / period;
+	return RACE_FINISH - 3 - k * (RACE_FINISH - 3 - SEC_BALLS);
+}
+
+function onDrum(z: number): {dir: number} | null {
+	for (const d of DRUMS) if (Math.abs(z - d.z) < DRUM_HALF) return d;
+	return null;
+}
+
+function raceSupport(x: number, z: number): boolean {
+	if (Math.abs(x) > COURSE_X + 0.15) return false;
+	// Los rodillos están pegados entre sí (no hay huecos donde caerse).
+	if (z > SEC_DRUMS + 1 && z < SEC_DOORS - 1) return Boolean(onDrum(z));
+	return z >= RACE_START - 3 && z <= RACE_FINISH + 8;
+}
+
+function doorClamp(p: THREE.Vector3, open: number[][]): void {
+	DOOR_ROWS.forEach((row, k) => {
+		if (Math.abs(p.z - row) >= 0.5) return;
+		if (open[k].includes(doorIndex(p.x))) return;
+		p.z = p.z < row ? row - 0.5 : row + 0.5;
+	});
+}
+
 const race: GameDef = {
-	id: 'race', name: 'Carrera de Gomitas', color: '#ff4fa8', duration: 70, kind: 'race', respawns: true,
-	desc: 'Llegá primero a la meta esquivando barras que giran.',
-	how: 'Corré con Shift y saltá las barras con Espacio. Si te caés, volvés al último punto.',
-	spawn: (i) => [((i % 6) - 2.5) * 1.0, RACE_START - Math.floor(i / 6) * 0.9],
+	id: 'race', name: 'Carrera de Gomitas', color: '#ff4fa8', duration: 150, kind: 'race', respawns: true, bigMap: true,
+	desc: 'Una pista enorme: bloques que van y vienen, barras que giran, rodillos, puertas falsas y pelotas que bajan. ¡Llegá a la corona!',
+	how: 'En los rodillos corré contra el giro para no caerte. Saltá las barras con Espacio. Si te caés, volvés al último punto.',
+	spawn: (i) => [((i % 6) - 2.5) * 1.5, RACE_START - Math.floor(i / 6) * 1.3],
 	build(ctx) {
 		const group = new THREE.Group();
 		const seed = ctx.state.seed;
-		// Carril por tramos de colores.
-		for (let k = 0; k < 9; k++) {
-			const seg = new THREE.Mesh(new THREE.BoxGeometry(LANE_X * 2, 0.5, 2.0), glossy(COLORS[k % COLORS.length]));
-			seg.position.set(0, -0.25, RACE_START - 0.6 + k * 2.0);
-			seg.receiveShadow = true;
-			group.add(seg);
+		group.add(landscape(new THREE.Vector3(0, 0, 50), {goo: -6}));
+		const floorTop = (z0: number, z1: number, a: string, b: string, pattern: 'stripes' | 'checker' | 'dots' = 'stripes') => {
+			const tex = candyTexture(pattern, a, b, 1);
+			tex.repeat.set(2, Math.max(1, (z1 - z0) / 6));
+			const slab = new THREE.Mesh(new THREE.BoxGeometry(COURSE_X * 2, 1.2, z1 - z0), [glossy(0xffffff), glossy(0xffffff), new THREE.MeshStandardMaterial({map: tex, roughness: 0.35}), glossy(0xffffff), glossy(0xffffff), glossy(0xffffff)]);
+			slab.position.set(0, -0.6, (z0 + z1) / 2);
+			slab.receiveShadow = true;
+			group.add(slab);
+		};
+		// Tramos de piso (los rodillos tienen huecos).
+		floorTop(RACE_START - 3, SEC_SLIDE, '#ff4fa8', '#ffffff', 'checker');
+		floorTop(SEC_SLIDE, SEC_BARS, '#5fe3e9', '#8af0f2');
+		floorTop(SEC_BARS, SEC_DRUMS + 1, '#a066ff', '#c29bff', 'dots');
+		floorTop(SEC_DOORS - 1, SEC_BALLS, '#ffd23f', '#ffe27a');
+		floorTop(SEC_BALLS, RACE_FINISH + 8, '#5fe3e9', '#8af0f2');
+		// Barandas inflables a los costados (sin tapar los rodillos).
+		const rail = glossy(0xff8ac6, 0.08);
+		for (const [z0, z1] of [[RACE_START - 3, SEC_DRUMS + 1], [SEC_DOORS - 1, RACE_FINISH + 8]] as const) {
+			for (const side of [-1, 1]) {
+				const tube = new THREE.Mesh(new THREE.CapsuleGeometry(0.45, z1 - z0 - 0.9, 8, 16), rail);
+				tube.rotation.x = Math.PI / 2;
+				tube.position.set(side * (COURSE_X + 0.45), 0.35, (z0 + z1) / 2);
+				group.add(tube);
+			}
 		}
-		const finishFloor = new THREE.Mesh(new THREE.BoxGeometry(LANE_X * 2 + 1, 0.5, 2.2), glossy(0xffffff));
-		finishFloor.position.set(0, -0.235, RACE_FINISH + 0.9);
-		group.add(finishFloor);
-		// Meta: arco inflable.
-		const arch = new THREE.Mesh(new THREE.TorusGeometry(LANE_X, 0.32, 14, 40, Math.PI), glossy(0x45e07a, 0.2));
-		arch.position.set(0, 0, RACE_FINISH);
-		group.add(arch);
-		const meta = textSprite('META', '#45e07a', 2.6);
-		meta.position.set(0, 3.9, RACE_FINISH);
-		group.add(meta);
-		// Barras que giran (con su eje).
+		// Flechas en el piso.
+		for (const z of [0, 10, 20, 30, 74, 96, 104]) {
+			const arrow = new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape([new THREE.Vector2(-1.2, -0.6), new THREE.Vector2(0, 0.9), new THREE.Vector2(1.2, -0.6), new THREE.Vector2(0.5, -0.6), new THREE.Vector2(0.5, -1.4), new THREE.Vector2(-0.5, -1.4), new THREE.Vector2(-0.5, -0.6)])), new THREE.MeshBasicMaterial({color: 0xff4fa8, transparent: true, opacity: 0.85}));
+			arrow.rotation.x = -Math.PI / 2;
+			arrow.position.set(0, 0.02, z);
+			group.add(arrow);
+		}
+		// 1) Bloques que van y vienen.
+		const sliders = SLIDERS.map((z) => {
+			const block = puffyBox(3, 1.4, 1.3, 0xff4fa8);
+			block.position.set(0, 0.7, z);
+			group.add(block);
+			return block;
+		});
+		// 2) Barras que giran.
 		const bars = BARS.map((z, i) => {
-			const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.45, 0.9, 20), glossy(0xffffff));
-			pivot.position.set(0, 0.45, z);
-			const bar = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 6.0, 8, 16), glossy(i % 2 ? 0xff8a2a : 0xa066ff, 0.15));
+			const pivot = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.7, 1.2, 20), glossy(0xffffff));
+			pivot.position.set(0, 0.6, z);
+			const bar = new THREE.Mesh(new THREE.CapsuleGeometry(0.34, BAR_REACH * 2 - 0.6, 8, 16), glossy(i % 2 ? 0xff8a2a : 0xffd23f, 0.12));
 			bar.rotation.z = Math.PI / 2;
-			const holder = new THREE.Group();
-			holder.position.set(0, 0.55, z);
-			holder.add(bar);
 			bar.castShadow = true;
+			const holder = new THREE.Group();
+			holder.position.set(0, 0.62, z);
+			holder.add(bar);
 			group.add(pivot, holder);
 			return holder;
 		});
-		const pads = bumpers(seed).map(([x, z]) => {
-			const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.75, 0.85, 0.35, 28), glossy(0xff4fa8, 0.25));
-			const top = new THREE.Mesh(new THREE.SphereGeometry(0.75, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), glossy(0xffd23f));
-			top.scale.y = 0.5;
-			top.position.y = 0.17;
-			const g = new THREE.Group();
-			g.add(pad, top);
-			g.position.set(x, 0.17, z);
-			group.add(g);
-			return g;
+		// 3) Rodillos rayados (el de arriba se mueve para atrás o para adelante).
+		const drums = DRUMS.map((d, i) => {
+			const tex = candyTexture('stripes', i % 2 ? '#45e07a' : '#3fa4ff', '#ffffff', 1);
+			tex.repeat.set(1, 3);
+			const drum = new THREE.Mesh(new THREE.CylinderGeometry(DRUM_R, DRUM_R, COURSE_X * 2, 40), [new THREE.MeshStandardMaterial({map: tex, roughness: 0.3}), glossy(0xffffff), glossy(0xffffff)]);
+			drum.rotation.z = Math.PI / 2;
+			drum.position.set(0, -DRUM_R, d.z);
+			drum.castShadow = true;
+			drum.receiveShadow = true;
+			group.add(drum);
+			// Tapas con flechas de giro.
+			for (const side of [-1, 1]) {
+				const cap = new THREE.Mesh(new THREE.TorusGeometry(DRUM_R * 0.7, 0.12, 8, 24, Math.PI * 1.4), glossy(0xff4fa8, 0.3));
+				cap.rotation.y = Math.PI / 2;
+				cap.position.set(side * (COURSE_X + 0.05), -DRUM_R, d.z);
+				group.add(cap);
+			}
+			return drum;
 		});
+		// 4) Puertas: dos filas de cinco; sólo dos de cada fila se rompen.
+		const open = openDoors(seed);
+		const doorMeshes: Array<{mesh: THREE.Mesh; open: boolean; row: number; slot: number}> = [];
+		DOOR_ROWS.forEach((row, k) => {
+			for (let slot = 0; slot < 5; slot++) {
+				const x = -COURSE_X + DOOR_W * (slot + 0.5);
+				const frame = puffyBox(0.3, 3, 0.6, 0xffffff);
+				frame.position.set(x - DOOR_W / 2, 1.5, row);
+				group.add(frame);
+				const door = puffyBox(DOOR_W - 0.35, 2.6, 0.35, [0x3fa4ff, 0xa066ff, 0x45e07a, 0xff8a2a, 0xffd23f][slot]);
+				door.position.set(x, 1.3, row);
+				group.add(door);
+				doorMeshes.push({mesh: door, open: open[k].includes(slot), row, slot});
+			}
+			const last = puffyBox(0.3, 3, 0.6, 0xffffff);
+			last.position.set(COURSE_X, 1.5, row);
+			group.add(last);
+			const top = puffyBox(COURSE_X * 2 + 0.6, 0.4, 0.7, 0xff4fa8);
+			top.position.set(0, 3.1, row);
+			group.add(top);
+		});
+		// 5) Pelotas gigantes que bajan rodando.
+		const balls = BALL_LANES.map((x) => {
+			const tex = candyTexture('dots', '#ffffff', '#ff4fa8', 1);
+			const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1.15, 1), new THREE.MeshStandardMaterial({map: tex, roughness: 0.3, flatShading: true}));
+			ball.position.set(x, 1.15, SEC_BALLS + 10);
+			ball.castShadow = true;
+			group.add(ball);
+			return ball;
+		});
+		// Meta: arco inflable, corona y alfombra a cuadros.
+		const finishPad = new THREE.Mesh(new THREE.BoxGeometry(COURSE_X * 2, 0.06, 8), new THREE.MeshStandardMaterial({map: candyTexture('checker', '#ff4fa8', '#ffffff', 2), roughness: 0.4}));
+		finishPad.position.set(0, 0.03, RACE_FINISH + 4);
+		group.add(finishPad);
+		const arch = new THREE.Mesh(new THREE.TorusGeometry(COURSE_X, 0.55, 16, 48, Math.PI), glossy(0x45e07a, 0.2));
+		arch.position.set(0, 0, RACE_FINISH);
+		group.add(arch);
+		const crown = new THREE.Group();
+		const band = new THREE.Mesh(new THREE.CylinderGeometry(1.4, 1.4, 0.9, 24, 1, true), glossy(0xffd23f, 0.35));
+		crown.add(band);
+		for (let k = 0; k < 5; k++) {
+			const spike = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1, 10), glossy(0xffd23f, 0.35));
+			const a = (k / 5) * Math.PI * 2;
+			spike.position.set(Math.cos(a) * 1.3, 0.9, Math.sin(a) * 1.3);
+			crown.add(spike);
+		}
+		crown.position.set(0, 9, RACE_FINISH + 6);
+		group.add(crown);
+		const meta = textSprite('META', '#45e07a', 3.4);
+		meta.position.set(0, COURSE_X + 1.4, RACE_FINISH);
+		group.add(meta);
+
 		let hitCooldown = 0;
 		let finished = false;
-		let checkpoint = RACE_START;
+		let checkpoint = CHECKPOINTS[0];
 		return {
 			group,
+			speed: 1.12,
 			clamp: (p) => {
-				p.x = THREE.MathUtils.clamp(p.x, -5.5, 5.5);
-				p.z = THREE.MathUtils.clamp(p.z, -9.4, finished ? 9.8 : 9.8);
-				if (finished && p.z < RACE_FINISH + 0.2) p.z = RACE_FINISH + 0.2;
+				p.x = THREE.MathUtils.clamp(p.x, -COURSE_X, COURSE_X);
+				p.z = THREE.MathUtils.clamp(p.z, RACE_START - 2.5, RACE_FINISH + 7.5);
+				if (finished && p.z < RACE_FINISH + 0.4) p.z = RACE_FINISH + 0.4;
+				doorClamp(p, open);
 				return p;
 			},
-			support: (x, z) => (Math.abs(x) <= LANE_X + 0.1 && z >= RACE_START - 1.7 && z <= RACE_FINISH + 2.0) || (z > RACE_FINISH - 0.1 && z < RACE_FINISH + 2.0 && Math.abs(x) <= LANE_X + 0.6),
+			support: (x, z) => raceSupport(x, z),
 			update(c, dt, t) {
+				sliders.forEach((b, i) => (b.position.x = sliderX(i, t)));
 				bars.forEach((h, i) => (h.rotation.y = -barAngle(i, t, seed)));
-				pads.forEach((p, i) => (p.scale.y = 1 + Math.sin(t * 6 + i) * 0.08));
-				if (c.state.phase !== 'play' || !c.state.alive.includes(c.meId)) return;
+				drums.forEach((d, i) => (d.rotation.x += DRUMS[i].dir * (DRUM_SPEED / DRUM_R) * dt));
+				balls.forEach((b, lane) => {
+					b.position.z = ballZ(lane, t, seed);
+					b.rotation.x -= dt * 4;
+				});
 				const me = c.engine.myState();
-				if (me.z > checkpoint + 0.5) for (const cp of BARS) if (me.z > cp + 0.6 && cp + 0.6 > checkpoint) checkpoint = cp + 0.6;
+				// Las puertas buenas se caen para atrás cuando alguien se acerca.
+				for (const d of doorMeshes) {
+					if (!d.open) continue;
+					const near = Math.abs(me.z - d.row) < 2.2 && Math.abs(me.x - (-COURSE_X + DOOR_W * (d.slot + 0.5))) < DOOR_W;
+					const target = near || (d.mesh.userData.down as boolean) ? -Math.PI / 2 : 0;
+					if (near) d.mesh.userData.down = true;
+					d.mesh.rotation.x += (target - d.mesh.rotation.x) * Math.min(1, dt * 8);
+					d.mesh.position.y = 1.3 * Math.cos(d.mesh.rotation.x) + 0.2;
+					d.mesh.position.z = d.row + 1.3 * Math.sin(-d.mesh.rotation.x);
+				}
+				if (c.state.phase !== 'play' || !c.state.alive.includes(c.meId)) return;
+				for (const cp of CHECKPOINTS) if (me.z > cp + 0.5 && cp > checkpoint) checkpoint = cp;
+				// Arriba de un rodillo: te lleva (para no caerte hay que correr en contra).
+				const drum = !me.falling ? onDrum(me.z) : null;
+				if (drum && me.z > SEC_DRUMS && me.z < SEC_DOORS) c.engine.nudge(0, drum.dir * DRUM_SPEED * dt);
 				hitCooldown -= dt;
-				if (hitCooldown <= 0) {
-					// Saltando por arriba de la barra, no te toca.
-					const hit = me.y > 0.45 ? null : barHit(me.x, me.z, t, seed);
+				if (hitCooldown <= 0 && me.y < 0.6) {
+					const hit = barHit(me.x, me.z, t, seed);
 					if (hit) {
-						c.engine.push(hit.dx, hit.dz, 11);
+						c.engine.push(hit.dx, hit.dz, 12);
 						hitCooldown = 0.5;
 					}
-					for (const [bx, bz] of bumpers(seed)) {
-						const dx = me.x - bx;
-						const dz = me.z - bz;
-						if (Math.hypot(dx, dz) < 1.05) {
-							c.engine.push(dx, dz, 9);
-							hitCooldown = 0.35;
+					SLIDERS.forEach((z, i) => {
+						const bx = sliderX(i, t);
+						if (Math.abs(me.x - bx) < 1.9 && Math.abs(me.z - z) < 1.05) {
+							c.engine.push(Math.sign(me.x - bx) || 1, 0, 10);
+							hitCooldown = 0.4;
 						}
-					}
+					});
+					BALL_LANES.forEach((x, lane) => {
+						const bz = ballZ(lane, t, seed);
+						if (Math.hypot(me.x - x, me.z - bz) < 1.55) {
+							c.engine.push((me.x - x) * 0.4, -1, 13);
+							hitCooldown = 0.6;
+						}
+					});
 				}
 				if (!finished && me.z > RACE_FINISH) {
 					finished = true;
 					c.send({finish: true});
 				}
 			},
-			respawn: () => [(Math.random() - 0.5) * 3, checkpoint],
+			respawn: () => [(Math.random() - 0.5) * 6, checkpoint + 0.8],
 			dispose: () => disposeGroup(group),
 		};
 	},
@@ -405,15 +679,33 @@ const race: GameDef = {
 			b.anim = 'idle';
 			return;
 		}
-		b.brain.lane ??= (Math.random() - 0.5) * 4;
-		b.brain.cp ??= RACE_START;
-		const wait = Math.sin(t * 0.9 + b.x * 3) > 0.92;
-		if (!wait) ctx.moveBot(b, b.brain.lane, b.z + 1.2, 3.3 + Math.sin(b.x) * 0.4, dt);
-		for (const cp of BARS) if (b.z > cp + 0.6 && cp + 0.6 > b.brain.cp) b.brain.cp = cp + 0.6;
-		const hit = barHit(b.x, b.z, t, ctx.state.seed);
+		const seed = ctx.state.seed;
+		b.brain.lane ??= (Math.random() - 0.5) * 7;
+		b.brain.cp ??= CHECKPOINTS[0];
+		let tx = b.brain.lane as number;
+		// Busca una puerta abierta.
+		const open = openDoors(seed);
+		DOOR_ROWS.forEach((row, k) => {
+			if (b.z > row - 6 && b.z < row + 0.6) tx = -COURSE_X + DOOR_W * (open[k][(b.id.length + k) % 2] + 0.5);
+		});
+		const wait = b.z > SEC_BARS - 2 && b.z < SEC_DRUMS && Math.sin(t * 0.9 + b.x * 3) > 0.9;
+		if (!wait) ctx.moveBot(b, tx, b.z + 1.4, 3.6 + Math.sin(b.x) * 0.4, dt);
+		// En los rodillos el piso los lleva.
+		const drum = onDrum(b.z);
+		if (drum && b.z > SEC_DRUMS && b.z < SEC_DOORS) b.z += drum.dir * DRUM_SPEED * dt;
+		for (const cp of CHECKPOINTS) if (b.z > cp + 0.5 && cp > (b.brain.cp as number)) b.brain.cp = cp;
+		const hit = barHit(b.x, b.z, t, seed);
 		if (hit && (b.brain.hit ?? 0) < t) {
 			pushBot(b, hit.dx, hit.dz, 10);
 			b.brain.hit = t + 0.5;
+		}
+		// Puertas falsas: no pasa.
+		const p = new THREE.Vector3(b.x, 0, b.z);
+		doorClamp(p, open);
+		b.z = p.z;
+		if (!raceSupport(b.x, b.z) && b.vy === 0) {
+			b.x = (Math.random() - 0.5) * 5;
+			b.z = (b.brain.cp as number) + 0.8;
 		}
 		if (b.z > RACE_FINISH) ctx.finish(b.id);
 	},
@@ -428,48 +720,65 @@ const race: GameDef = {
 // ================================================================= 2 =====
 // Piso que se Cae: hexágonos que desaparecen un ratito después de pisarlos.
 
-const HEX = 0.92;
+const HEX = 1.0;
+const HEX_W = HEX * Math.sqrt(3);
+const HEX_ROWS = 22;
 
-function hexTiles(): Array<[number, number]> {
+/** Los pisos (de arriba hacia abajo): altura, radio y colores. Bien grandes y separados. */
+const LAYERS: Array<{y: number; r: number; colors: number[]}> = [
+	{y: 0, r: 15, colors: [0xffb21f, 0xffc94a, 0xffd978]},
+	{y: -5, r: 13.5, colors: [0xff4fa8, 0xff7ac0, 0xffa3d4]},
+	{y: -10, r: 12, colors: [0x3fa4ff, 0x6fbcff, 0x9fd3ff]},
+];
+const rowParity = (row: number) => ((row % 2) + 2) % 2;
+const hexCenter = (row: number, col: number): [number, number] => [col * HEX_W + (rowParity(row) ? HEX_W / 2 : 0), row * HEX * 1.5];
+
+/** Casilleros de cada piso, con un índice rápido "fila,columna" → número. */
+const LAYER_TILES = LAYERS.map((layer) => {
 	const tiles: Array<[number, number]> = [];
-	const w = HEX * Math.sqrt(3);
-	for (let row = -10; row <= 10; row++) {
-		for (let col = -10; col <= 10; col++) {
-			const x = col * w + (row % 2 ? w / 2 : 0);
-			const z = row * HEX * 1.5;
-			if (Math.hypot(x, z) < 8.1) tiles.push([x, z]);
+	const index = new Map<string, number>();
+	for (let row = -HEX_ROWS; row <= HEX_ROWS; row++) {
+		for (let col = -HEX_ROWS; col <= HEX_ROWS; col++) {
+			const [x, z] = hexCenter(row, col);
+			if (Math.hypot(x, z) < layer.r) {
+				index.set(`${row},${col}`, tiles.length);
+				tiles.push([x, z]);
+			}
 		}
 	}
-	return tiles;
-}
-const TILES = hexTiles();
+	return {tiles, index};
+});
 
-const FALL_DELAY = 900;
+const FALL_DELAY = 750;
 
-function tileGone(g: Record<string, unknown>, i: number): boolean {
-	const fall = (g.fall as Record<number, number> | undefined)?.[i];
+function tileGone(g: Record<string, unknown>, key: number): boolean {
+	const fall = (g.fall as Record<number, number> | undefined)?.[key];
 	return fall !== undefined && hostNow() - fall > FALL_DELAY;
 }
 
-/** Los pisos (de arriba hacia abajo): altura, radio y colores. */
-const LAYERS: Array<{y: number; r: number; colors: number[]}> = [
-	{y: 0, r: 8.1, colors: [0xff4fa8, 0xff8ac6, 0xffb3da]},
-	{y: -3.6, r: 7.2, colors: [0x3fa4ff, 0x7cc3ff, 0xb0dcff]},
-	{y: -7.2, r: 6.2, colors: [0xffd23f, 0xffe27a, 0xfff0b0]},
-];
-const LAYER_TILES = LAYERS.map((layer) => TILES.filter(([x, z]) => Math.hypot(x, z) < layer.r));
-/** Índice global de un casillero: piso * 1000 + casillero. */
-const tileKey = (layer: number, i: number) => layer * 1000 + i;
+/** Índice global de un casillero: piso * 10000 + casillero. */
+const tileKey = (layer: number, i: number) => layer * 10000 + i;
 
+/**
+ * El casillero debajo de (x, z): el hexágono más cercano (cubre todo el piso, sin agujeritos en las
+ * esquinas donde se juntan tres; antes te caías "entre" los casilleros).
+ */
 function layerTileAt(layer: number, x: number, z: number): number {
-	const tiles = LAYER_TILES[layer];
+	const {index} = LAYER_TILES[layer];
+	const row0 = Math.round(z / (HEX * 1.5));
 	let best = -1;
-	let bestD = HEX * 0.98;
-	for (let i = 0; i < tiles.length; i++) {
-		const d = Math.hypot(tiles[i][0] - x, tiles[i][1] - z);
-		if (d < bestD) {
-			bestD = d;
-			best = i;
+	let bestD = HEX * 1.08;
+	for (let row = row0 - 1; row <= row0 + 1; row++) {
+		const col0 = Math.round((x - (rowParity(row) ? HEX_W / 2 : 0)) / HEX_W);
+		for (let col = col0 - 1; col <= col0 + 1; col++) {
+			const i = index.get(`${row},${col}`);
+			if (i === undefined) continue;
+			const [cx, cz] = hexCenter(row, col);
+			const d = Math.hypot(cx - x, cz - z);
+			if (d < bestD) {
+				bestD = d;
+				best = i;
+			}
 		}
 	}
 	return best;
@@ -491,59 +800,94 @@ function floorGround(g: Record<string, unknown>, x: number, z: number, y: number
 	return null;
 }
 
+/** Tribuna para los que se cayeron del último piso (miran desde ahí). */
+const STANDS_Z = -21;
+
 const floor: GameDef = {
-	id: 'floor', name: 'Piso que se Cae', color: '#3fa4ff', duration: 100, kind: 'elim',
-	desc: 'Tres pisos de hexágonos que se caen al pisarlos. Si caés, aterrizás en el de abajo.',
-	how: 'No te quedes quieto. Quedás afuera recién cuando te caés del último piso.',
-	spawn: (i, n) => ring(i, n, 5.5),
+	id: 'floor', name: 'Piso que se Cae', color: '#ffb21f', duration: 150, kind: 'elim', bigMap: true,
+	desc: 'Tres pisos gigantes de hexágonos que se rompen al pisarlos. Si caés, aterrizás en el de abajo y seguís.',
+	how: 'No te quedes quieto y saltá (Espacio) los huecos. Quedás afuera recién cuando te caés del último piso.',
+	spawn: (i, n) => ring(i, n, 9),
 	hostSetup: () => ({fall: {}}),
 	build(ctx) {
 		const group = new THREE.Group();
-		const geometry = new THREE.CylinderGeometry(HEX * 0.95, HEX * 0.95, 0.4, 6);
+		group.add(landscape(new THREE.Vector3(0, 0, 0), {goo: -16}));
+		// Hexágono con el borde un poco más oscuro (se distinguen bien uno del otro).
+		const geometry = new THREE.CylinderGeometry(HEX * 0.93, HEX * 0.88, 0.55, 6);
 		geometry.rotateY(Math.PI / 6);
 		const m = new THREE.Matrix4();
 		const color = new THREE.Color();
 		const layers = LAYERS.map((layer, k) => {
-			const tiles = LAYER_TILES[k];
-			const mat = new THREE.MeshStandardMaterial({roughness: 0.25, metalness: 0.05, transparent: true, opacity: 1});
+			const {tiles} = LAYER_TILES[k];
+			const mat = new THREE.MeshStandardMaterial({roughness: 0.3, metalness: 0.04, transparent: true, opacity: 1});
 			const mesh = new THREE.InstancedMesh(geometry, mat, tiles.length);
 			tiles.forEach(([x, z], i) => {
-				m.makeTranslation(x, layer.y - 0.2, z);
+				m.makeTranslation(x, layer.y - 0.275, z);
 				mesh.setMatrixAt(i, m);
 				mesh.setColorAt(i, color.setHex(layer.colors[(i * 7) % layer.colors.length]));
 			});
 			mesh.receiveShadow = true;
-			mesh.castShadow = true;
+			mesh.castShadow = k === 0;
 			group.add(mesh);
+			// Borde inflable alrededor de cada piso.
+			const rim = new THREE.Mesh(new THREE.TorusGeometry(layer.r + 0.6, 0.35, 10, 72), glossy(0xffffff, 0.05));
+			rim.rotation.x = Math.PI / 2;
+			rim.position.y = layer.y - 0.25;
+			group.add(rim);
 			return {mesh, mat};
 		});
+		// Tribuna.
+		const stands = new THREE.Mesh(new THREE.BoxGeometry(30, 0.6, 6), new THREE.MeshStandardMaterial({map: candyTexture('checker', '#ff4fa8', '#ffffff', 3), roughness: 0.4}));
+		stands.position.set(0, -0.3, STANDS_Z);
+		stands.receiveShadow = true;
+		group.add(stands);
+		const sign = textSprite('TRIBUNA', '#ff4fa8', 3.2);
+		sign.position.set(0, 3, STANDS_Z - 2.5);
+		group.add(sign);
 		let lastSent = -1;
+		const broken = new Set<number>();
 		return {
 			group,
-			outY: LAYERS[LAYERS.length - 1].y - 3.2,
-			clamp: circleClamp(10),
+			outY: LAYERS[LAYERS.length - 1].y - 4,
+			clamp: circleClamp(LAYERS[0].r + 2),
+			spectatorClamp: (p) => {
+				p.x = THREE.MathUtils.clamp(p.x, -14, 14);
+				p.z = THREE.MathUtils.clamp(p.z, STANDS_Z - 2.6, STANDS_Z + 2.6);
+				return p;
+			},
+			spectatorSpot: [0, STANDS_Z],
 			// El estado de la partida cambia todo el tiempo: se lee el actual, no el del arranque.
 			ground: (x, z, y) => floorGround(getParty()?.g ?? ctx.state.g, x, z, y),
 			update(c, _dt, t) {
 				const fall = (c.state.g.fall as Record<number, number>) ?? {};
 				const now = hostNow();
-				const myLayer = layerOf(c.engine.myState().y);
+				const meState = c.engine.myState();
+				const myLayer = layerOf(meState.y);
 				layers.forEach(({mesh, mat}, k) => {
 					// Los pisos de arriba del mío se ven transparentes (si no, taparían todo).
-					mat.opacity = k < myLayer ? 0.18 : 1;
+					mat.opacity = k < myLayer ? 0.15 : 1;
 					mat.depthWrite = k >= myLayer;
-					const tiles = LAYER_TILES[k];
+					const {tiles} = LAYER_TILES[k];
 					let changed = false;
-					for (let i = 0; i < tiles.length; i++) {
-						const at = fall[tileKey(k, i)];
-						if (at === undefined) continue;
+					for (const key of Object.keys(fall)) {
+						const n = Number(key);
+						if (Math.floor(n / 10000) !== k) continue;
+						const i = n % 10000;
+						const at = fall[n];
+						if (at === undefined || !tiles[i]) continue;
 						changed = true;
 						const age = now - at;
 						const [x, z] = tiles[i];
-						if (age > FALL_DELAY) m.makeScale(0.0001, 0.0001, 0.0001);
-						else {
-							const shake = Math.sin(t * 60 + i) * 0.04 * (age / FALL_DELAY);
-							m.makeTranslation(x + shake, LAYERS[k].y - 0.2 - (age / FALL_DELAY) * 0.15, z);
+						if (age > FALL_DELAY) {
+							m.makeScale(0.0001, 0.0001, 0.0001);
+							// ¡Crack! (sólo los que se rompen cerca mío).
+							if (!broken.has(n)) {
+								broken.add(n);
+								if (Math.abs(LAYERS[k].y - meState.y) < 3 && Math.hypot(x - meState.x, z - meState.z) < 9) worldSounds.play('tileBreak', 0.75);
+							}
+						} else {
+							const shake = Math.sin(t * 60 + i) * 0.05 * (age / FALL_DELAY);
+							m.makeTranslation(x + shake, LAYERS[k].y - 0.275 - (age / FALL_DELAY) * 0.2, z);
 							mesh.setColorAt(i, color.setHex(0xff3355).lerp(new THREE.Color(LAYERS[k].colors[(i * 7) % LAYERS[k].colors.length]), 1 - age / FALL_DELAY));
 						}
 						mesh.setMatrixAt(i, m);
@@ -554,10 +898,9 @@ const floor: GameDef = {
 					}
 				});
 				if (c.state.phase !== 'play' || !c.state.alive.includes(c.meId)) return;
-				const me = c.engine.myState();
-				if (me.falling) return;
-				const k = layerOf(me.y);
-				const i = layerTileAt(k, me.x, me.z);
+				if (meState.falling) return;
+				const k = layerOf(meState.y);
+				const i = layerTileAt(k, meState.x, meState.z);
 				const key = i >= 0 ? tileKey(k, i) : -1;
 				if (key >= 0 && key !== lastSent && fall[key] === undefined) {
 					lastSent = key;
@@ -580,14 +923,14 @@ const floor: GameDef = {
 		const here = layerTileAt(k, b.x, b.z);
 		if (here >= 0 && fall[tileKey(k, here)] === undefined) ctx.setG({fall: {...fall, [tileKey(k, here)]: Date.now()}});
 		if ((b.brain.next ?? 0) < t || b.brain.tx === undefined || b.brain.layer !== k) {
-			const tiles = LAYER_TILES[k];
+			const {tiles} = LAYER_TILES[k];
 			let best = -1;
 			let bestScore = Infinity;
-			for (let n = 0; n < 40; n++) {
+			for (let n = 0; n < 50; n++) {
 				const i = Math.floor(Math.random() * tiles.length);
 				if (fall[tileKey(k, i)] !== undefined) continue;
 				const d = Math.hypot(tiles[i][0] - b.x, tiles[i][1] - b.z);
-				const score = Math.abs(d - 1.5);
+				const score = Math.abs(d - 1.8);
 				if (score < bestScore) {
 					bestScore = score;
 					best = i;
@@ -598,9 +941,9 @@ const floor: GameDef = {
 				b.brain.tz = tiles[best][1];
 			}
 			b.brain.layer = k;
-			b.brain.next = t + 0.35 + Math.random() * 0.4;
+			b.brain.next = t + 0.3 + Math.random() * 0.35;
 		}
-		ctx.moveBot(b, b.brain.tx ?? b.x, b.brain.tz ?? b.z, 3.2, dt);
+		ctx.moveBot(b, b.brain.tx ?? b.x, b.brain.tz ?? b.z, 3.4, dt);
 	},
 	rank: elimRank,
 };
@@ -1221,10 +1564,12 @@ const soccer: GameDef = {
 		return [team === 'a' ? -3.5 - Math.floor(k / 3) * 1.5 : 3.5 + Math.floor(k / 3) * 1.5, ((k % 3) - 1) * 2];
 	},
 	hostSetup(players) {
-		return {teams: teamsFor(players), ball: [0, 0, 0, 0], goals: {a: 0, b: 0}};
+		return {teams: teamsFor(players), ball: [0, 0, 0, 0], goals: {a: 0, b: 0}, kickoff: 0};
 	},
-	build() {
+	build(buildCtx) {
 		const group = new THREE.Group();
+		let seenKickoff = (buildCtx.state.g.kickoff as number) ?? 0;
+		const scaled = new Set<string>();
 		const pitch = new THREE.Mesh(new THREE.BoxGeometry(PITCH_X * 2, 0.4, PITCH_Z * 2), [
 			glossy(0x2fb565), glossy(0x2fb565), new THREE.MeshStandardMaterial({map: pitchTexture(), roughness: 0.7}), glossy(0x2fb565), glossy(0x2fb565), glossy(0x2fb565),
 		]);
@@ -1279,9 +1624,25 @@ const soccer: GameDef = {
 				ball.rotation.x += vz * dt * 1.6;
 				ball.rotation.z -= vx * dt * 1.6;
 				const teams = (c.state.g.teams as Record<string, string>) ?? {};
+				// Gol: todos vuelven a su lugar (así la pelota no queda servida para el otro equipo).
+				const kickoff = (c.state.g.kickoff as number) ?? 0;
+				if (kickoff !== seenKickoff) {
+					seenKickoff = kickoff;
+					const index = c.state.players.indexOf(c.meId);
+					if (index >= 0 && c.state.alive.includes(c.meId)) {
+						const [sx, sz] = soccer.spawn(index, c.state.players.length, c.state.g);
+						c.engine.teleport(sx, sz, 0);
+					}
+				}
 				for (const id of c.state.players) {
 					const root = c.engine.actorRoot(id);
 					if (!root) continue;
+					// El equipo con menos jugadores se ve (y choca) más grande.
+					const size = soccerScale(teams, id);
+					if (Math.abs(root.scale.x - size) > 0.01) {
+						root.scale.setScalar(size);
+						scaled.add(id);
+					}
 					let ringMesh = rings.get(id);
 					if (!ringMesh || ringMesh.parent !== root) {
 						ringMesh?.removeFromParent();
@@ -1302,6 +1663,7 @@ const soccer: GameDef = {
 			},
 			dispose: () => {
 				for (const r of rings.values()) r.removeFromParent();
+				for (const id of scaled) buildCtx.engine.actorRoot(id)?.scale.setScalar(1);
 				disposeGroup(group);
 			},
 		};
@@ -1316,16 +1678,18 @@ const soccer: GameDef = {
 		let [x, z, vx, vz] = (g.ball as number[]) ?? [0, 0, 0, 0];
 		const goals = {...((g.goals as {a: number; b: number}) ?? {a: 0, b: 0})};
 		// Al chocarla, la pelota sale para el lado contrario (más fuerte si venías corriendo).
+		const teamsNow = (g.teams as Record<string, string>) ?? {};
 		for (const [id, p] of Object.entries(ctx.positions())) {
 			if (!ctx.state.players.includes(id)) continue;
+			const reach = 0.4 * soccerScale(teamsNow, id);
 			const dx = x - p.x;
 			const dz = z - p.z;
 			const d = Math.hypot(dx, dz);
-			if (d < BALL_R + 0.4 && d > 0.01) {
+			if (d < BALL_R + reach && d > 0.01) {
 				vx += (dx / d) * 2.2;
 				vz += (dz / d) * 2.2;
-				x = p.x + (dx / d) * (BALL_R + 0.4);
-				z = p.z + (dz / d) * (BALL_R + 0.4);
+				x = p.x + (dx / d) * (BALL_R + reach);
+				z = p.z + (dz / d) * (BALL_R + reach);
 			}
 		}
 		const speed = Math.hypot(vx, vz);
@@ -1374,9 +1738,17 @@ const soccer: GameDef = {
 			goals[scored] += 1;
 			[x, z, vx, vz] = [0, 0, 0, 0];
 			if (goals[scored] >= 3) ctx.finished = true;
+			// Los bots también vuelven a su lugar.
+			for (const b of ctx.bots) {
+				const index = ctx.state.players.indexOf(b.id);
+				if (index < 0) continue;
+				[b.x, b.z] = soccer.spawn(index, ctx.state.players.length, g);
+			}
 		}
 		const moving = Math.hypot(vx, vz) > 0.05;
-		if (scored || moving || (g.ball as number[])?.[2] !== 0) ctx.setG({ball: [x, z, vx, vz].map((v) => Math.round(v * 100) / 100), goals});
+		if (scored || moving || (g.ball as number[])?.[2] !== 0) {
+			ctx.setG({ball: [x, z, vx, vz].map((v) => Math.round(v * 100) / 100), goals, ...(scored ? {kickoff: ((g.kickoff as number) ?? 0) + 1} : {})});
+		}
 	},
 	bot(b, ctx, dt, t) {
 		const teams = (ctx.state.g.teams as Record<string, string>) ?? {};
@@ -1403,6 +1775,15 @@ const soccer: GameDef = {
 	},
 };
 
+/** El equipo chico juega con jugadores más grandes (con 3 jugadores, el que está solo). */
+function soccerScale(teams: Record<string, string>, id: string): number {
+	const team = teams[id];
+	if (!team) return 1;
+	const mine = Object.values(teams).filter((t) => t === team).length;
+	const other = Object.values(teams).length - mine;
+	return mine < other ? Math.min(1.7, 1 + 0.4 * (other - mine) / Math.max(1, mine)) : 1;
+}
+
 function kickBall(ctx: HostCtx, from: string, dx: number, dz: number, power: number): void {
 	const pos = ctx.positions()[from];
 	const [x, z, vx, vz] = (ctx.state.g.ball as number[]) ?? [0, 0, 0, 0];
@@ -1425,13 +1806,14 @@ function paintCell(x: number, z: number): number {
 
 const paint: GameDef = {
 	id: 'paint', name: 'Pintura Pegajosa', color: '#ff4fa8', duration: 60, kind: 'team',
-	desc: 'Rosa contra Azul: ¡pintá más piso que el otro equipo!',
-	how: 'Caminá por todos lados: donde pisás queda tu color.',
+	desc: '¡Pintá más piso que los demás! En pares, Rosa contra Azul; si son impares, cada uno con su color.',
+	how: 'Caminá por todos lados: donde pisás queda tu color (el aro de abajo te dice cuál es).',
 	spawn: (i, n) => ring(i, n, 2),
 	hostSetup(players) {
-		return {teams: teamsFor(players), cells: '0'.repeat(PAINT * PAINT)};
+		return {teams: teamsOrSolo(players), cells: '0'.repeat(PAINT * PAINT)};
 	},
-	build() {
+	build(buildCtx) {
+		const rings = new Map<string, THREE.Mesh>();
 		const group = new THREE.Group();
 		group.add(candyFloor('square', R, 'stripes', '#ffffff', '#f3ecff', 0xa066ff));
 		const size = (R * 2) / PAINT;
@@ -1451,13 +1833,29 @@ const paint: GameDef = {
 			group,
 			clamp: squareClamp(R - 0.3),
 			update(c) {
+				const teams = (c.state.g.teams as Record<string, string>) ?? {};
+				for (const id of c.state.players) {
+					const root = c.engine.actorRoot(id);
+					if (!root || rings.get(id)?.parent === root) continue;
+					rings.get(id)?.removeFromParent();
+					const ringMesh = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.07, 8, 28), glossy(TEAM_COLORS[teams[id]] ?? 0xffffff, 0.6));
+					ringMesh.rotation.x = Math.PI / 2;
+					ringMesh.position.y = 0.06;
+					ringMesh.userData.partyProp = true;
+					root.add(ringMesh);
+					rings.set(id, ringMesh);
+				}
 				const cells = (c.state.g.cells as string) ?? '';
 				if (cells === shownCells) return;
-				for (let i = 0; i < cells.length; i++) if (cells[i] !== shownCells[i]) mesh.setColorAt(i, color.setHex(cells[i] === 'a' ? 0xff4fa8 : cells[i] === 'b' ? 0x3fa4ff : 0xffffff));
+				for (let i = 0; i < cells.length; i++) if (cells[i] !== shownCells[i]) mesh.setColorAt(i, color.setHex(TEAM_COLORS[cells[i]] ?? 0xffffff));
 				shownCells = cells;
 				if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
 			},
-			dispose: () => disposeGroup(group),
+			dispose: () => {
+				for (const r of rings.values()) r.removeFromParent();
+				void buildCtx;
+				disposeGroup(group);
+			},
 		};
 	},
 	hostTick(ctx) {
@@ -1503,7 +1901,7 @@ const paint: GameDef = {
 	rank(s) {
 		const cells = (s.g.cells as string) ?? '';
 		const count = (team: string) => cells.split('').filter((c) => c === team).length;
-		return teamRank(s, (s.g.teams as Record<string, string>) ?? {}, count);
+		return multiTeamRank(s, (s.g.teams as Record<string, string>) ?? {}, count);
 	},
 };
 
