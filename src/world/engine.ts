@@ -103,6 +103,11 @@ export interface WorldMode {
 	action?(): boolean;
 	speed?: number;
 	wideCamera?: boolean;
+	/**
+	 * Karting: W acelera, S frena / marcha atrás, A y D doblan, y la cámara va detrás del auto.
+	 * Devuelve la velocidad máxima de ahora (con turbo es más) y si estoy girando como trompo.
+	 */
+	drive?(): {top: number; spin?: boolean} | null;
 }
 
 export type Interaction =
@@ -797,6 +802,8 @@ export class WorldEngine {
 			return;
 		}
 		actor.mount?.dispose();
+		this.kartMounts.get(actor)?.dispose();
+		this.kartMounts.delete(actor);
 		const item = id && this.catalog.items.find((item) => item.id === id && item.slot === 'mount');
 		actor.mount = item && id ? new ActorMount(id, item, this.actorsGroup, selection?.color) : undefined;
 	}
@@ -816,6 +823,8 @@ export class WorldEngine {
 			actor.avatar.dispose();
 			actor.companion?.dispose();
 			actor.mount?.dispose();
+			this.kartMounts.get(actor)?.dispose();
+			this.kartMounts.delete(actor);
 			this.others.delete(id);
 		}
 		for (let s of here) {
@@ -1950,6 +1959,7 @@ export class WorldEngine {
 	readonly bots = new Map<string, Actor>();
 
 	setMode(mode: WorldMode | null): void {
+		if (!mode?.drive) this.clearKartMounts();
 		this.mode = mode;
 		this.partyCamera = Boolean(mode?.wideCamera);
 		this.resetFall();
@@ -1987,9 +1997,78 @@ export class WorldEngine {
 		this.announce();
 	}
 
+	/** Velocidad del karting (para el velocímetro y el sonido del motor). */
+	kartSpeed = 0;
+	/** Hacia dónde mira la cámara del karting (suave, y no gira con los trompos). */
+	private kartView = 0;
+
+	/** Autos del karting (el mismo modelo que la montura auto), uno por personaje mientras se juega. */
+	private kartMounts = new Map<Actor, ActorMount>();
+	private static KART_COLORS = ['#ff4fa8', '#3fa4ff', '#ffd23f', '#45e07a', '#a066ff', '#ff8a2a', '#2ee6d6', '#ff5e5e'];
+
+	private kartMountFor(actor: Actor): ActorMount | null {
+		if (this.room !== 'arena' || !this.mode?.drive) return null;
+		let mount = this.kartMounts.get(actor);
+		if (!mount) {
+			const item = this.catalog.items.find((x) => x.id === 'mount_car' && x.slot === 'mount');
+			if (!item) return null;
+			let h = 0;
+			for (const ch of actor.id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+			mount = new ActorMount('mount_car', item, this.actorsGroup, WorldEngine.KART_COLORS[h % WorldEngine.KART_COLORS.length]);
+			this.kartMounts.set(actor, mount);
+		}
+		return mount;
+	}
+
+	private clearKartMounts(): void {
+		for (const mount of this.kartMounts.values()) mount.dispose();
+		this.kartMounts.clear();
+	}
+
+	/** Turbo del karting: sale disparado a esa velocidad (después vuelve a la normal). */
+	kartBoost(speed: number): void {
+		this.kartSpeed = Math.max(this.kartSpeed, speed);
+	}
+
+	private stepKart(actor: Actor, dt: number, drive: {top: number; spin?: boolean}, steer: number, throttle: number): void {
+		const top = drive.top;
+		if (drive.spin) {
+			// Trompo: frena de golpe y da vueltas.
+			this.kartSpeed *= Math.pow(0.03, dt);
+			actor.ry += dt * 13;
+		} else {
+			if (throttle > 0) this.kartSpeed += (this.kartSpeed < top ? 21 : -9) * dt;
+			else if (throttle < 0) this.kartSpeed -= (this.kartSpeed > 0 ? 28 : 9) * dt;
+			else this.kartSpeed -= Math.sign(this.kartSpeed) * Math.min(Math.abs(this.kartSpeed), 6 * dt);
+			if (this.kartSpeed < -top * 0.4) this.kartSpeed = -top * 0.4;
+			// Dobla más cuando va rápido (parado no gira sobre sí mismo), y al revés en marcha atrás.
+			const grip = Math.min(1, Math.abs(this.kartSpeed) / 5);
+			actor.ry += steer * 2.1 * grip * (this.kartSpeed < 0 ? -1 : 1) * dt;
+			let diff = actor.ry - this.kartView;
+			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+			this.kartView += diff * Math.min(1, dt * 5);
+		}
+		const want = actor.pos.clone().add(new THREE.Vector3(Math.sin(actor.ry) * this.kartSpeed * dt, 0, Math.cos(actor.ry) * this.kartSpeed * dt));
+		const got = this.clampMove(want.clone());
+		// Rozar la baranda frena.
+		const lost = Math.hypot(want.x - got.x, want.z - got.z);
+		if (lost > 0.005) this.kartSpeed *= Math.max(0.6, 1 - lost * 2.5);
+		actor.pos.x = got.x;
+		actor.pos.z = got.z;
+		// Los demás me ven yendo hacia donde voy a estar (así el auto no va a los saltos).
+		actor.target.set(actor.pos.x + Math.sin(actor.ry) * this.kartSpeed * 0.2, actor.pos.y, actor.pos.z + Math.cos(actor.ry) * this.kartSpeed * 0.2);
+		const gait: Anim = Math.abs(this.kartSpeed) > 0.6 ? 'run' : 'idle';
+		if (actor.anim !== gait) {
+			actor.anim = gait;
+			this.announce(true);
+		} else this.announce();
+	}
+
 	teleport(x: number, z: number, ry = 0): void {
 		if (!this.me) return;
 		this.resetFall();
+		this.kartSpeed = 0;
+		this.kartView = ry;
 		if (this.me.seat) this.standUp();
 		this.me.pos.set(x, 0, z);
 		this.me.target.copy(this.me.pos);
@@ -2030,6 +2109,8 @@ export class WorldEngine {
 		const actor = this.bots.get(id);
 		if (!actor) return;
 		actor.avatar.dispose();
+		this.kartMounts.get(actor)?.dispose();
+		this.kartMounts.delete(actor);
 		this.bots.delete(id);
 	}
 
@@ -2113,6 +2194,10 @@ export class WorldEngine {
 			const edge = Math.min(1, Math.abs(focus.x) / 14);
 			return new THREE.Vector3(focus.x * .93 + .48, (4.04 + 1.9 * edge ** 4) * this.zoom, focus.z - 8.35 * this.zoom);
 		}
+		if (this.room === 'arena' && this.mode?.drive && this.me) {
+			// Karting: detrás del auto, mirando para donde va.
+			return new THREE.Vector3(focus.x - Math.sin(this.kartView) * 7, focus.y + 3.2, focus.z - Math.cos(this.kartView) * 7);
+		}
 		if (this.room === 'arena') {
 			// Arena: más lejos y alta (el campo es grande); en una partida, todavía más (se ve todo).
 			// Si caés a un piso de abajo, la cámara baja con vos.
@@ -2177,7 +2262,10 @@ export class WorldEngine {
 		const city = this.room === 'city';
 		const lookZ = inside ? Math.max(this.me?.pos.z ?? 0, this.bounds.minZ + 2.4) + .9 : (this.me?.pos.z ?? 0) + (city ? 2.15 : .6);
 		const tvCam = this.tvView ? this.tvCamera() : null;
-		const lookGoal = this.cameraOverride ? this.cameraOverride.look : tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-16, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
+		const kartLook = this.room === 'arena' && this.mode?.drive && this.me && !this.cameraOverride
+			? new THREE.Vector3(this.me.pos.x + Math.sin(this.kartView) * 4, this.me.pos.y + 1, this.me.pos.z + Math.cos(this.kartView) * 4)
+			: null;
+		const lookGoal = kartLook ? kartLook : this.cameraOverride ? this.cameraOverride.look : tvCam ? tvCam.look : this.tableSeat !== null && this.tableCenter ? this.tableCenter : new THREE.Vector3((this.me?.pos.x ?? 0) * (inside ? .8 : 1), (city ? 1.65 : .6) + (this.room === 'arena' ? Math.max(-16, Math.min(0, this.me?.pos.y ?? 0)) : 0), lookZ);
 		this.camLook.lerp(lookGoal, 1 - Math.pow(0.0015, dt));
 		this.camera.lookAt(this.camLook);
 		if (this.me) this.sun.target.position.set(this.me.pos.x, 0, this.me.pos.z);
@@ -2215,6 +2303,12 @@ export class WorldEngine {
 			ix = 0;
 			iz = 0;
 		}
+		const drive = this.mode?.drive?.() ?? null;
+		if (drive) {
+			this.stepKart(actor, dt, drive, ix, iz);
+			ix = 0;
+			iz = 0;
+		} else this.kartSpeed = 0;
 		if ((ix || iz) && !typing && this.tableSeat === null) {
 			if (actor.seat) this.standUp();
 			if (this.fishing) this.stopFishing();
@@ -2234,7 +2328,7 @@ export class WorldEngine {
 				this.announce();
 			}
 			this.moved = true;
-		} else if (isMoving(actor.anim)) {
+		} else if (!drive && isMoving(actor.anim)) {
 			const toTarget = actor.target.clone().sub(actor.pos).setY(0);
 			const distance = toTarget.length();
 			if (this.moved || distance < 0.05) {
@@ -2315,7 +2409,9 @@ export class WorldEngine {
 			const toTarget = actor.target.clone().sub(actor.pos).setY(0);
 			const distance = toTarget.length();
 			if (distance > 0.05) {
-				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, (actor.anim === 'run' ? RUN_SPEED * 1.15 : WALK_SPEED * 1.3) * dt)));
+				// En el karting van rápido: se sigue la posición real sin quedarse atrás.
+				const follow = this.mode?.drive && this.room === 'arena' ? Math.max(24, distance * 7) : actor.anim === 'run' ? RUN_SPEED * 1.15 : WALK_SPEED * 1.3;
+				actor.pos.add(toTarget.normalize().multiplyScalar(Math.min(distance, follow * dt)));
 				this.turn(actor, Math.atan2(toTarget.x, toTarget.z), dt);
 			}
 			base = distance > 0.05 ? this.visualAnim(actor.anim) : 'idle';
@@ -2337,15 +2433,16 @@ export class WorldEngine {
 		const root = actor.avatar.root;
 		root.position.copy(actor.pos);
 		root.rotation.y = actor.ry;
-		const mount = actor.mount;
-		const mounted = mount?.update(actor.pos, actor.ry,
+		const kartMount = this.kartMountFor(actor);
+		const mount = kartMount ?? actor.mount;
+		const mounted = mount?.update(actor.pos, actor.ry, kartMount ? !actor.avatar.isGhost() :
 			this.room !== 'arena' && !actor.seat && actor.anim !== 'fish' && !actor.avatar.isGhost()
 			&& !(LOOP_ANIMS as readonly string[]).includes(actor.anim),
 			dt);
 		if (mount && mounted) {
 			mount.placeRider(root.position);
 			actor.avatar.setBase(mount.fit.anim);
-		} else if (base) actor.avatar.setBase(base);
+		} else if (base) actor.avatar.setBase(this.room === 'arena' && this.mode?.drive && base !== 'jump' ? 'rideCar' : base);
 		const talking = this.speaking.has(actor.id);
 		actor.avatar.setTalking(talking);
 		actor.labelEl.classList.toggle('is-speaking', talking);
@@ -2471,6 +2568,7 @@ export class WorldEngine {
 		this.me?.avatar.dispose();
 		this.me?.companion?.dispose();
 		this.me?.mount?.dispose();
+		this.clearKartMounts();
 		this.npcs.dispose();
 		this.pets.dispose();
 		this.ambience.dispose();
@@ -2483,6 +2581,8 @@ export class WorldEngine {
 			actor.avatar.dispose();
 			actor.companion?.dispose();
 			actor.mount?.dispose();
+			this.kartMounts.get(actor)?.dispose();
+			this.kartMounts.delete(actor);
 		}
 		this.screenVideo?.pause();
 		this.fx?.dispose();

@@ -69,6 +69,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	const party = useParty();
 	const partyRef = useRef<PartyRuntime | null>(null);
 	const [partyOverlay, setPartyOverlay] = useState<string | null>(null);
+	const [partyHudText, setPartyHudText] = useState<string | null>(null);
 	const [dismissedParty, setDismissedParty] = useState('');
 	const hostRef = useRef<HTMLDivElement>(null);
 	const tvHostRef = useRef<HTMLDivElement | null>(null);
@@ -403,7 +404,10 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 	}, [party, room, hidden, state.me.id]);
 	useEffect(() => {
 		if (!party) return;
-		const timer = window.setInterval(() => setPartyOverlay(partyRef.current?.overlay() ?? null), 250);
+		const timer = window.setInterval(() => {
+			setPartyOverlay(partyRef.current?.overlay() ?? null);
+			setPartyHudText(partyRef.current?.hud() ?? null);
+		}, 250);
 		return () => window.clearInterval(timer);
 	}, [party]);
 	// Premio al terminar (una sola vez por partida).
@@ -1102,7 +1106,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 				/>
 			) : null}
 			{party && room === 'arena' && !hidden && dismissedParty !== `${party.id}:final` ? (
-				<PartyHud party={party} meId={state.me.id} overlay={partyOverlay} onClose={() => setDismissedParty(`${party.id}:final`)} />
+				<PartyHud party={party} meId={state.me.id} overlay={partyOverlay} hud={partyHudText} onClose={() => setDismissedParty(`${party.id}:final`)} />
 			) : null}
 			{panel === 'fishmarket' ? <FishMarketPanel onClose={() => setPanel(null)} onSold={(c) => flash(`Tano te pagó ${c} pelamonedas`)} /> : null}
 			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)}

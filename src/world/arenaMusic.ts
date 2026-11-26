@@ -50,6 +50,7 @@ const GAME_TRACKS: Record<GameId, string[]> = {
 	soccer: ['home_run'],
 	paint: ['jungle', 'mg_4', 'alpine'],
 	boat: ['fire_hole', 'alpine', 'mg_3'],
+	kart: ['candy', 'conveyor', 'mg_1'],
 };
 
 /** Lo que tiene que sonar ahora: una secuencia de temas (el último se repite o la lista vuelve a empezar). */

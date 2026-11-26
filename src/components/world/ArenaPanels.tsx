@@ -142,7 +142,7 @@ function useTick(ms = 200): number {
 }
 
 /** Lo que se ve durante la partida: ronda, reloj, presentación del juego, cuenta regresiva, resultados. */
-export function PartyHud({party, meId, overlay, onClose}: {party: PartyState; meId: string; overlay: string | null; onClose: () => void}): JSX.Element {
+export function PartyHud({party, meId, overlay, hud, onClose}: {party: PartyState; meId: string; overlay: string | null; hud?: string | null; onClose: () => void}): JSX.Element {
 	useTick();
 	const game = GAMES[party.games[party.round]];
 	const left = Math.max(0, Math.ceil((party.phaseEnds - hostNow()) / 1000));
@@ -194,6 +194,7 @@ export function PartyHud({party, meId, overlay, onClose}: {party: PartyState; me
 			{party.phase === 'play' && since < 1.2 ? <div className="ph-go">¡YA!</div> : null}
 			{out ? <div className="ph-out">Quedaste afuera… ¡mirá cómo sigue!</div> : null}
 			{overlay ? <div className="ph-overlay"><span>{overlay}</span></div> : null}
+			{hud ? <div className="ph-hud">{hud.split(' · ').map((part) => <span key={part}>{part}</span>)}</div> : null}
 
 			{party.phase === 'results' ? (
 				<div className="ph-intro">

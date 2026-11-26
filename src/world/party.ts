@@ -591,6 +591,7 @@ export class PartyRuntime {
 			update: () => self.frame(live()),
 			speed: scene.speed ?? 1,
 			wideCamera: true,
+			drive: scene.drive ? () => (playing() ? scene.drive!() : null) : undefined,
 		};
 		this.engine.setMode(mode);
 	}
@@ -647,6 +648,12 @@ export class PartyRuntime {
 	overlay(): string | null {
 		if (!this.scene || !state) return null;
 		return this.scene.overlay?.(this.ctx()) ?? null;
+	}
+
+	/** Cartelito chico del juego (vuelta y puesto en el karting). */
+	hud(): string | null {
+		if (!this.scene || !state) return null;
+		return this.scene.hud?.(this.ctx()) ?? null;
 	}
 
 	/** Cada cuadro: animaciones del juego, mi caída, los bots. */

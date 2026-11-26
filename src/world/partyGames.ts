@@ -1,5 +1,5 @@
 /**
- * Los 10 juegos de la Arena. Cada juego:
+ * Los 11 juegos de la Arena. Cada juego:
  *  - arma su escenario (todo redondito, brillante y de colores fuertes),
  *  - dice dónde hay piso (para caerse), los límites y qué pasa con MI personaje cada cuadro,
  *  - y tiene su lógica de host (bots, reglas, puntos).
@@ -8,12 +8,13 @@
  * la partida: es igual en todas las PCs sin mandarlo por la red.
  */
 import * as THREE from 'three';
+import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type {WorldEngine} from '@/world/engine';
 import {bombBoom, bombPass, bombTick} from '@/world/partySounds';
 import {worldSounds} from '@/world/worldSounds';
 import {getParty, type HostBot, type HostCtx, hostNow, mulberry, type PartyState, pushBot, sendPush} from '@/world/party';
 
-export type GameId = 'race' | 'floor' | 'king' | 'bomb' | 'fruit' | 'colors' | 'soccer' | 'paint' | 'boat';
+export type GameId = 'race' | 'floor' | 'king' | 'bomb' | 'fruit' | 'colors' | 'soccer' | 'paint' | 'boat' | 'kart';
 
 export interface PartyCtx {
 	state: PartyState;
@@ -35,6 +36,8 @@ export interface GameScene {
 	respawn?(ctx: PartyCtx): [number, number];
 	/** Mensaje grande para mí. */
 	overlay?(ctx: PartyCtx): string | null;
+	/** Cartelito chico arriba (vuelta, puesto, poder), sin tapar la pantalla. */
+	hud?(ctx: PartyCtx): string | null;
 	/** Varios pisos: altura del piso debajo de (x, y, z) o null. */
 	ground?(x: number, z: number, y: number, t: number): number | null;
 	/** Por debajo de esta altura quedás afuera (por defecto -3.5). */
@@ -44,6 +47,8 @@ export interface GameScene {
 	/** Dónde aparecen los que miran. */
 	spectatorSpot?: [number, number];
 	speed?: number;
+	/** Karting: manejo con aceleración y cámara detrás (ver WorldMode.drive). */
+	drive?(): {top: number; spin?: boolean} | null;
 	dispose(): void;
 }
 
@@ -324,7 +329,8 @@ function skyDome(top: number, bottom: number): THREE.Mesh {
 }
 
 /** Cielo, montañas lavanda de fondo, nubes redonditas y un mar de gelatina abajo. */
-function landscape(center: THREE.Vector3, opts: {goo?: number; mountains?: number} = {}): THREE.Group {
+function landscape(center: THREE.Vector3, opts: {goo?: number; mountains?: number; spread?: number} = {}): THREE.Group {
+	const spread = opts.spread ?? 1;
 	const g = new THREE.Group();
 	const sky = skyDome(0x5fb8ff, 0xd7f0ff);
 	sky.position.copy(center);
@@ -333,8 +339,8 @@ function landscape(center: THREE.Vector3, opts: {goo?: number; mountains?: numbe
 	const mountain = [0x9b8cff, 0xb8a8ff, 0x8ec5ff, 0xc9b6ff];
 	for (let i = 0; i < (opts.mountains ?? 18); i++) {
 		const a = (i / (opts.mountains ?? 18)) * Math.PI * 2 + r() * 0.3;
-		const d = 85 + r() * 20;
-		const h = 18 + r() * 26;
+		const d = (85 + r() * 20) * spread;
+		const h = (18 + r() * 26) * Math.sqrt(spread);
 		const m = new THREE.Mesh(new THREE.ConeGeometry(10 + r() * 10, h, 5 + Math.floor(r() * 3)), new THREE.MeshStandardMaterial({color: mountain[i % mountain.length], roughness: 0.9, flatShading: true}));
 		m.position.set(center.x + Math.cos(a) * d, -14 + h / 2, center.z + Math.sin(a) * d);
 		m.rotation.y = r() * 3;
@@ -353,7 +359,7 @@ function landscape(center: THREE.Vector3, opts: {goo?: number; mountains?: numbe
 			cloud.add(puff);
 		}
 		const a = r() * Math.PI * 2;
-		const d = 45 + r() * 40;
+		const d = (45 + r() * 40) * spread;
 		cloud.position.set(center.x + Math.cos(a) * d, 14 + r() * 16, center.z + Math.sin(a) * d);
 		cloud.scale.setScalar(0.8 + r() * 0.8);
 		g.add(cloud);
@@ -2099,5 +2105,730 @@ const boat: GameDef = {
 	rank: elimRank,
 };
 
-export const GAMES: Record<GameId, GameDef> = {race, floor, king, bomb, fruit, colors, soccer, paint, boat};
-export const GAME_ORDER: GameId[] = ['race', 'floor', 'king', 'bomb', 'fruit', 'colors', 'soccer', 'paint', 'boat'];
+// ================================================================ 10 =====
+// Karting de Gomitas: tres pistas enormes (caramelo, playa y nieve), 3 vueltas, cajas con poderes
+// (turbo, banana y bomba de gomita) y flechas de turbo en el piso. Mapa propio, fuera de la Arena.
+
+const KART_LAPS = 3;
+const KART_HALF = 5.2;
+const KART_TOP = 20;
+/** Las pistas se dibujan en un plano chico y se agrandan (curvas abiertas, nada de horquillas imposibles). */
+const KART_SCALE = 1.5;
+
+interface KartTrack {
+	name: string;
+	pts: Array<[number, number]>;
+	ground: number;
+	road: [string, string];
+	curb: [string, string];
+	rail: number;
+	theme: 'candy' | 'beach' | 'snow';
+}
+
+const KART_TRACKS: KartTrack[] = [
+	{
+		name: 'Circuito Caramelo', theme: 'candy', ground: 0x9be89a, road: ['#7f6bb8', '#9a88d0'], curb: ['#ff4fa8', '#ffffff'], rail: 0xff7ac0,
+		pts: [[0, 0], [32, -4], [54, 10], [58, 34], [42, 52], [18, 46], [2, 62], [-16, 78], [-42, 70], [-54, 44], [-36, 26], [-50, 6], [-30, -12]],
+	},
+	{
+		name: 'Playa Gelatina', theme: 'beach', ground: 0xffe3a3, road: ['#5b7fa8', '#7699c2'], curb: ['#ffd23f', '#3fa4ff'], rail: 0x3fa4ff,
+		pts: [[0, 0], [40, 0], [64, 14], [66, 42], [42, 54], [20, 40], [0, 54], [-10, 82], [-38, 90], [-60, 66], [-54, 32], [-32, 12]],
+	},
+	{
+		name: 'Pico Nevado', theme: 'snow', ground: 0xf3f8ff, road: ['#6f7c99', '#8a96b2'], curb: ['#ff5e5e', '#ffffff'], rail: 0x8ec5ff,
+		pts: [[0, 0], [36, -6], [58, -28], [82, -14], [78, 20], [52, 30], [54, 60], [26, 76], [-4, 60], [-20, 32], [-46, 36], [-62, 12], [-42, -12]],
+	},
+];
+
+interface KartPath {
+	pts: THREE.Vector3[];
+	tan: THREE.Vector3[];
+	n: number;
+	/** Índice por cuadrícula (celdas de 8): buscar el punto más cercano sin recorrer toda la pista. */
+	grid: Map<string, number[]>;
+}
+
+const KART_CELL = 8;
+
+const kartPaths = new Map<number, KartPath>();
+
+function kartPath(track: number): KartPath {
+	let path = kartPaths.get(track);
+	if (path) return path;
+	const def = KART_TRACKS[track] ?? KART_TRACKS[0];
+	const curve = new THREE.CatmullRomCurve3(def.pts.map(([x, z]) => new THREE.Vector3(x * KART_SCALE, 0, z * KART_SCALE)), true, 'centripetal');
+	const n = Math.round(curve.getLength());
+	const pts = curve.getSpacedPoints(n).slice(0, n);
+	const tan = pts.map((_, i) => pts[(i + 1) % n].clone().sub(pts[(i - 1 + n) % n]).setY(0).normalize());
+	const grid = new Map<string, number[]>();
+	pts.forEach((p, i) => {
+		const key = `${Math.floor(p.x / KART_CELL)},${Math.floor(p.z / KART_CELL)}`;
+		const list = grid.get(key);
+		if (list) list.push(i);
+		else grid.set(key, [i]);
+	});
+	path = {pts, tan, n, grid};
+	kartPaths.set(track, path);
+	return path;
+}
+
+const kartTrackOf = (g: Record<string, unknown>) => ((g.track as number) ?? 0) % KART_TRACKS.length;
+
+/** El punto de la pista más cercano y qué tan corrido del centro estoy (+ = a la izquierda). */
+function kartNearest(path: KartPath, x: number, z: number): {i: number; side: number} {
+	let best = -1;
+	let bestD = Infinity;
+	const cx = Math.floor(x / KART_CELL);
+	const cz = Math.floor(z / KART_CELL);
+	for (let reach = 1; reach <= 3 && best < 0; reach += 2) {
+		for (let a = cx - reach; a <= cx + reach; a++) {
+			for (let b = cz - reach; b <= cz + reach; b++) {
+				const list = path.grid.get(`${a},${b}`);
+				if (!list) continue;
+				for (const i of list) {
+					const p = path.pts[i];
+					const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+					if (d < bestD) {
+						bestD = d;
+						best = i;
+					}
+				}
+			}
+		}
+	}
+	if (best < 0) {
+		// Muy lejos de la pista (no debería pasar): se busca en toda.
+		for (let i = 0; i < path.n; i++) {
+			const p = path.pts[i];
+			const d = (p.x - x) ** 2 + (p.z - z) ** 2;
+			if (d < bestD) {
+				bestD = d;
+				best = i;
+			}
+		}
+	}
+	const p = path.pts[best];
+	const t = path.tan[best];
+	// Normal a la izquierda de la dirección de la pista.
+	const side = (x - p.x) * t.z - (z - p.z) * t.x;
+	return {i: best, side};
+}
+
+function kartClamp(path: KartPath, p: THREE.Vector3): THREE.Vector3 {
+	const {i, side} = kartNearest(path, p.x, p.z);
+	if (Math.abs(side) > KART_HALF) {
+		const t = path.tan[i];
+		const fix = side - Math.sign(side) * KART_HALF;
+		p.x -= t.z * fix;
+		p.z += t.x * fix;
+	}
+	return p;
+}
+
+/** Lugar en la pista: índice + vuelta, a una distancia del centro. */
+function kartAt(path: KartPath, i: number, side: number): [number, number] {
+	const k = ((i % path.n) + path.n) % path.n;
+	const p = path.pts[k];
+	const t = path.tan[k];
+	return [p.x + t.z * side, p.z - t.x * side];
+}
+
+const kartHeading = (path: KartPath, i: number) => {
+	const t = path.tan[((i % path.n) + path.n) % path.n];
+	return Math.atan2(t.x, t.z);
+};
+
+/** Dónde arranca cada uno: grilla de a 4 detrás de la largada. */
+function kartGrid(path: KartPath, index: number): {i: number; side: number} {
+	const row = Math.floor(index / 4);
+	const col = index % 4;
+	return {i: path.n - 5 - row * 3, side: (col - 1.5) * 2.3};
+}
+
+const KART_ITEMS = ['turbo', 'banana', 'bomba'] as const;
+type KartItem = typeof KART_ITEMS[number];
+const KART_ITEM_LABEL: Record<KartItem, string> = {turbo: '🚀 Turbo', banana: '🍌 Banana', bomba: '💣 Bomba de gomita'};
+/** Filas de cajas (en qué parte de la vuelta) y flechas de turbo. */
+const KART_BOX_ROWS = [0.22, 0.52, 0.8];
+const KART_PADS = [0.1, 0.4, 0.66];
+const KART_SPIN = 1.1;
+
+function kartStunned(g: Record<string, unknown>, id: string): boolean {
+	const at = (g.stun as Record<string, number> | undefined)?.[id];
+	if (at === undefined) return false;
+	const age = (hostNow() - at) / 1000;
+	return age >= 0 && age < KART_SPIN;
+}
+
+/** Caja de poderes: cubo de colores con un "?" que gira. */
+function itemBoxMaterial(): THREE.MeshStandardMaterial {
+	const canvas = document.createElement('canvas');
+	canvas.width = canvas.height = 128;
+	const x = canvas.getContext('2d')!;
+	const grad = x.createLinearGradient(0, 0, 128, 128);
+	grad.addColorStop(0, '#ff4fa8');
+	grad.addColorStop(0.35, '#ffd23f');
+	grad.addColorStop(0.7, '#45e07a');
+	grad.addColorStop(1, '#3fa4ff');
+	x.fillStyle = grad;
+	x.fillRect(0, 0, 128, 128);
+	x.strokeStyle = 'rgba(255,255,255,.9)';
+	x.lineWidth = 10;
+	x.strokeRect(5, 5, 118, 118);
+	x.fillStyle = '#ffffff';
+	x.font = '900 86px system-ui, sans-serif';
+	x.textAlign = 'center';
+	x.textBaseline = 'middle';
+	x.fillText('?', 64, 70);
+	const tex = new THREE.CanvasTexture(canvas);
+	tex.colorSpace = THREE.SRGBColorSpace;
+	return new THREE.MeshStandardMaterial({map: tex, roughness: 0.25, transparent: true, opacity: 0.92, emissive: 0xffffff, emissiveIntensity: 0.12});
+}
+
+function roadTexture(a: string, b: string): THREE.CanvasTexture {
+	const canvas = document.createElement('canvas');
+	canvas.width = 128;
+	canvas.height = 256;
+	const x = canvas.getContext('2d')!;
+	x.fillStyle = a;
+	x.fillRect(0, 0, 128, 256);
+	x.fillStyle = b;
+	for (let i = 0; i < 40; i++) x.fillRect(Math.random() * 128, Math.random() * 256, 3, 3);
+	x.fillStyle = 'rgba(255,255,255,.85)';
+	x.fillRect(60, 20, 8, 90);
+	x.fillRect(60, 148, 8, 90);
+	const tex = new THREE.CanvasTexture(canvas);
+	tex.colorSpace = THREE.SRGBColorSpace;
+	tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+	return tex;
+}
+
+/** Cinta a lo largo de la pista, entre dos distancias del centro (asfalto, cordones). */
+function ribbon(path: KartPath, from: number, to: number, y: number, mat: THREE.Material, vScale: number): THREE.Mesh {
+	const pos: number[] = [];
+	const uv: number[] = [];
+	const index: number[] = [];
+	for (let k = 0; k <= path.n; k++) {
+		const i = k % path.n;
+		const [ax, az] = kartAt(path, i, from);
+		const [bx, bz] = kartAt(path, i, to);
+		pos.push(ax, y, az, bx, y, bz);
+		uv.push(0, k / vScale, 1, k / vScale);
+		if (k < path.n) {
+			const o = k * 2;
+			index.push(o, o + 2, o + 1, o + 1, o + 2, o + 3);
+		}
+	}
+	const geo = new THREE.BufferGeometry();
+	geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+	geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+	geo.setIndex(index);
+	geo.computeVertexNormals();
+	const mesh = new THREE.Mesh(geo, mat);
+	mesh.receiveShadow = true;
+	return mesh;
+}
+
+/** Decoración de cada pista, siempre lejos del asfalto. */
+function kartDecor(track: KartTrack, path: KartPath, seed: number): THREE.Group {
+	const g = new THREE.Group();
+	const r = mulberry(seed + 31);
+	let minX = Infinity;
+	let maxX = -Infinity;
+	let minZ = Infinity;
+	let maxZ = -Infinity;
+	for (const p of path.pts) {
+		minX = Math.min(minX, p.x);
+		maxX = Math.max(maxX, p.x);
+		minZ = Math.min(minZ, p.z);
+		maxZ = Math.max(maxZ, p.z);
+	}
+	const spots: Array<[number, number]> = [];
+	for (let tries = 0; spots.length < 150 && tries < 1500; tries++) {
+		const x = minX - 18 + r() * (maxX - minX + 36);
+		const z = minZ - 18 + r() * (maxZ - minZ + 36);
+		const {side} = kartNearest(path, x, z);
+		const near = path.pts.some((p) => Math.hypot(p.x - x, p.z - z) < KART_HALF + 3.5);
+		if (near || Math.abs(side) < KART_HALF + 3.5) continue;
+		spots.push([x, z]);
+	}
+	const shared = new Map<number, THREE.MeshStandardMaterial>();
+	const mat = (c: number, e = 0.04) => {
+		let m = shared.get(c);
+		if (!m) {
+			m = glossy(c, e);
+			shared.set(c, m);
+		}
+		return m;
+	};
+	const add = (mesh: THREE.Object3D, x: number, y: number, z: number) => {
+		mesh.position.set(x, y, z);
+		g.add(mesh);
+		return mesh;
+	};
+	spots.forEach(([x, z], k) => {
+		const s = 0.8 + r() * 0.9;
+		const kind = k % 3;
+		if (track.theme === 'candy') {
+			if (kind === 0) {
+				// Chupetín gigante.
+				add(new THREE.Mesh(new THREE.CylinderGeometry(0.15 * s, 0.15 * s, 4 * s, 8), mat(0xffffff)), x, 2 * s, z);
+				const pop = add(new THREE.Mesh(new THREE.CylinderGeometry(1.4 * s, 1.4 * s, 0.4 * s, 28), new THREE.MeshStandardMaterial({map: candyTexture('rays', ['#ff4fa8', '#45e07a', '#3fa4ff'][k % 3], '#ffffff', 1), roughness: 0.3})), x, 4.2 * s, z);
+				pop.rotation.x = Math.PI / 2;
+				pop.rotation.z = r() * 3;
+			} else if (kind === 1) {
+				// Gomita.
+				add(new THREE.Mesh(new THREE.SphereGeometry(1.1 * s, 18, 12, 0, Math.PI * 2, 0, Math.PI / 1.7), mat([0xff4fa8, 0xffd23f, 0x45e07a, 0xa066ff][k % 4], 0.12)), x, 0, z);
+			} else {
+				// Bastón de caramelo.
+				const cane = add(new THREE.Mesh(new THREE.TorusGeometry(0.7 * s, 0.18 * s, 8, 20, Math.PI), mat(0xff5e5e)), x, 3.5 * s, z);
+				cane.rotation.y = r() * 3;
+				add(new THREE.Mesh(new THREE.CylinderGeometry(0.18 * s, 0.18 * s, 3.5 * s, 8), mat(0xffffff)), x + 0.7 * s * Math.cos(cane.rotation.y), 1.75 * s, z - 0.7 * s * Math.sin(cane.rotation.y));
+			}
+		} else if (track.theme === 'beach') {
+			if (kind === 0) {
+				// Palmera.
+				for (let i = 0; i < 5; i++) add(new THREE.Mesh(new THREE.CylinderGeometry(0.26 * s, 0.32 * s, 1.1 * s, 8), mat(i % 2 ? 0xc68a52 : 0xa8703f)), x + i * 0.12 * s, (0.55 + i * 1.05) * s, z);
+				for (let i = 0; i < 6; i++) {
+					const leaf = add(new THREE.Mesh(new THREE.ConeGeometry(0.5 * s, 3 * s, 4), mat(0x45c66a)), x + 0.6 * s, 5.6 * s, z);
+					leaf.rotation.set(Math.PI / 2.4, (i / 6) * Math.PI * 2, 0, 'YXZ');
+				}
+			} else if (kind === 1) {
+				// Pelota de playa.
+				add(new THREE.Mesh(new THREE.SphereGeometry(0.9 * s, 16, 12), new THREE.MeshStandardMaterial({map: candyTexture('stripes', '#ff4fa8', '#ffffff', 1), roughness: 0.3})), x, 0.9 * s, z);
+			} else {
+				// Sombrilla.
+				add(new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3 * s, 6), mat(0xffffff)), x, 1.5 * s, z);
+				add(new THREE.Mesh(new THREE.ConeGeometry(1.8 * s, 0.9 * s, 10, 1, true), new THREE.MeshStandardMaterial({map: candyTexture('rays', '#3fa4ff', '#ffffff', 1), roughness: 0.4, side: THREE.DoubleSide})), x, 3.1 * s, z);
+			}
+		} else {
+			if (kind !== 2) {
+				// Pino nevado.
+				for (let i = 0; i < 3; i++) {
+					add(new THREE.Mesh(new THREE.ConeGeometry((1.6 - i * 0.4) * s, 1.8 * s, 9), mat(0x2f9e63)), x, (1.2 + i * 1.1) * s, z);
+					add(new THREE.Mesh(new THREE.ConeGeometry((1.0 - i * 0.25) * s, 0.6 * s, 9), mat(0xffffff)), x, (1.9 + i * 1.1) * s, z);
+				}
+				add(new THREE.Mesh(new THREE.CylinderGeometry(0.2 * s, 0.25 * s, 0.6 * s, 8), mat(0x8d6b4a)), x, 0.3 * s, z);
+			} else {
+				// Muñeco de nieve.
+				add(new THREE.Mesh(new THREE.SphereGeometry(0.9 * s, 16, 12), mat(0xffffff)), x, 0.8 * s, z);
+				add(new THREE.Mesh(new THREE.SphereGeometry(0.6 * s, 16, 12), mat(0xffffff)), x, 2.0 * s, z);
+				const nose = add(new THREE.Mesh(new THREE.ConeGeometry(0.1 * s, 0.5 * s, 8), mat(0xff8a2a)), x, 2.05 * s, z - 0.75 * s);
+				nose.rotation.x = -Math.PI / 2;
+				add(new THREE.Mesh(new THREE.CylinderGeometry(0.4 * s, 0.4 * s, 0.5 * s, 14), mat(0x333344)), x, 2.75 * s, z);
+			}
+		}
+	});
+	return mergeByMaterial(g);
+}
+
+/** Junta todas las piezas del mismo material en una sola malla (cientos de adornos = pocas llamadas de dibujo). */
+function mergeByMaterial(g: THREE.Group): THREE.Group {
+	const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+	g.updateMatrixWorld(true);
+	for (const child of [...g.children]) {
+		const mesh = child as THREE.Mesh;
+		if (!mesh.isMesh || Array.isArray(mesh.material)) continue;
+		const geo = (mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone()).applyMatrix4(mesh.matrixWorld);
+		for (const name of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv'].includes(name)) geo.deleteAttribute(name);
+		const list = byMat.get(mesh.material);
+		if (list) list.push(geo);
+		else byMat.set(mesh.material, [geo]);
+		mesh.geometry.dispose();
+	}
+	const out = new THREE.Group();
+	for (const [material, geos] of byMat) {
+		const merged = mergeGeometries(geos);
+		geos.forEach((x) => x.dispose());
+		if (!merged) continue;
+		const mesh = new THREE.Mesh(merged, material);
+		mesh.receiveShadow = true;
+		out.add(mesh);
+	}
+	return out;
+}
+
+const kart: GameDef = {
+	id: 'kart', name: 'Karting de Gomitas', color: '#45e07a', duration: 210, kind: 'race', bigMap: true,
+	desc: '¡Autitos! Tres pistas gigantes (Caramelo, Playa y Nieve), 3 vueltas, cajas con poderes y flechas de turbo.',
+	how: 'W acelera, S frena, A y D doblan. Pasá por las cajas "?" y usá el poder con Espacio: Turbo, Banana (la tirás atrás) o Bomba (le pega al de adelante).',
+	spawn: (i, _n, g) => {
+		const path = kartPath(kartTrackOf(g));
+		const spot = kartGrid(path, i);
+		return kartAt(path, spot.i, spot.side);
+	},
+	hostSetup: (_players, seed) => ({track: seed % KART_TRACKS.length, traps: [], stun: {}, laps: {}, shot: null}),
+	build(ctx) {
+		const group = new THREE.Group();
+		const trackIndex = kartTrackOf(ctx.state.g);
+		const track = KART_TRACKS[trackIndex];
+		const path = kartPath(trackIndex);
+		const seed = ctx.state.seed;
+		const center = path.pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / path.n);
+		const scenery = landscape(center, {mountains: 26, spread: 1.7});
+		group.add(scenery);
+		// El cielo va siempre alrededor mío (la pista es enorme) y la cámara ve más lejos.
+		const sky = scenery.children[0];
+		const camera = ctx.engine.viewContext().camera as THREE.PerspectiveCamera;
+		const oldFar = camera.far;
+		camera.far = 420;
+		camera.updateProjectionMatrix();
+		// Piso (pasto, arena o nieve) y, en la playa, el mar alrededor.
+		const ground = new THREE.Mesh(new THREE.CircleGeometry(track.theme === 'beach' ? 140 : 190, 64), new THREE.MeshStandardMaterial({color: track.ground, roughness: 0.95}));
+		ground.rotation.x = -Math.PI / 2;
+		ground.position.set(center.x, -0.04, center.z);
+		ground.receiveShadow = true;
+		group.add(ground);
+		if (track.theme === 'beach') {
+			const sea = new THREE.Mesh(new THREE.CircleGeometry(230, 64), new THREE.MeshStandardMaterial({color: 0x2ec5e6, roughness: 0.15, metalness: 0.1, emissive: 0x1a8fd0, emissiveIntensity: 0.15}));
+			sea.rotation.x = -Math.PI / 2;
+			sea.position.set(center.x, -0.3, center.z);
+			group.add(sea);
+		}
+		// Asfalto, cordones y barandas inflables.
+		group.add(ribbon(path, -KART_HALF, KART_HALF, 0.02, new THREE.MeshStandardMaterial({map: roadTexture(track.road[0], track.road[1]), roughness: 0.7}), 8));
+		const curbTex = candyTexture('stripes', track.curb[0], track.curb[1], 1);
+		curbTex.wrapS = curbTex.wrapT = THREE.RepeatWrapping;
+		const curbMat = new THREE.MeshStandardMaterial({map: curbTex, roughness: 0.4});
+		group.add(ribbon(path, KART_HALF, KART_HALF + 0.9, 0.04, curbMat, 3));
+		group.add(ribbon(path, -KART_HALF - 0.9, -KART_HALF, 0.04, curbMat, 3));
+		for (const side of [-1, 1]) {
+			const edge = new THREE.CatmullRomCurve3(path.pts.map((_, i) => {
+				const [x, z] = kartAt(path, i, side * (KART_HALF + 1.3));
+				return new THREE.Vector3(x, 0.4, z);
+			}), true);
+			const rail = new THREE.Mesh(new THREE.TubeGeometry(edge, path.n, 0.42, 10, true), glossy(track.rail, 0.06));
+			rail.castShadow = true;
+			group.add(rail);
+		}
+		// Largada: cuadriculado, arco y cartel.
+		const startTex = candyTexture('checker', '#222233', '#ffffff', 1);
+		startTex.wrapS = startTex.wrapT = THREE.RepeatWrapping;
+		startTex.repeat.set(6, 1);
+		const start = new THREE.Mesh(new THREE.PlaneGeometry(KART_HALF * 2, 1.6), new THREE.MeshStandardMaterial({map: startTex, roughness: 0.5}));
+		start.rotation.x = -Math.PI / 2;
+		start.rotation.z = kartHeading(path, 0);
+		start.position.set(path.pts[0].x, 0.05, path.pts[0].z);
+		group.add(start);
+		const arch = new THREE.Group();
+		const archRing = new THREE.Mesh(new THREE.TorusGeometry(KART_HALF + 1.4, 0.55, 14, 40, Math.PI), glossy(0xff4fa8, 0.15));
+		arch.add(archRing);
+		const archSign = textSprite(track.name.toUpperCase(), '#ff4fa8', 7);
+		archSign.position.y = KART_HALF + 2.6;
+		arch.add(archSign);
+		arch.position.set(path.pts[0].x, 0, path.pts[0].z);
+		arch.rotation.y = kartHeading(path, 0) + Math.PI / 2;
+		group.add(arch);
+		group.add(kartDecor(track, path, seed));
+		// Flechas de turbo.
+		const padTex = (() => {
+			const canvas = document.createElement('canvas');
+			canvas.width = 128;
+			canvas.height = 128;
+			const x = canvas.getContext('2d')!;
+			x.fillStyle = '#ffd23f';
+			x.fillRect(0, 0, 128, 128);
+			x.fillStyle = '#ff8a2a';
+			for (const y of [18, 66]) {
+				x.beginPath();
+				x.moveTo(20, y + 40);
+				x.lineTo(64, y);
+				x.lineTo(108, y + 40);
+				x.lineTo(90, y + 46);
+				x.lineTo(64, y + 22);
+				x.lineTo(38, y + 46);
+				x.closePath();
+				x.fill();
+			}
+			const tex = new THREE.CanvasTexture(canvas);
+			tex.colorSpace = THREE.SRGBColorSpace;
+			return tex;
+		})();
+		const pads = KART_PADS.map((f, k) => {
+			const i = Math.floor(f * path.n);
+			const side = ((k % 3) - 1) * 2.4;
+			const [x, z] = kartAt(path, i, side);
+			const pad = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 3.2), new THREE.MeshStandardMaterial({map: padTex, roughness: 0.3, emissive: 0xffa020, emissiveIntensity: 0.35}));
+			pad.rotation.x = -Math.PI / 2;
+			pad.rotation.z = kartHeading(path, i);
+			pad.position.set(x, 0.06, z);
+			group.add(pad);
+			return {x, z, mat: pad.material as THREE.MeshStandardMaterial};
+		});
+		// Cajas "?" (cada uno las ve desaparecer al agarrarlas y vuelven a los 3 segundos).
+		const boxMat = itemBoxMaterial();
+		const boxGeo = new THREE.BoxGeometry(1.1, 1.1, 1.1);
+		const boxes = KART_BOX_ROWS.flatMap((f) => {
+			const i = Math.floor(f * path.n);
+			return [-3.3, -1.1, 1.1, 3.3].map((side) => {
+				const [x, z] = kartAt(path, i, side);
+				const mesh = new THREE.Mesh(boxGeo, boxMat);
+				mesh.position.set(x, 1, z);
+				mesh.castShadow = true;
+				group.add(mesh);
+				return {x, z, mesh, back: 0};
+			});
+		});
+		// Bananas en el piso (las del estado de la partida).
+		const trapGroup = new THREE.Group();
+		group.add(trapGroup);
+		const bananaMat = glossy(0xffd23f, 0.15);
+		const trapMeshes = new Map<string, THREE.Object3D>();
+		// La bomba de gomita volando.
+		const shotMesh = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 12), glossy(0xff4fa8, 0.5));
+		shotMesh.visible = false;
+		group.add(shotMesh);
+		const myTrack = {lap: 0, quarter: 0, visited: 1, placed: 0};
+		let item: KartItem | null = null;
+		let rolling = 0;
+		let boostUntil = 0;
+		let lastShot = 0;
+		const hitTraps = new Set<string>();
+		let finished = false;
+		const progressOf = (pos: {x: number; z: number}, laps: number) => laps * path.n + kartNearest(path, pos.x, pos.z).i;
+		return {
+			group,
+			clamp: (p) => kartClamp(path, p),
+			spectatorClamp: (p) => kartClamp(path, p),
+			spectatorSpot: kartAt(path, 8, 0),
+			drive: () => ({top: KART_TOP * (performance.now() < boostUntil ? 1.45 : 1), spin: kartStunned(getParty()?.g ?? ctx.state.g, ctx.meId)}),
+			action() {
+				if (!item || rolling > 0) return true;
+				const me = ctx.engine.myState();
+				if (item === 'turbo') {
+					boostUntil = performance.now() + 1700;
+					ctx.engine.kartBoost(KART_TOP * 1.6);
+					worldSounds.play('throw', 0.6);
+				} else if (item === 'banana') {
+					ctx.send({drop: [me.x - Math.sin(me.ry) * 1.8, me.z - Math.cos(me.ry) * 1.8]});
+					worldSounds.play('place', 0.7);
+				} else {
+					ctx.send({bomb: true});
+					worldSounds.play('throw', 0.8);
+				}
+				item = null;
+				return true;
+			},
+			hud(c) {
+				if (c.state.phase !== 'play' || !c.state.players.includes(c.meId)) return null;
+				if (finished) return '¡Llegaste! 🏁';
+				const laps = (c.state.g.laps as Record<string, number>) ?? {};
+				const pos = c.positions();
+				const mine = progressOf(c.engine.myState(), myTrack.lap);
+				const done = c.state.order.length;
+				const ahead = c.state.players.filter((id) => id !== c.meId && !c.state.order.includes(id) && pos[id] && progressOf(pos[id], laps[id] ?? 0) > mine).length;
+				const place = done + ahead + 1;
+				const power = rolling > 0 ? '🎲 …' : item ? `${KART_ITEM_LABEL[item]} (Espacio)` : 'Sin poder';
+				const speed = Math.round(Math.abs(c.engine.kartSpeed) * 6);
+				return `Vuelta ${Math.min(KART_LAPS, myTrack.lap + 1)}/${KART_LAPS} · ${place}º de ${c.state.players.length} · ${power} · ${speed} km/h`;
+			},
+			update(c, dt, t) {
+				const g = c.state.g;
+				const now = performance.now();
+				sky.position.copy(camera.position);
+				boxes.forEach((b) => {
+					b.mesh.rotation.y = t * 1.6;
+					b.mesh.rotation.x = Math.sin(t * 1.3) * 0.3;
+					b.mesh.position.y = 1 + Math.sin(t * 2 + b.x) * 0.15;
+					b.mesh.visible = now > b.back;
+				});
+				pads.forEach((p) => (p.mat.emissiveIntensity = 0.35 + Math.sin(t * 8) * 0.2));
+				// Bananas.
+				const traps = (g.traps as Array<{id: string; x: number; z: number}>) ?? [];
+				const alive = new Set(traps.map((x) => x.id));
+				for (const [id, mesh] of trapMeshes) {
+					if (alive.has(id)) continue;
+					mesh.removeFromParent();
+					trapMeshes.delete(id);
+				}
+				for (const trap of traps) {
+					if (trapMeshes.has(trap.id)) continue;
+					const banana = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.16, 8, 16, Math.PI * 1.1), bananaMat);
+					banana.position.set(trap.x, 0.3, trap.z);
+					banana.rotation.set(-Math.PI / 2, 0, Math.random() * 6);
+					trapGroup.add(banana);
+					trapMeshes.set(trap.id, banana);
+				}
+				// Bomba volando del que la tiró al que tiene adelante.
+				const shot = g.shot as {from: string; to: string; at: number} | null;
+				if (shot) {
+					const age = (hostNow() - shot.at) / 500;
+					const pos = c.positions();
+					const a = pos[shot.from];
+					const b = pos[shot.to];
+					shotMesh.visible = age >= 0 && age < 1 && Boolean(a && b);
+					if (shotMesh.visible && a && b) shotMesh.position.set(a.x + (b.x - a.x) * age, 1 + Math.sin(age * Math.PI) * 3, a.z + (b.z - a.z) * age);
+					if (shot.at !== lastShot && age >= 1) {
+						lastShot = shot.at;
+						if (b && Math.hypot(b.x - c.engine.myState().x, b.z - c.engine.myState().z) < 30) bombBoom();
+					}
+				}
+				if (rolling > 0) {
+					rolling -= dt;
+					if (rolling <= 0) worldSounds.play('reward', 0.6);
+				}
+				if (!c.state.players.includes(c.meId)) return;
+				const me = c.engine.myState();
+				const near = kartNearest(path, me.x, me.z);
+				// Antes de largar: mirando para adelante en la grilla.
+				if (c.state.phase === 'intro' && now - myTrack.placed > 600) {
+					myTrack.placed = now;
+					const index = c.state.players.indexOf(c.meId);
+					const spot = kartGrid(path, index);
+					const [sx, sz] = kartAt(path, spot.i, spot.side);
+					c.engine.teleport(sx, sz, kartHeading(path, spot.i));
+				}
+				if (c.state.phase !== 'play') return;
+				// Vueltas: hay que pasar por los cuatro cuartos de la pista, en orden.
+				const quarter = Math.floor((near.i / path.n) * 4);
+				if (quarter !== myTrack.quarter) {
+					if (quarter === (myTrack.quarter + 1) % 4) {
+						if (quarter === 0 && myTrack.visited === 0b1111) {
+							myTrack.lap += 1;
+							myTrack.visited = 1;
+							c.send({lap: myTrack.lap});
+							if (myTrack.lap >= KART_LAPS && !finished) {
+								finished = true;
+								c.send({finish: true});
+								worldSounds.play('reward', 0.9);
+							} else worldSounds.play('notice', 0.7);
+						} else myTrack.visited |= 1 << quarter;
+					}
+					myTrack.quarter = quarter;
+				}
+				// Cajas.
+				for (const b of boxes) {
+					if (now < b.back || Math.hypot(b.x - me.x, b.z - me.z) > 1.4) continue;
+					b.back = now + 3000;
+					if (!item && rolling <= 0) {
+						worldSounds.play('dice', 0.6);
+						rolling = 1.1;
+						// Los que van atrás tienen más chances de turbo y bomba.
+						const r = Math.random();
+						item = r < 0.4 ? 'turbo' : r < 0.72 ? 'banana' : 'bomba';
+					}
+				}
+				// Flechas de turbo.
+				for (const p of pads) {
+					if (Math.hypot(p.x - me.x, p.z - me.z) < 1.6 && now > boostUntil - 1000) {
+						boostUntil = now + 1100;
+						c.engine.kartBoost(KART_TOP * 1.5);
+						worldSounds.play('throw', 0.5);
+					}
+				}
+				// Pisé una banana.
+				for (const trap of traps) {
+					if (hitTraps.has(trap.id) || Math.hypot(trap.x - me.x, trap.z - me.z) > 1) continue;
+					hitTraps.add(trap.id);
+					c.send({trap: trap.id});
+					worldSounds.play('slapHit', 0.8);
+				}
+			},
+			dispose: () => {
+				camera.far = oldFar;
+				camera.updateProjectionMatrix();
+				disposeGroup(group);
+			},
+		};
+	},
+	hostInput(from, a, ctx) {
+		const g = ctx.state.g;
+		if (typeof a.lap === 'number') ctx.setG({laps: {...((g.laps as Record<string, number>) ?? {}), [from]: a.lap}});
+		const drop = a.drop as [number, number] | undefined;
+		if (drop) {
+			const traps = ((g.traps as Array<{id: string; x: number; z: number}>) ?? []).slice(-11);
+			ctx.setG({traps: [...traps, {id: `${from}:${Date.now()}`, x: drop[0], z: drop[1]}]});
+		}
+		if (typeof a.trap === 'string') {
+			const traps = (g.traps as Array<{id: string}>) ?? [];
+			ctx.setG({traps: traps.filter((x) => x.id !== a.trap), stun: {...((g.stun as Record<string, number>) ?? {}), [from]: Date.now()}});
+		}
+		if (a.bomb) kartBomb(from, ctx);
+	},
+	hostTick(ctx) {
+		// Los bots también se resbalan con las bananas.
+		const g = ctx.state.g;
+		const traps = (g.traps as Array<{id: string; x: number; z: number}>) ?? [];
+		if (!traps.length) return;
+		for (const b of ctx.bots) {
+			const hit = traps.find((x) => Math.hypot(x.x - b.x, x.z - b.z) < 1);
+			if (!hit) continue;
+			ctx.setG({traps: traps.filter((x) => x.id !== hit.id), stun: {...((g.stun as Record<string, number>) ?? {}), [b.id]: Date.now()}});
+			return;
+		}
+	},
+	bot(b, ctx, dt, t) {
+		const g = ctx.state.g;
+		const path = kartPath(kartTrackOf(g));
+		if (ctx.state.order.includes(b.id) || ctx.state.phase !== 'play') {
+			b.anim = 'idle';
+			return;
+		}
+		if (kartStunned(g, b.id)) {
+			b.ry += dt * 13;
+			return;
+		}
+		const near = kartNearest(path, b.x, b.z);
+		b.brain.lane ??= (Math.random() - 0.5) * 5;
+		if ((b.brain.laneAt ?? 0) < t) {
+			b.brain.lane = THREE.MathUtils.clamp((b.brain.lane as number) + (Math.random() - 0.5) * 2.5, -3.6, 3.6);
+			b.brain.laneAt = t + 2 + Math.random() * 2;
+		}
+		const [tx, tz] = kartAt(path, near.i + 8, b.brain.lane as number);
+		b.brain.speed ??= KART_TOP * (0.8 + Math.random() * 0.1);
+		ctx.moveBot(b, tx, tz, b.brain.speed as number, dt);
+		// Vueltas del bot.
+		const quarter = Math.floor((near.i / path.n) * 4);
+		b.brain.q ??= 0;
+		b.brain.vis ??= 1;
+		b.brain.lap ??= 0;
+		if (quarter !== b.brain.q) {
+			if (quarter === ((b.brain.q as number) + 1) % 4) {
+				if (quarter === 0 && b.brain.vis === 0b1111) {
+					b.brain.lap = (b.brain.lap as number) + 1;
+					b.brain.vis = 1;
+					ctx.setG({laps: {...((g.laps as Record<string, number>) ?? {}), [b.id]: b.brain.lap}});
+					if ((b.brain.lap as number) >= KART_LAPS) ctx.finish(b.id);
+				} else b.brain.vis = (b.brain.vis as number) | (1 << quarter);
+			}
+			b.brain.q = quarter;
+		}
+		// De vez en cuando usan un poder.
+		if ((b.brain.itemAt ?? t + 6) < t) {
+			if (Math.random() < 0.5) {
+				const traps = ((g.traps as Array<{id: string; x: number; z: number}>) ?? []).slice(-11);
+				ctx.setG({traps: [...traps, {id: `${b.id}:${Date.now()}`, x: b.x - Math.sin(b.ry) * 1.8, z: b.z - Math.cos(b.ry) * 1.8}]});
+			} else kartBomb(b.id, ctx);
+			b.brain.itemAt = t + 9 + Math.random() * 8;
+		}
+		b.brain.itemAt ??= t + 6 + Math.random() * 6;
+	},
+	rank(s) {
+		const groups = s.order.map((id) => [id]);
+		const laps = (s.g.laps as Record<string, number>) ?? {};
+		const rest = s.players.filter((p) => !s.order.includes(p)).sort((a, b) => (laps[b] ?? 0) - (laps[a] ?? 0));
+		for (const id of rest) groups.push([id]);
+		return groups;
+	},
+};
+
+/** Bomba de gomita: le pega al que va justo adelante (si sos el primero, al segundo). */
+function kartBomb(from: string, ctx: HostCtx): void {
+	const g = ctx.state.g;
+	const path = kartPath(kartTrackOf(g));
+	const laps = (g.laps as Record<string, number>) ?? {};
+	const pos = ctx.positions();
+	const progress = (id: string) => (pos[id] ? (laps[id] ?? 0) * path.n + kartNearest(path, pos[id].x, pos[id].z).i : -Infinity);
+	const mine = progress(from);
+	const racing = ctx.state.players.filter((id) => id !== from && !ctx.state.order.includes(id) && pos[id]);
+	if (!racing.length) return;
+	const ahead = racing.filter((id) => progress(id) > mine).sort((a, b) => progress(a) - progress(b));
+	const behind = racing.filter((id) => progress(id) <= mine).sort((a, b) => progress(b) - progress(a));
+	const target = ahead[0] ?? behind[0];
+	if (!target) return;
+	const at = Date.now();
+	ctx.setG({shot: {from, to: target, at}, stun: {...((g.stun as Record<string, number>) ?? {}), [target]: at + 500}});
+}
+
+export const GAMES: Record<GameId, GameDef> = {race, floor, king, bomb, fruit, colors, soccer, paint, boat, kart};
+export const GAME_ORDER: GameId[] = ['race', 'kart', 'floor', 'king', 'bomb', 'fruit', 'colors', 'soccer', 'paint', 'boat'];

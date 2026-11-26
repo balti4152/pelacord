@@ -4624,3 +4624,39 @@
 	font-style: normal;
 	font-weight: 900;
 }
+
+/* Cartelito chico de los juegos (karting: vuelta, puesto, poder y velocidad). */
+.ph-hud {
+	position: absolute;
+	left: 50%;
+	bottom: 5.4rem;
+	transform: translateX(-50%);
+	display: flex;
+	gap: 0.4rem;
+	z-index: 5;
+	pointer-events: none;
+	flex-wrap: wrap;
+	justify-content: center;
+	max-width: calc(100% - 2rem);
+}
+
+.ph-hud span {
+	padding: 0.35rem 0.8rem;
+	border: 3px solid #2a1747;
+	border-radius: 999px;
+	background: #fff8e8;
+	color: #2a1747;
+	font-size: 0.95rem;
+	font-weight: 900;
+	box-shadow: 0 3px 0 #2a1747;
+	white-space: nowrap;
+}
+
+.ph-hud span:first-child {
+	background: #ffd23f;
+}
+
+.ph-hud span:nth-child(2) {
+	background: #ff4fa8;
+	color: #fff;
+}
