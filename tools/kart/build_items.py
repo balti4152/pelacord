@@ -73,8 +73,8 @@ PEPPER = mat('Pepper', (0.9, 0.04, 0.04), 0.15, coat=1.0)
 PEPPER_STEM = mat('PepperStem', (0.18, 0.6, 0.15), 0.4)
 ROCK = mat('MeteorRock', (0.16, 0.11, 0.09), 0.85)
 LAVA = mat('MeteorLava', (1.0, 0.12, 0.0), 0.5, emit=(1.0, 0.25, 0.02), strength=0.9)
-GOLD = mat('Gold', (1.0, 0.74, 0.1), 0.25, metal=0.35, coat=0.8)
-GOLD2 = mat('GoldDeep', (0.95, 0.52, 0.04), 0.3, metal=0.35)
+GOLD = mat('Gold', (1.0, 0.78, 0.12), 0.22, metal=0.0, coat=1.0, emit=(1.0, 0.62, 0.05), strength=0.35)
+GOLD2 = mat('GoldDeep', (1.0, 0.6, 0.05), 0.3, metal=0.0, emit=(1.0, 0.5, 0.02), strength=0.25)
 
 
 def rainbow_image():

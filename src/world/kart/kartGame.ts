@@ -19,7 +19,7 @@ import {type KartItem, resetKartHud, setKartHud} from '@/world/kart/kartHud';
 import TRACK_DATA from '@/world/kart/tracks.json';
 
 export const KART_LAPS = 3;
-const TOP = 17;
+const TOP = 22;
 const CELL = 8;
 const COLORS = ['#ff4fa8', '#3fa4ff', '#ffd23f', '#45e07a', '#a066ff', '#ff8a2a', '#2ee6d6', '#ff5e5e'];
 
