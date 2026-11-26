@@ -169,9 +169,11 @@ export function PartyHud({party, meId, overlay, hud, onClose}: {party: PartyStat
 	}
 	const teams = g.teams as Record<string, string> | undefined;
 	const myTeam = teams?.[meId];
+	// Karting: la cuenta regresiva (con semáforo) la muestra su propio HUD, con la pista a la vista.
+	const isKart = party.games[party.round] === 'kart';
 	return (
 		<>
-			<div className="ph-top">
+			<div className={`ph-top${isKart && (party.phase === 'play' || (party.phase === 'intro' && left <= 3.5)) ? ' is-hidden' : ''}`}>
 				<span className="ph-round">{party.round + 1}/{party.games.length}</span>
 				<span className="ph-name" style={{'--c': game.color} as React.CSSProperties}>{game.name}</span>
 				{party.phase === 'play' ? <span className="ph-timer"><Timer size={16} strokeWidth={3} /> {left}</span> : null}
@@ -179,7 +181,7 @@ export function PartyHud({party, meId, overlay, hud, onClose}: {party: PartyStat
 				{myTeam ? <span className={`ph-team is-${myTeam}`}>{myTeam === 'a' ? 'Equipo Rosa' : 'Equipo Azul'}</span> : null}
 			</div>
 
-			{party.phase === 'intro' ? (
+			{party.phase === 'intro' && !(isKart && left <= 3.5) ? (
 				<div className="ph-intro">
 					<div className="ph-card" style={{'--c': game.color} as React.CSSProperties}>
 						<span className="ph-card-round">Juego {party.round + 1}</span>
@@ -191,7 +193,7 @@ export function PartyHud({party, meId, overlay, hud, onClose}: {party: PartyStat
 					</div>
 				</div>
 			) : null}
-			{party.phase === 'play' && since < 1.2 ? <div className="ph-go">¡YA!</div> : null}
+			{party.phase === 'play' && since < 1.2 && !isKart ? <div className="ph-go">¡YA!</div> : null}
 			{out ? <div className="ph-out">Quedaste afuera… ¡mirá cómo sigue!</div> : null}
 			{overlay ? <div className="ph-overlay"><span>{overlay}</span></div> : null}
 			{hud ? <div className="ph-hud">{hud.split(' · ').map((part) => <span key={part}>{part}</span>)}</div> : null}

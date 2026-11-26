@@ -20,6 +20,7 @@ import {recordPetCapture} from '@/world/pets';
 import {spatialVoices, type VoicePlace} from '@/world/spatialAudio';
 import {claimPayout, hostSkip, hostStart, hostStop, PartyRuntime, sendPush, startParty, useParty} from '@/world/party';
 import {ArenaAdminPanel, PartyHud} from '@/components/world/ArenaPanels';
+import {KartHud} from '@/components/world/KartHud';
 import {type CardColor, table, useTableSession} from '@/world/tableGames';
 import {TableView} from '@/world/tableView';
 import {currentTrack, startTv, tv, tvPosition, useTvs, volumeForDistance} from '@/world/tv';
@@ -949,7 +950,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 					{EMOTES.find((e) => e.id === myAnim)?.label}… <small>movete para parar</small>
 				</div>
 			) : null}
-			{tableSeat === null && !tvView ? (
+			{tableSeat === null && !tvView && !(party && room === 'arena' && party.games[party.round] === 'kart' && (party.phase === 'intro' || party.phase === 'play')) ? (
 				<footer className="t-emotes">
 					<button type="button" className={`is-main${emoteOpen ? ' is-active' : ''}`} onClick={() => setEmoteOpen((o) => !o)} title="Emotes (Q)"><Smile size={20} strokeWidth={2.6} /><span>Emotes</span><kbd>Q</kbd></button>
 					<button type="button" onClick={() => { setTryOn(null); setPanel('shop-clothes'); }} title="Ropa"><Shirt size={20} strokeWidth={2.6} /><span>Ropa</span></button>
@@ -1108,6 +1109,7 @@ export function WorldView({onClose, onQuit, hidden = false}: {onClose: () => voi
 			{party && room === 'arena' && !hidden && dismissedParty !== `${party.id}:final` ? (
 				<PartyHud party={party} meId={state.me.id} overlay={partyOverlay} hud={partyHudText} onClose={() => setDismissedParty(`${party.id}:final`)} />
 			) : null}
+			{party && room === 'arena' && !hidden && party.phase !== 'results' && party.phase !== 'final' ? <KartHud /> : null}
 			{panel === 'fishmarket' ? <FishMarketPanel onClose={() => setPanel(null)} onSold={(c) => flash(`Tano te pagó ${c} pelamonedas`)} /> : null}
 			{casinoOpen && panel ? <CasinoPanel key={panel} initial={panel.slice(7) as CasinoGame} playerName={state.me.name} onClose={() => setPanel(null)} onSpin={(spin) => engineRef.current?.playCasino(spin)}
 				others={Object.entries(rouletteChips).filter(([id]) => peers[id]?.room === 'casino').map(([id, chips]) => ({id, name: nameRef.current(id), color: peers[id]?.color ?? '#8a5cff', chips}))}

@@ -4660,3 +4660,306 @@
 	background: #ff4fa8;
 	color: #fff;
 }
+
+/* ---------------------------------------------------------------- HUD del karting --------- */
+@font-face {
+	font-family: 'Lilita One';
+	src: url('../assets/fonts/LilitaOne-Regular.ttf') format('truetype');
+	font-display: block;
+}
+
+.ph-top.is-hidden {
+	display: none;
+}
+
+.kh {
+	position: absolute;
+	inset: 0;
+	z-index: 5;
+	pointer-events: none;
+	font-family: 'Lilita One', 'Fredoka', 'Segoe UI', sans-serif;
+	font-weight: 400;
+	color: #fff;
+	user-select: none;
+	--kh-ink: #15122b;
+}
+
+/* Contorno grueso de las letras (como en los juegos de karting). */
+.kh-stat b,
+.kh-item-count,
+.kh-wrong {
+	paint-order: stroke fill;
+	-webkit-text-stroke: 7px var(--kh-ink);
+	text-shadow: 0 5px 0 var(--kh-ink);
+	letter-spacing: 0.02em;
+}
+
+.kh-item {
+	position: absolute;
+	top: 4rem;
+	left: 1.2rem;
+}
+
+.kh-item-frame {
+	position: relative;
+	width: 124px;
+	height: 124px;
+	border-radius: 26px;
+	background:
+		radial-gradient(circle at 50% 30%, rgba(255, 255, 255, 0.28), transparent 60%),
+		linear-gradient(160deg, rgba(70, 95, 170, 0.78), rgba(24, 28, 70, 0.86));
+	border: 5px solid #fff;
+	box-shadow: 0 0 0 4px var(--kh-ink), inset 0 0 0 3px rgba(255, 255, 255, 0.18), inset 0 -14px 24px rgba(0, 0, 0, 0.3), 0 10px 20px rgba(0, 0, 0, 0.35);
+	display: grid;
+	place-items: center;
+}
+
+.kh-item-frame img {
+	width: 104px;
+	height: 104px;
+	object-fit: contain;
+	filter: drop-shadow(0 5px 4px rgba(0, 0, 0, 0.4));
+	animation: kh-item-in 0.28s cubic-bezier(.2, 1.6, .5, 1);
+}
+
+.kh-item.is-rolling .kh-item-frame img {
+	animation: kh-roll 0.09s linear infinite;
+}
+
+@keyframes kh-roll {
+	from { transform: translateY(-10px); opacity: 0.7; }
+	to { transform: translateY(10px); opacity: 1; }
+}
+
+.kh-item-count {
+	position: absolute;
+	right: -4px;
+	bottom: -10px;
+	font-size: 2.1rem;
+}
+
+@keyframes kh-item-in {
+	from { transform: scale(0.3) rotate(-25deg); }
+	to { transform: scale(1) rotate(0); }
+}
+
+.kh-map {
+	position: absolute;
+	top: 4rem;
+	right: 1.2rem;
+	width: 190px;
+	height: 190px;
+	overflow: visible;
+	filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.35));
+}
+
+.kh-map-road-out {
+	fill: none;
+	stroke: var(--kh-ink);
+	stroke-width: 12;
+	stroke-linejoin: round;
+	opacity: 0.7;
+}
+
+.kh-map-road {
+	fill: none;
+	stroke: rgba(255, 255, 255, 0.95);
+	stroke-width: 6.5;
+	stroke-linejoin: round;
+}
+
+.kh-map-dot {
+	stroke: var(--kh-ink);
+	stroke-width: 1.8;
+}
+
+.kh-map-dot.is-me {
+	stroke: #fff;
+	stroke-width: 2.4;
+}
+
+.kh-bottom-left {
+	position: absolute;
+	left: 1.4rem;
+	bottom: 1.2rem;
+	display: flex;
+	align-items: flex-end;
+	gap: 1.4rem;
+}
+
+.kh-stat {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	font-size: 3rem;
+	line-height: 1;
+}
+
+.kh-stat img {
+	width: 54px;
+	height: 54px;
+	filter: drop-shadow(0 3px 0 var(--kh-ink));
+}
+
+.kh-flag {
+	width: 46px;
+	height: 46px;
+	filter: drop-shadow(0 3px 0 var(--kh-ink)) drop-shadow(0 0 1px var(--kh-ink));
+}
+
+.kh-place {
+	position: absolute;
+	right: 1.6rem;
+	bottom: 0.4rem;
+	display: flex;
+	align-items: flex-start;
+	transform: rotate(-4deg);
+	animation: kh-pop 0.35s cubic-bezier(.2, 1.7, .5, 1);
+}
+
+.kh-place b,
+.kh-place span {
+	background: linear-gradient(180deg, #fffbe0 0%, #ffe14a 38%, #ffb21f 62%, #ff7a12 100%);
+	-webkit-background-clip: text;
+	background-clip: text;
+	color: transparent;
+	-webkit-text-stroke: 9px var(--kh-ink);
+	paint-order: stroke fill;
+	filter: drop-shadow(0 6px 0 var(--kh-ink)) drop-shadow(0 12px 16px rgba(0, 0, 0, 0.35));
+	line-height: 0.95;
+}
+
+.kh-place b {
+	font-size: 9rem;
+}
+
+.kh-place span {
+	font-size: 4rem;
+	margin-top: 0.6rem;
+}
+
+.kh-place.is-p2 b,
+.kh-place.is-p2 span {
+	background-image: linear-gradient(180deg, #ffffff 0%, #dfe8ff 40%, #9fb2ea 100%);
+}
+
+.kh-place.is-p3 b,
+.kh-place.is-p3 span {
+	background-image: linear-gradient(180deg, #ffeedd 0%, #ffb877 45%, #d0682a 100%);
+}
+
+.kh-place.is-p4 b,
+.kh-place.is-p4 span {
+	background-image: linear-gradient(180deg, #eaf8ff 0%, #7fd0ff 45%, #2f7be0 100%);
+}
+
+@keyframes kh-pop {
+	0% { transform: rotate(-4deg) scale(1.6); }
+	100% { transform: rotate(-4deg) scale(1); }
+}
+
+.kh-count {
+	position: absolute;
+	left: 50%;
+	top: 16%;
+	transform: translateX(-50%);
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+.kh-lights {
+	display: flex;
+	gap: 0.8rem;
+	padding: 0.7rem 1rem;
+	border-radius: 20px;
+	background: linear-gradient(180deg, #2b2547, var(--kh-ink));
+	border: 3px solid #fff;
+	box-shadow: 0 0 0 3px var(--kh-ink), 0 10px 22px rgba(0, 0, 0, 0.45);
+}
+
+.kh-lights i {
+	width: 44px;
+	height: 44px;
+	border-radius: 50%;
+	background: radial-gradient(circle at 40% 35%, #5a5170, #2e2742 70%);
+	box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.35);
+}
+
+.kh-lights i.is-on {
+	background: radial-gradient(circle at 40% 35%, #ffd0c8, #ff2d2d 55%, #b80f0f);
+	box-shadow: 0 0 22px #ff3b3b;
+}
+
+.kh-lights i.is-go {
+	background: radial-gradient(circle at 40% 35%, #d8ffc8, #2fd24a 55%, #138a2c);
+	box-shadow: 0 0 22px #44ff66;
+}
+
+.kh-count b {
+	display: block;
+	font-size: 9rem;
+	line-height: 1;
+	color: #ffd23f;
+	-webkit-text-stroke: 10px var(--kh-ink);
+	paint-order: stroke fill;
+	text-shadow: 0 8px 0 var(--kh-ink), 0 0 40px rgba(255, 200, 60, 0.6);
+	animation: kh-count 0.9s ease-out both;
+}
+
+.kh-count b.is-go {
+	color: #5ee87a;
+	text-shadow: 0 8px 0 var(--kh-ink), 0 0 40px rgba(80, 255, 120, 0.6);
+}
+
+@keyframes kh-count {
+	0% { transform: scale(2.3); opacity: 0; }
+	15% { transform: scale(1); opacity: 1; }
+	80% { transform: scale(1); opacity: 1; }
+	100% { transform: scale(0.85); opacity: 0; }
+}
+
+.kh-banner {
+	position: absolute;
+	left: 50%;
+	top: 24%;
+	transform: translateX(-50%) rotate(-3deg);
+	font-size: 4.6rem;
+	color: #fff;
+	-webkit-text-stroke: 10px var(--kh-ink);
+	paint-order: stroke fill;
+	text-shadow: 0 7px 0 var(--kh-ink), 0 0 30px rgba(255, 90, 160, 0.7);
+	white-space: nowrap;
+	animation: kh-banner 0.5s cubic-bezier(.2, 1.5, .5, 1);
+}
+
+@keyframes kh-banner {
+	from { transform: translateX(-50%) rotate(-3deg) scale(0.2); opacity: 0; }
+	to { transform: translateX(-50%) rotate(-3deg) scale(1); opacity: 1; }
+}
+
+.kh-wrong {
+	position: absolute;
+	left: 50%;
+	top: 40%;
+	transform: translateX(-50%);
+	font-size: 2.6rem;
+	color: #ff4747;
+	animation: kh-blink 0.6s steps(2) infinite;
+}
+
+@keyframes kh-blink {
+	50% { opacity: 0.2; }
+}
+
+.kh-flash {
+	position: absolute;
+	inset: 0;
+	box-shadow: inset 0 0 140px 40px rgba(255, 170, 40, 0.5);
+	animation: kh-flash 0.6s ease-out forwards;
+}
+
+@keyframes kh-flash {
+	to { opacity: 0; }
+}

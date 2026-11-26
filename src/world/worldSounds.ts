@@ -49,6 +49,23 @@ const CUES = {
 	water: {files: ['garden-water.ogg'], gain: .32, gap: 170},
 	slapHit: {files: ['slap-hit.ogg'], gain: .42, gap: 120},
 	tileBreak: {files: ['tile-break.ogg'], gain: .3, gap: 70, pitch: .08},
+	// Karting (Kenney, CC0).
+	kartBoost: {files: ['kart/boost.ogg'], gain: .5, gap: 250},
+	kartMiniTurbo: {files: ['kart/miniturbo.ogg'], gain: .5, gap: 200},
+	kartMissile: {files: ['kart/missile.ogg'], gain: .5, gap: 200},
+	kartSpark: {files: ['kart/spark.ogg'], gain: .25, gap: 300},
+	kartCoin: {files: ['kart/coin.ogg'], gain: .4, gap: 60, pitch: .04},
+	kartSlip: {files: ['kart/slip.ogg'], gain: .55, gap: 400},
+	kartExplode: {files: ['kart/explode.ogg'], gain: .55, gap: 120, pitch: .06},
+	kartWall: {files: ['kart/wall.ogg'], gain: .45, gap: 260, pitch: .08},
+	kartBox: {files: ['kart/itembox.ogg'], gain: .4, gap: 150},
+	kartRoll: {files: ['kart/roll.ogg'], gain: .3, gap: 70},
+	kartItem: {files: ['kart/itemget.ogg'], gain: .45, gap: 300},
+	kartCount: {files: ['kart/count.ogg'], gain: .5, gap: 400},
+	kartGo: {files: ['kart/go.ogg'], gain: .55, gap: 400},
+	kartDrop: {files: ['kart/drop.ogg'], gain: .45, gap: 150},
+	kartLap: {files: ['kart/lap.ogg'], gain: .5, gap: 500},
+	kartFinish: {files: ['kart/finish.ogg'], gain: .55, gap: 800},
 } satisfies Record<string, Cue>;
 
 type CueName = keyof typeof CUES;
@@ -68,6 +85,7 @@ class WorldSounds {
 		subscribeOutputVolume(() => {
 			for (const clip of this.playing.values()) this.applyVolume(clip);
 			if (this.ambient) this.applyVolume(this.ambient);
+			if (this.engineClip) this.applyVolume(this.engineClip);
 		});
 	}
 
@@ -148,6 +166,28 @@ class WorldSounds {
 		});
 	}
 
+	private engineClip: Clip | null = null;
+
+	/** Motor del karting en loop: más agudo y fuerte cuanto más rápido (0..1), o null para apagarlo. */
+	setEngine(speed: number | null): void {
+		if (speed === null || !this.active || !this.enabled) {
+			this.engineClip?.audio.pause();
+			this.engineClip = null;
+			return;
+		}
+		if (!this.engineClip) {
+			const audio = new Audio(ASSET_PATH + 'kart/engine.ogg');
+			audio.loop = true;
+			audio.preservesPitch = false;
+			if (this.outputDevice !== 'default') void routeMediaOutput(audio, this.outputDevice);
+			this.engineClip = {audio, level: 0};
+			void audio.play().catch(() => {});
+		}
+		this.engineClip.level = 0.06 + speed * 0.14;
+		this.engineClip.audio.playbackRate = 0.65 + speed * 1.0;
+		this.applyVolume(this.engineClip);
+	}
+
 	private clip(file: string): HTMLAudioElement {
 		let audio = this.clips.get(file);
 		if (!audio) {
@@ -178,6 +218,7 @@ class WorldSounds {
 	}
 
 	private stop(): void {
+		this.setEngine(null);
 		for (const audio of this.playing.keys()) audio.pause();
 		this.playing.clear();
 		this.ambient?.audio.pause();

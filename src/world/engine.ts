@@ -107,7 +107,7 @@ export interface WorldMode {
 	 * Karting: W acelera, S frena / marcha atrás, A y D doblan, y la cámara va detrás del auto.
 	 * Devuelve la velocidad máxima de ahora (con turbo es más) y si estoy girando como trompo.
 	 */
-	drive?(): {top: number; spin?: boolean} | null;
+	drive?(): {top: number; spin?: boolean; offroad?: boolean} | null;
 }
 
 export type Interaction =
@@ -1545,6 +1545,11 @@ export class WorldEngine {
 		// Espacio: saltar (en todo el mundo).
 		if (key === ' ' && !event.repeat) {
 			event.preventDefault();
+			// Manejando (karting): Espacio usa el poder; no se salta.
+			if (this.mode?.drive) {
+				this.mode.action?.();
+				return;
+			}
 			this.jump();
 			return;
 		}
@@ -2025,34 +2030,108 @@ export class WorldEngine {
 		this.kartMounts.clear();
 	}
 
-	/** Turbo del karting: sale disparado a esa velocidad (después vuelve a la normal). */
-	kartBoost(speed: number): void {
-		this.kartSpeed = Math.max(this.kartSpeed, speed);
+	/** Turbo: durante `seconds` va más rápido (no lo frena el pasto) y sale disparado. */
+	kartBoost(seconds: number, power = 1.4): void {
+		const now = performance.now();
+		this.kartBoostUntil = Math.max(this.kartBoostUntil, now + seconds * 1000);
+		this.kartBoostPower = Math.max(now < this.kartBoostUntil - seconds * 1000 ? this.kartBoostPower : 1, power);
 	}
 
-	private stepKart(actor: Actor, dt: number, drive: {top: number; spin?: boolean}, steer: number, throttle: number): void {
-		const top = drive.top;
+	/** ¿Está en turbo ahora? (para el fuego del caño de escape). */
+	kartBoosting(): boolean {
+		return performance.now() < this.kartBoostUntil;
+	}
+
+	/** Derrape: -1 / 0 / 1 (para dónde) y el nivel de chispas (0 nada, 1 azul, 2 naranja, 3 violeta). */
+	kartDrift(): {dir: number; tier: number; hop: number} {
+		return {dir: this.driftDir, tier: this.driftTier(), hop: this.kartHop};
+	}
+
+	/** ¿Está apretando acelerar? (para la salida turbo en la cuenta regresiva). */
+	kartThrottle(): boolean {
+		return this.keys.has('w') || this.keys.has('arrowup');
+	}
+
+	/** Se chocó una baranda en este cuadro (el juego hace el ruido y lo borra). */
+	kartBumped = 0;
+
+	private kartBoostUntil = 0;
+	private kartBoostPower = 1;
+	private driftDir = 0;
+	private driftTime = 0;
+	private kartHop = 0;
+	private kartHopV = 0;
+	private kartLean = 0;
+
+	private driftTier(): number {
+		if (!this.driftDir) return 0;
+		return this.driftTime > 2.9 ? 3 : this.driftTime > 1.8 ? 2 : this.driftTime > 0.85 ? 1 : 0;
+	}
+
+	private stepKart(actor: Actor, dt: number, drive: {top: number; spin?: boolean; offroad?: boolean}, steer: number, throttle: number): void {
+		const now = performance.now();
+		const boosting = now < this.kartBoostUntil;
+		let top = drive.top;
+		if (drive.offroad && !boosting) top *= 0.52;
+		if (boosting) top *= this.kartBoostPower;
+		// Saltito (al empezar a derrapar).
+		if (this.kartHop > 0 || this.kartHopV > 0) {
+			this.kartHopV -= 30 * dt;
+			this.kartHop = Math.max(0, this.kartHop + this.kartHopV * dt);
+			if (this.kartHop === 0) this.kartHopV = 0;
+		}
+		const shift = this.keys.has('shift');
 		if (drive.spin) {
 			// Trompo: frena de golpe y da vueltas.
-			this.kartSpeed *= Math.pow(0.03, dt);
+			this.kartSpeed *= Math.pow(0.04, dt);
 			actor.ry += dt * 13;
+			this.driftDir = 0;
+			this.driftTime = 0;
 		} else {
-			if (throttle > 0) this.kartSpeed += (this.kartSpeed < top ? 21 : -9) * dt;
-			else if (throttle < 0) this.kartSpeed -= (this.kartSpeed > 0 ? 28 : 9) * dt;
-			else this.kartSpeed -= Math.sign(this.kartSpeed) * Math.min(Math.abs(this.kartSpeed), 6 * dt);
-			if (this.kartSpeed < -top * 0.4) this.kartSpeed = -top * 0.4;
-			// Dobla más cuando va rápido (parado no gira sobre sí mismo), y al revés en marcha atrás.
-			const grip = Math.min(1, Math.abs(this.kartSpeed) / 5);
-			actor.ry += steer * 2.1 * grip * (this.kartSpeed < 0 ? -1 : 1) * dt;
+			if (boosting && this.kartSpeed < top) this.kartSpeed = Math.min(top, this.kartSpeed + 45 * dt);
+			else if (throttle > 0) this.kartSpeed += (this.kartSpeed < top ? 19 : -14) * dt;
+			else if (throttle < 0) this.kartSpeed -= (this.kartSpeed > 0 ? 30 : 9) * dt;
+			else this.kartSpeed -= Math.sign(this.kartSpeed) * Math.min(Math.abs(this.kartSpeed), 7 * dt);
+			if (this.kartSpeed < -top * 0.35) this.kartSpeed = -top * 0.35;
+			// Derrape: Shift + doblar a buena velocidad. Cuanto más dura, mejor el turbo al soltar.
+			if (!this.driftDir && shift && steer !== 0 && this.kartSpeed > 9 && this.kartHop === 0) {
+				this.driftDir = Math.sign(steer);
+				this.driftTime = 0;
+				this.kartHopV = 5.5;
+				this.kartHop = 0.001;
+			}
+			if (this.driftDir) {
+				if (!shift || this.kartSpeed < 6) {
+					const tier = this.driftTier();
+					if (tier) this.kartBoost([0, 0.7, 1.25, 1.9][tier], 1.32);
+					this.driftDir = 0;
+					this.driftTime = 0;
+				} else {
+					const into = steer * this.driftDir;
+					this.driftTime += dt * (into > 0 ? 1.35 : into < 0 ? 0.75 : 1);
+					// Derrapando dobla siempre para ese lado: más cerrado empujando hacia adentro.
+					actor.ry += this.driftDir * (1.25 + into * 0.75) * dt;
+				}
+			} else {
+				// Dobla más cuando va rápido (parado no gira sobre sí mismo), y al revés en marcha atrás.
+				const grip = Math.min(1, Math.abs(this.kartSpeed) / 5) * (1 - Math.min(0.35, Math.abs(this.kartSpeed) / 90));
+				actor.ry += steer * 2.15 * grip * (this.kartSpeed < 0 ? -1 : 1) * dt;
+			}
 			let diff = actor.ry - this.kartView;
 			diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-			this.kartView += diff * Math.min(1, dt * 5);
+			this.kartView += diff * Math.min(1, dt * 4.5);
 		}
+		// El auto se ve cruzado mientras derrapa.
+		const lean = this.driftDir * 0.42;
+		this.kartLean += (lean - this.kartLean) * Math.min(1, dt * 8);
 		const want = actor.pos.clone().add(new THREE.Vector3(Math.sin(actor.ry) * this.kartSpeed * dt, 0, Math.cos(actor.ry) * this.kartSpeed * dt));
 		const got = this.clampMove(want.clone());
-		// Rozar la baranda frena.
+		// Chocar la baranda frena y rebota un poquito.
 		const lost = Math.hypot(want.x - got.x, want.z - got.z);
-		if (lost > 0.005) this.kartSpeed *= Math.max(0.6, 1 - lost * 2.5);
+		if (lost > 0.02) {
+			if (this.kartSpeed > 8) this.kartBumped = Math.max(this.kartBumped, this.kartSpeed);
+			this.kartSpeed *= Math.max(0.55, 1 - lost * 3);
+		}
 		actor.pos.x = got.x;
 		actor.pos.z = got.z;
 		// Los demás me ven yendo hacia donde voy a estar (así el auto no va a los saltos).
@@ -2069,6 +2148,9 @@ export class WorldEngine {
 		this.resetFall();
 		this.kartSpeed = 0;
 		this.kartView = ry;
+		this.kartBoostUntil = 0;
+		this.driftDir = 0;
+		this.driftTime = 0;
 		if (this.me.seat) this.standUp();
 		this.me.pos.set(x, 0, z);
 		this.me.target.copy(this.me.pos);
@@ -2435,7 +2517,15 @@ export class WorldEngine {
 		root.rotation.y = actor.ry;
 		const kartMount = this.kartMountFor(actor);
 		const mount = kartMount ?? actor.mount;
-		const mounted = mount?.update(actor.pos, actor.ry, kartMount ? !actor.avatar.isGhost() :
+		// Yo, en el karting: el auto se cruza al derrapar y salta un poquito.
+		const mine = kartMount && actor === this.me;
+		const heading = mine ? actor.ry + this.kartLean : actor.ry;
+		const lift = mine ? this.kartHop : 0;
+		if (mine) {
+			root.rotation.y = heading;
+			root.position.y += lift;
+		}
+		const mounted = mount?.update(mine ? actor.pos.clone().setY(actor.pos.y + lift) : actor.pos, heading, kartMount ? !actor.avatar.isGhost() :
 			this.room !== 'arena' && !actor.seat && actor.anim !== 'fish' && !actor.avatar.isGhost()
 			&& !(LOOP_ANIMS as readonly string[]).includes(actor.anim),
 			dt);
